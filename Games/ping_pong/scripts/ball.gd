@@ -22,6 +22,11 @@ var show_starting_next: bool = false
 var ball_speed = INITIAL_BALL_SPEED
 var collision_point = Vector2.ZERO
 
+# Variables to track side wall bouncing to prevent infinite back-and-forth bouncing
+var side_wall_hit_count: int = 0
+var last_side_hit: String = ""
+@export var max_side_hits: int = 3  # Reset ball if it hits side walls more than this many times
+
 func _physics_process(delta):
     if not game_started:
         return
@@ -53,24 +58,28 @@ func _physics_process(delta):
                 reset_ball_after_score()
                 
             "left":
+                _handle_side_wall_hit("left")
                 status = "left"
                 GlobalSignals.hit_left = collision_point
                 print("Hit left at:", collision_point)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "right":
+                _handle_side_wall_hit("right")
                 status = "right"
                 GlobalSignals.hit_right = collision_point
                 print("Hit right at:", collision_point)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "player":
+                _reset_side_hit_counter()
                 status = "player"
                 GlobalSignals.hit_player = collision_point
                 print("Hit player at:", collision_point)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "computer":
+                _reset_side_hit_counter()
                 status = "computer"
                 GlobalSignals.hit_computer = collision_point
                 print("Hit computer at:", collision_point)
@@ -137,8 +146,47 @@ func reset_ball_after_score():
     # Reset position to center
     position = initial_position
     
+    # Reset side hit tracking
+    _reset_side_hit_counter()
+    
     # Wait 2 seconds for text display (1s score + 1s starting)
     await get_tree().create_timer(2.0).timeout
+    
+    # Restart ball with new random direction
+    start_ball()
+    game_started = true
+
+func _handle_side_wall_hit(side: String) -> void:
+    """Handle side wall hits and check if ball is stuck bouncing back and forth between walls"""
+    # Always increment counter for any side wall hit
+    side_wall_hit_count += 1
+    last_side_hit = side
+    
+    print("Side wall hit: ", side, " - Total side hits: ", side_wall_hit_count)
+    
+    # Check if ball is stuck bouncing back and forth between side walls
+    if side_wall_hit_count > max_side_hits:
+        print("Ball stuck bouncing back and forth between side walls (", side_wall_hit_count, " hits), resetting position")
+        _reset_ball_position()
+
+func _reset_side_hit_counter() -> void:
+    """Reset the side hit counter when ball hits player, computer, top, or bottom"""
+    side_wall_hit_count = 0
+    last_side_hit = ""
+
+func _reset_ball_position() -> void:
+    """Reset ball to center position and give it a new random direction"""
+    # Stop the ball temporarily
+    game_started = false
+    
+    # Reset position to center
+    position = initial_position
+    
+    # Reset side hit tracking
+    _reset_side_hit_counter()
+    
+    # Wait a brief moment then restart
+    await get_tree().create_timer(0.5).timeout
     
     # Restart ball with new random direction
     start_ball()
