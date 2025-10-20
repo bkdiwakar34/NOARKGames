@@ -87,8 +87,12 @@ The platform uses Godot's autoload feature for core systems. Order matters for d
 6. **GlobalTimer** (`Main_screen/Scripts/global_timer.gd`)
    - Centralized timer for session tracking
 
-7. **ScoreManager** (`Main_screen/Scripts/score_manager.gd`)
-   - Score tracking and progress metrics
+7. **ScoreManager** (`Main_screen/Scripts/score_db.gd`)
+   - Score tracking and persistence (JSON-based)
+   - Stores high scores in user documents directory
+   - Path: `{DOCUMENTS}/NOARK/records/scores.json`
+   - Provides methods: `get_top_score()`, `update_top_score()`, `get_all_scores_for_patient()`
+   - Auto-migrates from old `user://score_data.tres` format
 
 8. **DebugSettings** (`Main_screen/Scripts/debug_settings.gd`)
    - Debug configuration handling
@@ -117,6 +121,7 @@ The platform uses Godot's autoload feature for core systems. Order matters for d
   NOARK/
     records/
       patients.json  # Patient database (JSON format)
+      scores.json    # High scores per patient per game
     data/
       {patient_id}/
         GameData/
@@ -177,9 +182,19 @@ scaled_y = net_y * PLAYER3D_POS_SCALER_Y
 
 The platform supports **2D** and **3D** game modes (set via `GlobalSignals.selected_game_mode`):
 
-**2D Games**: flappy_bird, fruit_catcher, random_reach
-**3D Games**: Jumpify, assessment modules
-**Hybrid**: ping_pong (2D with physics)
+**Games with Both 2D and 3D Modes:**
+- **Flappy Bird**: `FlyThrough` (2D) / `FlyThrough3D` (3D) - Separate scores tracked
+- **Random Reach**: `RandomReach` (2D) / `RandomReach3D` (3D) - Separate scores tracked
+
+**2D-Only Games:**
+- **Ping Pong**: `PingPong` (2D with physics)
+- **Fruit Catcher**: `FruitCatcher` (2D)
+
+**3D-Only Games:**
+- **Jumpify**: 3D platformer
+- **Assessment modules**: 3D workspace tracking
+
+**Scoring:** Games that support both modes maintain separate high scores for 2D and 3D. The `game_name` variable is updated dynamically based on `is_3d_mode` flag, which is set from `GlobalSignals.selected_game_mode` on game start.
 
 ## Input System
 
@@ -223,6 +238,17 @@ Games can use keyboard input OR network position (from UDP) interchangeably.
 - List all patients: `PatientDB.list_all_patients()` returns Array of Dictionaries
 - Patient database automatically saves to: `{DOCUMENTS}/NOARK/records/patients.json`
 - All data persists in user documents directory (survives game updates/reinstalls)
+
+**Using the Score System:**
+- Access via global singleton: `ScoreManager.get_top_score(patient_id, game_name)`
+- Update scores: `ScoreManager.update_top_score(patient_id, game_name, new_score)`
+- Get all scores for patient: `ScoreManager.get_all_scores_for_patient(patient_id)`
+- Scores automatically save to: `{DOCUMENTS}/NOARK/records/scores.json`
+- Only updates if new score is higher than current top score
+- **2D/3D Modes**: Games supporting both modes use different game names (e.g., `FlyThrough` vs `FlyThrough3D`)
+  - Set `game_name` dynamically in `_update_game_name()` based on `is_3d_mode` flag
+  - Example: `game_name = "GameName3D" if is_3d_mode else "GameName"`
+  - This ensures separate high score tracking for 2D and 3D gameplay
 
 **Data Directory Management:**
 - Always check debug mode: `if debug: p_id = 'vvv'`
