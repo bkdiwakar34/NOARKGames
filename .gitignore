@@ -1,41 +1,165 @@
-# Godot files
-*.uid
-*.import
-.DS_Store
-
-# Godot 4 specific
+# Godot 4.5 - Generated files
 .godot/
-*.tmp
+*.import
+*.uid
 
-# Godot editor settings
+# Godot 4.5 - Editor specific
 .import/
 override.cfg
-export.cfg
-export_presets.cfg
 
-# Godot project settings
+# Export presets (uncomment if you want to keep these in version control)
+# export_presets.cfg
+
+# Godot backups
+*.backup
+*.backup[0-9]*
 project.godot.backup*
 
-# Addons (uncomment if you want to ignore specific addons)
-# addons/
-
-# Logs
-*.log
-
-# Build outputs
+# Build outputs and exports
 builds/
 exports/
+*.exe
+*.x86_64
+*.arm64
+*.apk
+*.aab
+*.ipa
+*.dmg
+*.zip
+*.tar.gz
 
-# OS specific
+# Logs and debugging
+*.log
+logs/
+*.stackdump
+crash_handler_*.txt
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.~*
+
+# Patient data and game logs (rehabilitation project specific)
+# Uncomment these if you don't want to track patient data
+# data.json
+# *.csv
+# !**/example.csv
+
+# Debug settings (uncomment if you want to keep debug.json in version control)
+# debug.json
+
+# macOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows specific
 Thumbs.db
+Thumbs.db:encryptable
 ehthumbs.db
-Desktop.ini
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux specific
+*~
+.directory
+.Trash-*
+.nfs*
+
+# IDE and editor files
+.vscode/
+.idea/
 *.swp
 *.swo
-*~
+*.swn
+.project
+.cproject
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# JetBrains IDEs (Rider, etc.)
+.idea/
+*.iml
+*.ipr
+*.iws
 
 # Claude Code files
 .claude/
 claude_*.json
 claude_*.md
 .claude_*
+
+# Python (if using Python integration)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+
+# Node.js (if using web exports or tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Compiled addons
+addons/*/bin/
+addons/*/libs/
+
+# Shader cache
+*.spv
+
+# Android Studio
+.gradle/
+local.properties
+*.iml
+.externalNativeBuild
+.cxx/
+captures/
+.navigation/
+lint/
+
+# Mono/C# specific (if using C# with Godot)
+.mono/
+data_*/
+mono_crash.*.json
+*.booproj
+*.svd
+*.pdb
+*.mdb
+
+# Asset Store imports (if applicable)
+AssetStoreTools/

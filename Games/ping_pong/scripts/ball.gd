@@ -19,8 +19,19 @@ var starting_timer: Timer
 var initial_position: Vector2
 var show_starting_next: bool = false
 
+# Trajectory prediction
+var trajectory_line: Line2D
+var show_trajectory: bool = true
+var max_trajectory_points: int = 50
+var trajectory_time_step: float = 0.016  # 60 FPS simulation
+
 var ball_speed = INITIAL_BALL_SPEED
 var collision_point = Vector2.ZERO
+
+# Variables to track side wall bouncing to prevent infinite back-and-forth bouncing
+var side_wall_hit_count: int = 0
+var last_side_hit: String = ""
+@export var max_side_hits: int = 3  # Reset ball if it hits side walls more than this many times
 
 func _physics_process(delta):
     if not game_started:
@@ -53,24 +64,28 @@ func _physics_process(delta):
                 reset_ball_after_score()
                 
             "left":
+                _handle_side_wall_hit("left")
                 status = "left"
                 GlobalSignals.hit_left = collision_point
                 print("Hit left at:", collision_point)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "right":
+                _handle_side_wall_hit("right")
                 status = "right"
                 GlobalSignals.hit_right = collision_point
                 print("Hit right at:", collision_point)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "player":
+                _reset_side_hit_counter()
                 status = "player"
                 GlobalSignals.hit_player = collision_point
                 print("Hit player at:", collision_point)
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "computer":
+                _reset_side_hit_counter()
                 status = "computer"
                 GlobalSignals.hit_computer = collision_point
                 print("Hit computer at:", collision_point)
@@ -82,6 +97,10 @@ func _physics_process(delta):
         
     else:
         status = "moving"
+    
+    # Update trajectory prediction
+    if show_trajectory and game_started:
+        _update_trajectory()
     
     GlobalSignals.ball_position = position
 
@@ -106,6 +125,9 @@ func _on_ready():
     # Hide score display initially
     if score_display_label:
         score_display_label.visible = false
+    
+    # Setup trajectory line
+    _setup_trajectory_line()
     
     start_ball() 
 
@@ -134,11 +156,58 @@ func reset_ball_after_score():
     # Stop the ball temporarily
     game_started = false
     
+    # Hide trajectory during reset
+    if trajectory_line:
+        trajectory_line.visible = false
+    
     # Reset position to center
     position = initial_position
     
+    # Reset side hit tracking
+    _reset_side_hit_counter()
+    
     # Wait 2 seconds for text display (1s score + 1s starting)
     await get_tree().create_timer(2.0).timeout
+    
+    # Restart ball with new random direction
+    start_ball()
+    game_started = true
+
+func _handle_side_wall_hit(side: String) -> void:
+    """Handle side wall hits and check if ball is stuck bouncing back and forth between walls"""
+    # Always increment counter for any side wall hit
+    side_wall_hit_count += 1
+    last_side_hit = side
+    
+    print("Side wall hit: ", side, " - Total side hits: ", side_wall_hit_count)
+    
+    # Check if ball is stuck bouncing back and forth between side walls
+    if side_wall_hit_count > max_side_hits:
+        print("Ball stuck bouncing back and forth between side walls (", side_wall_hit_count, " hits), resetting position")
+        _reset_ball_position()
+
+func _reset_side_hit_counter() -> void:
+    """Reset the side hit counter when ball hits player, computer, top, or bottom"""
+    side_wall_hit_count = 0
+    last_side_hit = ""
+
+func _reset_ball_position() -> void:
+    """Reset ball to center position and give it a new random direction"""
+    # Stop the ball temporarily
+    game_started = false
+    
+    # Hide trajectory during reset
+    if trajectory_line:
+        trajectory_line.visible = false
+    
+    # Reset position to center
+    position = initial_position
+    
+    # Reset side hit tracking
+    _reset_side_hit_counter()
+    
+    # Wait a brief moment then restart
+    await get_tree().create_timer(0.5).timeout
     
     # Restart ball with new random direction
     start_ball()
@@ -173,3 +242,79 @@ func start_ball():
     var speed = velocity.length()
     velocity.x = cos(angle) * speed * sign(velocity.x)
     velocity.y = sin(angle) * speed
+
+func _update_trajectory() -> void:
+    """Update the trajectory line to show where the ball will go"""
+    if not trajectory_line:
+        print("Trajectory line not found, creating it...")
+        _setup_trajectory_line()
+        return
+    
+    trajectory_line.clear_points()
+    
+    var sim_position = position
+    var sim_velocity = velocity * ball_speed
+    var points = []
+    
+    # Get screen boundaries (you may need to adjust these values)
+    var screen_size = get_viewport().get_visible_rect().size
+    var left_wall = 0
+    var right_wall = screen_size.x
+    var top_wall = 0
+    var bottom_wall = screen_size.y
+    
+    for i in range(max_trajectory_points):
+        # Add current position to trajectory
+        points.append(sim_position)
+        
+        # Calculate next position
+        sim_position += sim_velocity * trajectory_time_step
+        
+        # Check for wall collisions and bounce
+        
+        # Left wall collision
+        if sim_position.x <= left_wall:
+            sim_position.x = left_wall
+            sim_velocity.x = -sim_velocity.x
+        
+        # Right wall collision
+        if sim_position.x >= right_wall:
+            sim_position.x = right_wall
+            sim_velocity.x = -sim_velocity.x
+        
+        # Top wall collision
+        if sim_position.y <= top_wall:
+            sim_position.y = top_wall
+            sim_velocity.y = -sim_velocity.y
+        
+        # Bottom wall collision
+        if sim_position.y >= bottom_wall:
+            sim_position.y = bottom_wall
+            sim_velocity.y = -sim_velocity.y
+        
+        # Stop if ball goes off screen or hits too many walls
+        if sim_position.y > bottom_wall + 100 or sim_position.y < top_wall - 100:
+            break
+    
+    # Set the trajectory points
+    trajectory_line.points = points
+    
+    # Debug output
+    if points.size() > 0:
+        print("Trajectory updated with ", points.size(), " points")
+
+func _setup_trajectory_line() -> void:
+    """Setup the trajectory line appearance"""
+    # Create the Line2D node if it doesn't exist
+    if not trajectory_line:
+        trajectory_line = Line2D.new()
+        get_parent().add_child(trajectory_line)
+        trajectory_line.name = "TrajectoryLine"
+    
+    # Configure the line appearance
+    trajectory_line.width = 3.0  # Make it thicker for better visibility
+    trajectory_line.default_color = Color(1.0, 1.0, 0.0, 0.8)  # Brighter yellow with more opacity
+    trajectory_line.antialiased = true
+    trajectory_line.visible = show_trajectory
+    
+    print("Trajectory line created and configured. Visible: ", trajectory_line.visible)
