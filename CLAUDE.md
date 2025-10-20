@@ -55,46 +55,54 @@ Debug mode affects:
 ### Autoload System (Global Singletons)
 The platform uses Godot's autoload feature for core systems. Order matters for dependencies:
 
-1. **Manager** (`Main_screen/Scripts/manager.gd`)
+1. **PatientDB** (`Main_screen/Scripts/patient_db.gd`)
+   - Centralized patient database management (JSON-based)
+   - Stores patient records in user documents directory
+   - Path: `{DOCUMENTS}/NOARK/records/patients.json`
+   - Provides methods: `add_patient()`, `remove_patient()`, `get_patient()`, `list_all_patients()`
+   - Cross-platform compatible (Windows, Linux, Android)
+
+2. **Manager** (`Main_screen/Scripts/manager.gd`)
    - Creates CSV log files for game sessions
    - Handles file I/O for patient data
    - Format: `{game}_S{session}_T{trial}_{date}.csv`
    - CSV headers: `game_name, h_id, device_location, device_version, protocol_version, start_time`
 
-2. **GlobalSignals** (`Main_screen/Scripts/global_signals.gd`)
+3. **GlobalSignals** (`Main_screen/Scripts/global_signals.gd`)
    - Signal bus for inter-component communication
    - Stores global state: `current_patient_id`, `selected_training_hand`, `affected_hand`
    - Data path: `OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS) + "//NOARK//data"`
    - Controls game button states via `enable_game_buttons()`
 
-3. **GlobalScript** (`Main_screen/Scripts/global_script.gd`)
+4. **GlobalScript** (`Main_screen/Scripts/global_script.gd`)
    - Session/trial management: `session_id`, `trial_counts` dictionary
    - UDP networking on `127.0.0.1:8000` for external device integration
    - Screen positioning: `network_position`, `scaled_network_position`
    - Position scalers for 2D/3D games: `PLAYER_POS_SCALER_X`, `PLAYER3D_POS_SCALER_Y`
    - Threading: `thread_network`, `thread_python`, `thread_path_check`
 
-4. **SoundFx** (`Main_screen/Scenes/SoundFx.tscn`)
+5. **SoundFx** (`Main_screen/Scenes/SoundFx.tscn`)
    - Audio management scene (autoloaded)
 
-5. **GlobalTimer** (`Main_screen/Scripts/global_timer.gd`)
+6. **GlobalTimer** (`Main_screen/Scripts/global_timer.gd`)
    - Centralized timer for session tracking
 
-6. **ScoreManager** (`Main_screen/Scripts/score_manager.gd`)
+7. **ScoreManager** (`Main_screen/Scripts/score_manager.gd`)
    - Score tracking and progress metrics
 
-7. **DebugSettings** (`Main_screen/Scripts/debug_settings.gd`)
+8. **DebugSettings** (`Main_screen/Scripts/debug_settings.gd`)
    - Debug configuration handling
 
-8. **AudioManager**, **SceneTransition**, **GlobalTimerManager**
+9. **AudioManager**, **SceneTransition**, **GlobalTimerManager**
    - Game-specific managers (primarily for Jumpify)
 
 ### Data Flow and Patient System
 
 **Patient Registration Flow**:
-1. Patient details entered in registration UI → stored in `patient_register.tres` (Resource)
-2. Patient ID stored in `GlobalSignals.current_patient_id`
-3. Data directory created: `{DOCUMENTS}/NOARK/data/{patient_id}/GameData/`
+1. Patient details entered in registration UI → saved via `PatientDB.add_patient()`
+2. Patient data stored in JSON: `{DOCUMENTS}/NOARK/records/patients.json`
+3. Patient ID stored in both `PatientDB.current_patient_id` and `GlobalSignals.current_patient_id`
+4. Data directory created: `{DOCUMENTS}/NOARK/data/{patient_id}/GameData/`
 
 **Game Session Flow**:
 1. Game starts → calls `Manager.create_game_log_file(game_name, patient_id)`
@@ -107,6 +115,8 @@ The platform uses Godot's autoload feature for core systems. Order matters for d
 ```
 {DOCUMENTS}/
   NOARK/
+    records/
+      patients.json  # Patient database (JSON format)
     data/
       {patient_id}/
         GameData/
@@ -203,12 +213,20 @@ Games can use keyboard input OR network position (from UDP) interchangeably.
 
 ### When Modifying Autoloads:
 - Order in `project.godot` matters for initialization dependencies
-- `Manager` and `GlobalSignals` must load before game scenes
+- `PatientDB`, `Manager`, and `GlobalSignals` must load before game scenes
 - Debug mode is read from `debug.json` in `_ready()` of Manager and GlobalScript
 
 ### When Working with Patient Data:
+**Using the Patient Database:**
+- Access via global singleton: `PatientDB.add_patient()`, `PatientDB.get_patient(hospital_id)`
+- Current patient ID: `PatientDB.current_patient_id` or `GlobalSignals.current_patient_id`
+- List all patients: `PatientDB.list_all_patients()` returns Array of Dictionaries
+- Patient database automatically saves to: `{DOCUMENTS}/NOARK/records/patients.json`
+- All data persists in user documents directory (survives game updates/reinstalls)
+
+**Data Directory Management:**
 - Always check debug mode: `if debug: p_id = 'vvv'`
-- Use `GlobalSignals.data_path` for base directory
+- Use `GlobalSignals.data_path` for game data directory: `{DOCUMENTS}/NOARK/data`
 - Create directories recursively: `DirAccess.make_dir_recursive_absolute()`
 - CSV logging format is standardized across all games
 

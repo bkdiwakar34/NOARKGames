@@ -5,7 +5,6 @@ extends Control
 @onready var pname_label: Label = $PName
 @onready var hid_label: Label = $HID
 @onready var session_list: ItemList = $SessionList
-@onready var patient_db: PatientDetails = load("res://Main_screen/patient_register.tres")
 @onready var area_calc := preload("res://Games/assessment/workspace.gd").new()
 @onready var ddl = $DirectionDetailsLabel
 @export var workspace_data = []
@@ -17,8 +16,8 @@ var x_dates = []
 
 func _ready():
     var current_id = GlobalSignals.current_patient_id
-    var all_patients = patient_db.list_all_patients()
-    
+    var all_patients = PatientDB.list_all_patients()
+
     for patient in all_patients:
         if patient["hospital_id"] == current_id:
             pname_label.text = "Patient: " + patient["name"]

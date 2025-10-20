@@ -1,6 +1,5 @@
 extends Control
 
-@onready var patient_db: PatientDetails = load("res://Main_screen/patient_register.tres")
 @onready var logged_in_as = $LoggedInAs
 @onready var training_label = $TrainingLabel
 
@@ -16,7 +15,7 @@ var endgame : bool
 
 
 func _ready() -> void:
-    logged_in_as.text = "Patient: " + patient_db.current_patient_id
+    logged_in_as.text = "Patient: " + PatientDB.current_patient_id
     var affected_hand = GlobalSignals.affected_hand
     
     if affected_hand == "Left":
