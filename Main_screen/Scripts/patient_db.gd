@@ -1,8 +1,7 @@
 extends Node
-class_name PatientDB
 
 # Singleton instance for global access
-static var instance: PatientDB
+static var instance
 
 # Constants
 const RECORDS_DIR = "NOARK//records"
