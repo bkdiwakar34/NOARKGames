@@ -1,0 +1,92 @@
+# .gdignore - Files and folders that Godot editor should ignore
+# Godot will not import or process files/folders listed here
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+.gitmodules
+
+# Build outputs
+builds/
+exports/
+dist/
+
+# Patient data and logs (rehabilitation project specific)
+*.csv
+logs/
+data/
+
+# Development and documentation
+README.md
+CLAUDE.md
+LICENSE
+CHANGELOG.md
+TODO.md
+docs/
+
+# IDE and editor files
+.vscode/
+.idea/
+.vs/
+*.swp
+*.swo
+
+# Python files (if using external tools)
+__pycache__/
+*.py[cod]
+venv/
+env/
+
+# Node.js
+node_modules/
+package.json
+package-lock.json
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# OS specific
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.lnk
+
+# Temporary files
+*.tmp
+*.temp
+*~
+*.backup
+*.log
+
+# Raw asset sources (if you keep originals separate)
+# Uncomment if you have a folder with source files like .psd, .ai, .blend, etc.
+# raw_assets/
+# sources/
+# *.psd
+# *.ai
+# *.blend
+# *.xcf
+
+# SSH and deploy configs
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+known_hosts
+
+# Debug files
+debug.json
+*.stackdump
+crash_handler_*.txt
+*.md5
+*.ctex
+imported
