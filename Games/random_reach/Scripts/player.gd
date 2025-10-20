@@ -102,7 +102,8 @@ func _ready() -> void:
 	_setup_ui()
 	_connect_signals()
 	_initialize_game_state()
-	_auto_select_mode()
+	_auto_select_mode()  # Must be called BEFORE _update_top_score_display() to set correct game_name
+	_update_top_score_display()
 	_setup_global_timer()
 
 func _setup_global_timer() -> void:
@@ -139,7 +140,7 @@ func _setup_ui() -> void:
 	_ui_nodes.game_over_label.hide()
 	_ui_nodes.color_rect.hide()
 	_ui_nodes.countdown_display.visible = false
-	_update_top_score_display()
+	# Note: _update_top_score_display() is now called after _auto_select_mode() in _ready()
 
 func _connect_signals() -> void:
 	# Button connections

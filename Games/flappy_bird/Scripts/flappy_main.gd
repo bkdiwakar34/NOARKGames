@@ -98,8 +98,8 @@ func _ready() -> void:
 	_setup_ui()
 	_connect_signals()
 	_setup_logging()
+	_auto_select_mode()  # Must be called BEFORE _initialize_scoring() to set correct game_name
 	_initialize_scoring()
-	_auto_select_mode()
 	_setup_global_timer()
 
 func _setup_global_timer() -> void:
