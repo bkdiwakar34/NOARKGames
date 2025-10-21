@@ -87,7 +87,6 @@ var quit_request:bool = false
 var _outgoing_message = "CONNECTED"
 var _incoming_message: float
 
-var patient_db: PatientDetails = load("res://Main_screen/patient_register.tres")
 @onready var debug:bool
 
 func _ready():
@@ -191,7 +190,7 @@ func handle_udp_packet():
     
     
 func change_patient():
-    _outgoing_message = 'USER:' + patient_db.current_patient_id
+    _outgoing_message = 'USER:' + PatientDB.current_patient_id
 
 func send_dummy_packet():
     udp.put_packet(_outgoing_message.to_utf8_buffer())

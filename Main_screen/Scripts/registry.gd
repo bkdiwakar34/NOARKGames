@@ -2,7 +2,6 @@ extends Control
 
 # Constants
 const ADMIN_PASSWORD = "CMC"
-const PATIENT_REGISTER_PATH = "res://Main_screen/patient_register.tres"
 const MAIN_SCENE_PATH = "res://Main_screen/Scenes/main.tscn"
 const SELECT_GAME_SCENE_PATH = preload("res://Main_screen/Scenes/select_game.tscn")
 const MODE_SELECTION = preload("res://Main_screen/Scenes/mode.tscn")
@@ -13,7 +12,6 @@ enum Hand { LEFT, RIGHT, AMBIDEXTROUS, UNSPECIFIED = -1 }
 enum AffectedHand { LEFT, RIGHT, BOTH, UNSPECIFIED = -1 }
 
 # Node references - cached for performance
-@onready var patient_db: PatientDetails = load(PATIENT_REGISTER_PATH)
 @onready var patient_list = $TextureRect/PatientList
 @onready var auth_window = $TextureRect/Auth
 @onready var patient_display = $TextureRect/Patient_display
@@ -43,7 +41,7 @@ func _ready() -> void:
 	_refresh_patient_data()
 
 func _refresh_patient_data() -> void:
-	cached_patients = patient_db.list_all_patients()
+	cached_patients = PatientDB.list_all_patients()
 	_update_patient_list()
 
 func _update_patient_list() -> void:
@@ -91,19 +89,17 @@ func _clear_form_fields() -> void:
 	comments_field.text = ""
 
 func _save_patient_data() -> void:
-	# Save JSON backup
+	# Save using the global patient database manager
+	PatientDB.save_database()
+
+	# Save legacy JSON backup for compatibility
 	var file = FileAccess.open(json_path, FileAccess.WRITE)
 	if file:
 		file.store_string(JSON.stringify(cached_patients))
 		file.close()
 	else:
 		push_error("Failed to save JSON file at: " + json_path)
-	
-	# Save resource file
-	var save_result = ResourceSaver.save(patient_db, PATIENT_REGISTER_PATH)
-	if save_result != OK:
-		push_error("Failed to save patient database resource")
-	
+
 	GlobalScript._path_checker()
 
 func _create_patient_display_text(patient: Dictionary) -> String:
@@ -152,7 +148,7 @@ func _on_register_patient_pressed() -> void:
 		'comments': comments_field.text.strip_edges()
 	}
 	
-	patient_db.add_patient(
+	PatientDB.add_patient(
 		patient_data['hospital_id'],
 		patient_data['name'],
 		patient_data['age'],
@@ -204,7 +200,7 @@ func _on_delete_login_pressed() -> void:
 		return
 	
 	var patient_to_remove = cached_patients[patient_selected]
-	patient_db.remove_patient(patient_to_remove['hospital_id'])
+	PatientDB.remove_patient(patient_to_remove['hospital_id'])
 	
 	_save_patient_data()
 	_refresh_patient_data()
@@ -218,13 +214,13 @@ func _on_login_button_pressed() -> void:
 		return
 		
 	var current_patient = cached_patients[patient_selected]
-	
+
 	# Set global state
-	patient_db.current_patient_id = current_patient['hospital_id']
+	PatientDB.current_patient_id = current_patient['hospital_id']
 	GlobalScript.change_patient()
 	GlobalSignals.current_patient_id = current_patient['hospital_id']
 	GlobalSignals.affected_hand = current_patient['affected_hand']
-	
+
 	_save_patient_data()
 	get_tree().change_scene_to_packed(MODE_SELECTION)
 
