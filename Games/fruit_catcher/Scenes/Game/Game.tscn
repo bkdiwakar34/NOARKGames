@@ -1,9 +1,8 @@
-[gd_scene load_steps=7 format=3 uid="uid://dv4g57qgdfg33"]
+[gd_scene load_steps=6 format=3 uid="uid://dv4g57qgdfg33"]
 
 [ext_resource type="Script" uid="uid://chlk3v2pashqe" path="res://Games/fruit_catcher/Scenes/Game/game.gd" id="1_ln2h6"]
 [ext_resource type="PackedScene" uid="uid://dqhaj3fx1ah8r" path="res://Games/fruit_catcher/Scenes/Paddle/paddle.tscn" id="2_gwu2e"]
 [ext_resource type="Texture2D" uid="uid://d04q4wfpcqudk" path="res://Games/fruit_catcher/assets/vecteezy_deep-forest-scene-with-trees-cartoon-background-vector_9577135-1.jpg" id="2_y3kpf"]
-[ext_resource type="AudioStream" uid="uid://c6b4darsin5cb" path="res://Games/fruit_catcher/assets/bgm_action_5.mp3" id="4_ln2h6"]
 [ext_resource type="AudioStream" uid="uid://nunov43qa4b0" path="res://Games/fruit_catcher/assets/spell1_0.wav" id="5_y3kpf"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="8_5dybn"]
 
@@ -23,12 +22,11 @@ wait_time = 2.0
 autostart = true
 
 [node name="Sound" type="AudioStreamPlayer" parent="."]
-stream = ExtResource("4_ln2h6")
 volume_db = -15.0
 
 [node name="ScoreSound" type="AudioStreamPlayer2D" parent="."]
 stream = ExtResource("5_y3kpf")
-volume_db = 12.0
+volume_db = 8.466
 
 [node name="PauseButton" type="Button" parent="."]
 offset_left = 971.0

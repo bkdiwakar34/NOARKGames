@@ -319,6 +319,7 @@ func _on_retry_button_pressed() -> void:
     GlobalTimerManager.show_timer_selector_for_retry()
 
 func _on_logout_button_pressed() -> void:
+    MusicManager.play_music("main")
     GlobalTimerManager.remove_timer_selector_from_game()
     get_tree().paused = false
     get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")

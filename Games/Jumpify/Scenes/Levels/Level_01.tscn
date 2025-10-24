@@ -62,6 +62,10 @@ next_scene = ExtResource("2_0ac5u")
 [node name="Player" parent="." instance=ExtResource("2_pay8t")]
 z_index = 1
 position = Vector2(85, 577)
+movement_smoothing = null
+use_scaled_position = null
+ground_level = null
+max_score = null
 
 [node name="Level" type="Node2D" parent="."]
 
