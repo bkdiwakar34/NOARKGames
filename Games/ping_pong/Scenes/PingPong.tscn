@@ -1,4 +1,4 @@
-[gd_scene load_steps=22 format=4 uid="uid://w15x815lgg7o"]
+[gd_scene load_steps=21 format=4 uid="uid://w15x815lgg7o"]
 
 [ext_resource type="Texture2D" uid="uid://dq0fpat00ukhu" path="res://Assets/Background/Space.jpg" id="1_koe3q"]
 [ext_resource type="PackedScene" uid="uid://cqbhdd3f3ysqn" path="res://Games/ping_pong/Scenes/pp_player.tscn" id="2_x01ca"]
@@ -12,7 +12,6 @@
 [ext_resource type="Texture2D" uid="uid://bl10pbij7t6ge" path="res://Assets/Paddle/paddle.png" id="10_rod25"]
 [ext_resource type="Texture2D" uid="uid://g3xuhbbrhthp" path="res://Games/random_reach/Sprites/medal.webp" id="13_m35pc"]
 [ext_resource type="Texture2D" uid="uid://cwqtv62nto34u" path="res://Assets/Terrian/Terrain (16x16).png" id="14_pu5g1"]
-[ext_resource type="AudioStream" path="res://Assets/Sound_effects/Mr-Bean-Animated-Theme-Song-Pian.mp3" id="14_tg0pj"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="15_koe3q"]
 
 [sub_resource type="Image" id="Image_j7a8p"]
@@ -676,11 +675,6 @@ text = "Do assessment"
 layout_mode = 2
 theme_override_fonts/font = ExtResource("15_koe3q")
 text = "Close"
-
-[node name="pp_bgm" type="AudioStreamPlayer" parent="."]
-stream = ExtResource("14_tg0pj")
-autoplay = true
-parameters/looping = true
 
 [connection signal="ready" from="player" to="player" method="_on_ready"]
 [connection signal="ready" from="computer" to="computer" method="_on_ready"]
