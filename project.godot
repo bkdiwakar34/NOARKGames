@@ -32,6 +32,7 @@ DebugSettings="*res://Main_screen/Scripts/debug_settings.gd"
 AudioManager="*res://Games/Jumpify/Scenes/Managers/AudioManager.tscn"
 SceneTransition="*res://Games/Jumpify/Scenes/Managers/SceneTransition.tscn"
 GlobalTimerManager="*res://Main_screen/Scripts/GlobalTimerManager.gd"
+MusicManager="*res://Main_screen/Scripts/MusicManager.gd"
 
 [display]
 

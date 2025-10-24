@@ -11,7 +11,9 @@ var fruit_catcher = preload("res://Games/fruit_catcher/Scenes/Game/Game.tscn")
 var assessment_scene = preload("res://Games/assessment/workspace.tscn")
 var results_scene = preload("res://Results/scenes/user_progress.tscn")
 var main_menu_scene = preload("res://Main_screen/Scenes/main.tscn")
+
 var endgame : bool
+
 
 
 func _ready() -> void:
@@ -50,13 +52,17 @@ func _process(delta: float) -> void:
 
 
 func _on_game_reach_pressed() -> void:
+    MusicManager.play_music("rr_bgm")
     get_tree().change_scene_to_packed(random_reach_scene)
 
 func _on_game_flappy_pressed() -> void:
+    MusicManager.play_music("ft_bgm")
     get_tree().change_scene_to_packed(flappy_scene)
 
 func _on_game_pingpong_pressed() -> void:
+    MusicManager.play_music("pp_bgm")
     get_tree().change_scene_to_packed(pingpong_scene)
+    
 
 func _on_assessment_pressed() -> void:
     get_tree().change_scene_to_packed(assessment_scene)
@@ -76,6 +82,7 @@ func _on_exit_button_pressed() -> void:
     get_tree().quit()
 
 func _on_fruit_catcher_pressed() -> void:
+    MusicManager.play_music("fc_bgm")
     get_tree().change_scene_to_packed(fruit_catcher)
 
 

@@ -278,6 +278,7 @@ func _notification(what: int) -> void:
         get_tree().quit()
 
 func _on_logout_pressed() -> void:
+    MusicManager.play_music("main")
     GlobalTimer.stop_timer()
     GlobalTimerManager.remove_timer_selector_from_game()
     get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")

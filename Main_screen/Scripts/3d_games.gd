@@ -31,12 +31,15 @@ func _ready() -> void:
             training_label.text = "Training for %s hand" % GlobalSignals.selected_training_hand
 
 func _on_random_reach_3d_pressed() -> void:
+    MusicManager.play_music("rr_bgm")
     get_tree().change_scene_to_packed(random_reach3D)
 
 func _on_fly_through_3d_pressed() -> void:
+   MusicManager.play_music("ft_bgm")
    get_tree().change_scene_to_packed(fly_through3D)
 
 func _on_jumpify_pressed() -> void:
+  MusicManager.play_music("jy_bgm")
   get_tree().change_scene_to_packed(jumpify)
 
 func _on_assessment_pressed() -> void:
@@ -52,6 +55,7 @@ func _on_exit_pressed() -> void:
    get_tree().quit()
 
 func _on_logout_pressed() -> void:
+    MusicManager.play_music("main")
     GlobalSignals.selected_training_hand == ""
     GlobalSignals.affected_hand = ""
     get_tree().change_scene_to_file("res://Main_screen/Scenes/main.tscn")
