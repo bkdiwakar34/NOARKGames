@@ -259,10 +259,9 @@ theme_override_fonts/font = ExtResource("7_m56p3")
 text = "Pause"
 
 [node name="TextureRect" type="TextureRect" parent="CanvasLayer"]
-offset_left = 243.0
-offset_top = 8.0
-offset_right = 328.0
-offset_bottom = 113.0
+offset_left = 229.0
+offset_right = 314.0
+offset_bottom = 105.0
 texture = ExtResource("13_8iopb")
 expand_mode = 1
 
@@ -278,9 +277,9 @@ horizontal_alignment = 1
 
 [node name="MissedLabel" type="Label" parent="CanvasLayer"]
 offset_left = 102.0
-offset_top = 60.0
+offset_top = 45.0
 offset_right = 212.0
-offset_bottom = 94.0
+offset_bottom = 79.0
 theme_override_colors/font_color = Color(0.95700353, 0.8394424, 0.3733772, 1)
 theme_override_fonts/font = ExtResource("7_m56p3")
 theme_override_font_sizes/font_size = 25
@@ -322,9 +321,9 @@ anchor_top = 0.5
 anchor_right = 0.557
 anchor_bottom = 0.5
 offset_left = 104.0
-offset_top = 26.0
+offset_top = 10.0
 offset_right = 189.0
-offset_bottom = 61.0
+offset_bottom = 45.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_fonts/font = ExtResource("7_m56p3")
@@ -340,9 +339,9 @@ anchor_top = 0.5
 anchor_right = 1.0
 anchor_bottom = 0.5
 offset_left = 202.0
-offset_top = 26.0
+offset_top = 10.0
 offset_right = 250.0
-offset_bottom = 61.0
+offset_bottom = 45.0
 grow_horizontal = 0
 grow_vertical = 2
 theme_override_fonts/font = ExtResource("7_m56p3")
