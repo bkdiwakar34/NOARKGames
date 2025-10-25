@@ -55,6 +55,7 @@ signal game_started
 }
 
 # Game state variables
+var can_score: bool = true
 var game_running: bool = false
 var game_over: bool = false
 var scroll: float = 0.0
@@ -398,11 +399,15 @@ func _update_health_display() -> void:
                 _health_nodes.heart_array[i].visible = true
 
 func pipe_hit() -> void:
-    missed_count += 1  # Increment missed counter instead of reducing health
-    _ui_nodes.missed_label.text = "Missed " + str(missed_count)  # Update missed label
+    if not can_score:
+        return  
+    can_score = false  
+    MusicManager.play_sound_effect("hit")
+    missed_count += 1
+    _ui_nodes.missed_label.text = "Missed " + str(missed_count)
     flash_animation.emit()
-    status = "collided"
-    # Note: Game continues running instead of ending
+    await get_tree().create_timer(0.5).timeout
+    can_score = true
 
 func _handle_game_over() -> void:
     # This function is no longer called from pipe_hit()
@@ -413,12 +418,17 @@ func _handle_game_over() -> void:
     stop_game()
 
 func scored() -> void:
+    if not can_score:
+        return  
+    can_score = false  
+    MusicManager.play_sound_effect("scored")
     score += 1
-    # Use the dynamic game_name for score tracking
     ScoreManager.update_top_score(GlobalSignals.current_patient_id, game_name, score)
     _update_top_score_display()
     status = "reached"
     _ui_nodes.score_label.text = str(score)
+    await get_tree().create_timer(0.5).timeout
+    can_score = true
 
 func _on_logout_pressed() -> void:
     MusicManager.play_music("main")

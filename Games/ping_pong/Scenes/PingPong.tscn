@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=4 uid="uid://w15x815lgg7o"]
+[gd_scene load_steps=22 format=4 uid="uid://w15x815lgg7o"]
 
 [ext_resource type="Texture2D" uid="uid://dq0fpat00ukhu" path="res://Assets/Background/Space.jpg" id="1_koe3q"]
 [ext_resource type="PackedScene" uid="uid://cqbhdd3f3ysqn" path="res://Games/ping_pong/Scenes/pp_player.tscn" id="2_x01ca"]
@@ -10,6 +10,7 @@
 [ext_resource type="PackedScene" uid="uid://i3uo1tqj0yob" path="res://Games/ping_pong/Scenes/wall.tscn" id="9_p63tb"]
 [ext_resource type="Script" uid="uid://dj606ct7uo4ou" path="res://Games/ping_pong/scripts/timer_label.gd" id="10_g2848"]
 [ext_resource type="Texture2D" uid="uid://bl10pbij7t6ge" path="res://Assets/Paddle/paddle.png" id="10_rod25"]
+[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="10_tg0pj"]
 [ext_resource type="Texture2D" uid="uid://g3xuhbbrhthp" path="res://Games/random_reach/Sprites/medal.webp" id="13_m35pc"]
 [ext_resource type="Texture2D" uid="uid://cwqtv62nto34u" path="res://Assets/Terrian/Terrain (16x16).png" id="14_pu5g1"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="15_koe3q"]
@@ -532,10 +533,11 @@ text = "Computer "
 
 [node name="logout" type="Button" parent="."]
 layout_mode = 0
-offset_left = 16.0
-offset_top = 566.0
-offset_right = 122.0
-offset_bottom = 610.0
+offset_left = 6.0
+offset_top = 562.0
+offset_right = 143.0
+offset_bottom = 616.0
+theme = ExtResource("10_tg0pj")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 theme_override_font_sizes/font_size = 18
 text = "⬅️ logout"
@@ -605,10 +607,11 @@ theme_override_fonts/font = ExtResource("15_koe3q")
 text = "🔄:Retry"
 
 [node name="PauseButton" type="Button" parent="CanvasLayer"]
-offset_left = 520.0
-offset_top = 560.0
-offset_right = 588.0
-offset_bottom = 591.0
+offset_left = 981.0
+offset_top = 82.0
+offset_right = 1085.0
+offset_bottom = 123.0
+theme = ExtResource("10_tg0pj")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Pause"
 

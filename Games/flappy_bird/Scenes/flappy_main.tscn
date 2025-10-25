@@ -1,4 +1,4 @@
-[gd_scene load_steps=18 format=3 uid="uid://fj2c6cebl8pk"]
+[gd_scene load_steps=19 format=3 uid="uid://fj2c6cebl8pk"]
 
 [ext_resource type="Script" uid="uid://cplymo30m4t22" path="res://Games/flappy_bird/Scripts/flappy_main.gd" id="1_ahv5j"]
 [ext_resource type="PackedScene" uid="uid://cd76jpqxb0eqo" path="res://Games/flappy_bird/Scenes/ground.tscn" id="2_lkjn6"]
@@ -9,6 +9,7 @@
 [ext_resource type="Texture2D" uid="uid://uoq3jhwpvq60" path="res://Assets/Plane/Fly (1).png" id="6_sq106"]
 [ext_resource type="Texture2D" uid="uid://fn3psom18nnv" path="res://Assets/health_and_pointers_bar/Sprites/Heart Bar/Heart Stage 1.png" id="7_60dfc"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="7_m56p3"]
+[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="7_qkajw"]
 [ext_resource type="Texture2D" uid="uid://co33yn52kaeqb" path="res://Assets/health_and_pointers_bar/Sprites/Heart Bar/Heart Stage 5.png" id="8_oja8t"]
 [ext_resource type="PackedScene" uid="uid://7nr2tlykv2n5" path="res://Games/flappy_bird/Scenes/game_over.tscn" id="9_wgnds"]
 [ext_resource type="Script" uid="uid://nqypnx6hl2qj" path="res://Games/flappy_bird/Scripts/timer_label.gd" id="10_7qyl5"]
@@ -92,10 +93,11 @@ autostart = true
 [node name="logout" type="Button" parent="."]
 z_index = 12
 layout_mode = 0
-offset_left = 8.0
-offset_top = 591.0
-offset_right = 106.0
-offset_bottom = 627.0
+offset_left = -6.0
+offset_top = 590.0
+offset_right = 121.280304
+offset_bottom = 648.0
+theme = ExtResource("7_qkajw")
 theme_override_fonts/font = ExtResource("7_m56p3")
 text = "⬅️ logout
 "
@@ -248,10 +250,11 @@ theme_override_fonts/font = ExtResource("7_m56p3")
 text = "🔄:Retry"
 
 [node name="PauseButton" type="Button" parent="CanvasLayer"]
-offset_left = 494.0
-offset_top = 592.0
-offset_right = 567.0
-offset_bottom = 625.0
+offset_left = 1021.0
+offset_top = 8.0
+offset_right = 1128.0
+offset_bottom = 63.0
+theme = ExtResource("7_qkajw")
 theme_override_fonts/font = ExtResource("7_m56p3")
 text = "Pause"
 

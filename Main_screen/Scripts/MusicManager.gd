@@ -1,38 +1,77 @@
 extends Node
 
-var player: AudioStreamPlayer
+var bgm_player: AudioStreamPlayer
+var sfx_player: AudioStreamPlayer
 
-var main_theme = preload("res://Assets/Sound_effects/Clash-of-Clans-Main-Theme.mp3")
-var pp_bgm    = preload("res://Assets/Sound_effects/smooth-midieval-332632-2.mp3")
-var rr_bgm  = preload("res://Assets/Sound_effects/Age-of-War-Theme-Soundtrack.mp3")
-var ft_bgm  = preload("res://Assets/Sound_effects/Original-Tetris-theme-Tetris-Sou.mp3")
-var fc_bgm  = preload("res://Assets/Sound_effects/Pokmon-Legends-Z-A-OST-Lumiose-C.mp3")
-var jy_bgm  = preload("res://Assets/Sound_effects/Kids-2.mp3")
+# Dictionary for cleaner music management
+var music_tracks := {
+    "main": "res://Assets/Sound_effects/Clash-of-Clans-Main-Theme.mp3",
+    "pp_bgm": "res://Assets/Sound_effects/smooth-midieval-332632-2.mp3",
+    "rr_bgm": "res://Assets/Sound_effects/Age-of-War-Theme-Soundtrack.mp3",
+    "ft_bgm": "res://Assets/Sound_effects/Original-Tetris-theme-Tetris-Sou.mp3",
+    "fc_bgm": "res://Assets/Sound_effects/Pokmon-Legends-Z-A-OST-Lumiose-C.mp3",
+    "jy_bgm": "res://Assets/Sound_effects/Kids-2.mp3"
+}
+
+var sound_effects := {
+    "scored": "res://Assets/Sound_effects/scored.mp3",
+    "hit": "res://Assets/Sound_effects/lightning-strike-386161_kP0k5uhh.mp3"
+    }
+                
 
 func _ready():
-    player = AudioStreamPlayer.new()
-    add_child(player)
-    player.autoplay = false
-    player.volume_db = 0
+    # Create background music player
+    bgm_player = AudioStreamPlayer.new()
+    add_child(bgm_player)
+    bgm_player.volume_db = 0
     
+    # Create sound effect player
+    sfx_player = AudioStreamPlayer.new()
+    add_child(sfx_player)
+    sfx_player.volume_db = 0
     
     play_music("main")
 
 func play_music(track_name: String):
-    var stream: AudioStream = null
+    if not music_tracks.has(track_name):
+        push_error("Unknown BGM track: " + track_name)
+        return
     
-    match track_name:
-        "main": stream = main_theme
-        "pp_bgm": stream = pp_bgm
-        "rr_bgm": stream = rr_bgm
-        "ft_bgm": stream = ft_bgm
-        "fc_bgm": stream = fc_bgm
-        "jy_bgm": stream = jy_bgm
-        _:
-            print("Unknown track: ", track_name)
-            return
+    var stream = load(music_tracks[track_name]) as AudioStream
+    if stream == null:
+        push_error("Failed to load music track: " + track_name)
+        return
+    
+    # Enable looping based on the stream type
+    if stream is AudioStreamMP3:
+        stream.loop = true
+    elif stream is AudioStreamOggVorbis:
+        stream.loop = true
+    
+    # Only restart if different track
+    if bgm_player.stream != stream:
+        bgm_player.stop()
+        bgm_player.stream = stream
+        bgm_player.play()
 
-    if player.stream != stream:
-        player.stop()
-        player.stream = stream
-        player.play()
+func play_sound_effect(effect_name: String):
+    if not sound_effects.has(effect_name):
+        push_error("Unknown sound effect: " + effect_name)
+        return
+    
+    var stream = load(sound_effects[effect_name]) as AudioStream
+    if stream == null:
+        push_error("Failed to load sound effect: " + effect_name)
+        return
+    
+    sfx_player.stream = stream
+    sfx_player.play()
+
+func stop_music():
+    bgm_player.stop()
+
+func set_music_volume(volume_db: float):
+    bgm_player.volume_db = volume_db
+
+func set_sfx_volume(volume_db: float):
+    sfx_player.volume_db = volume_db

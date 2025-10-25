@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=4 uid="uid://cjanwm3sy2x37"]
+[gd_scene load_steps=16 format=4 uid="uid://cjanwm3sy2x37"]
 
 [ext_resource type="PackedScene" uid="uid://cyti38f0lagf2" path="res://Games/Jumpify/Scenes/Prefabs/LevelFinishDoor.tscn" id="1_oqkjg"]
 [ext_resource type="Texture2D" uid="uid://dq0fpat00ukhu" path="res://Assets/Background/Space.jpg" id="1_t1ylk"]
@@ -9,6 +9,7 @@
 [ext_resource type="Texture2D" uid="uid://clreg520jah1j" path="res://Games/Jumpify/Assets/platformPack_item008.png" id="7_j7jun"]
 [ext_resource type="FontFile" uid="uid://qgc4vi5osk7v" path="res://Games/Jumpify/Assets/Fonts/Star Choco.ttf" id="8_gwcy2"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="9_uy5mx"]
+[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="10_pvb7v"]
 [ext_resource type="PackedScene" uid="uid://bfmh3fm2de78o" path="res://Games/Jumpify/Scenes/Prefabs/Coin.tscn" id="10_uy5mx"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_gs0qk"]
@@ -144,8 +145,9 @@ text = "x 3"
 layout_mode = 0
 offset_left = 32.0
 offset_top = 616.0
-offset_right = 167.0
-offset_bottom = 660.0
+offset_right = 171.0
+offset_bottom = 667.0
+theme = ExtResource("10_pvb7v")
 theme_override_fonts/font = ExtResource("9_uy5mx")
 text = "⬅️ logout
 "
