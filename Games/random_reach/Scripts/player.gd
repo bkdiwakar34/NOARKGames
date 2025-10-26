@@ -20,7 +20,7 @@ const LOG_INTERVAL = 0.02
     "time_display": $"../Panel/TimeSeconds",
     "countdown_display": $"../TileMap/CanvasLayer/CountdownLabel",
     "game_over_label": $"../TileMap/CanvasLayer/ColorRect/GameOverLabel",
-    "top_score_label":$"../TileMap/CanvasLayer/TopScoreLabel",
+    "top_score_label":$"../TileMap/CanvasLayer/TextureRect/TopScoreLabel",
     "color_rect": $"../TileMap/CanvasLayer/ColorRect",
     "warning_window":$"../Window",
     "bg_2d":$"../2DRR",
@@ -154,7 +154,7 @@ func _initialize_game_state() -> void:
 
 func _update_top_score_display() -> void:
     var top_score = ScoreManager.get_top_score(patient_id, game_name)
-    _ui_nodes.top_score_label.text = "HIGH SCORE : " + str(top_score)
+    _ui_nodes.top_score_label.text = str(top_score)
 
 # Global Timer Callbacks
 func _on_global_timer_play_pressed(time: int) -> void:

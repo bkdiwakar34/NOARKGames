@@ -207,7 +207,7 @@ func spawn_gem() -> void:
 func _on_gem_off_screen() -> void:
     if not game_active:
         return
-        
+    MusicManager.play_sound_effect("fruit_missed")  
     print("Game:: _on_gem_off_screen - Gem missed")
     current_gem = null
     status = "gem_missed"
@@ -219,6 +219,9 @@ func _on_gem_off_screen() -> void:
 
 func _on_paddle_area_entered(area: Area2D) -> void:
     if area == current_gem and game_active:
+        # Show +1 label at gem position
+        show_score_popup(area.position)
+        
         _score += 1
         score_label.text = "SCORE: " + str(_score)
         print("Gem caught! Score: ", _score)
@@ -235,6 +238,26 @@ func _on_paddle_area_entered(area: Area2D) -> void:
         await get_tree().create_timer(0.5).timeout
         if game_active:
             spawn_gem()
+
+func show_score_popup(gem_position: Vector2) -> void:
+    var popup_label = Label.new()
+    popup_label.text = "+1"
+    popup_label.add_theme_font_size_override("font_size", 35)
+    
+    # Add custom font if available
+    var font = load("res://Assets/Fonts/Bungee-Regular.ttf")
+    if font:
+        popup_label.add_theme_font_override("font", font)
+    
+    popup_label.modulate = Color(1, 1, 1, 1)
+    popup_label.position = gem_position + Vector2(-20, -50)
+    add_child(popup_label)
+    
+    # Animate the label
+    var tween = create_tween()
+    tween.tween_property(popup_label, "position:y", popup_label.position.y - 50, 0.5)
+    tween.parallel().tween_property(popup_label, "modulate:a", 0.0, 0.5)
+    tween.tween_callback(popup_label.queue_free)
 
 func _on_pause_button_pressed() -> void:
     if is_paused:

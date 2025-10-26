@@ -259,9 +259,10 @@ theme_override_fonts/font = ExtResource("7_m56p3")
 text = "Pause"
 
 [node name="TextureRect" type="TextureRect" parent="CanvasLayer"]
-offset_left = 229.0
-offset_right = 314.0
-offset_bottom = 105.0
+offset_left = 240.0
+offset_top = -1.0
+offset_right = 325.0
+offset_bottom = 104.0
 texture = ExtResource("13_8iopb")
 expand_mode = 1
 
@@ -381,6 +382,18 @@ text = "Do assessment"
 layout_mode = 2
 theme_override_fonts/font = ExtResource("7_m56p3")
 text = "Close"
+
+[node name="+1" type="Label" parent="."]
+visible = false
+layout_mode = 0
+offset_left = 386.0
+offset_top = 323.0
+offset_right = 408.0
+offset_bottom = 345.0
+theme_override_colors/font_color = Color(0.096204735, 0.09620475, 0.096204735, 1)
+theme_override_fonts/font = ExtResource("7_m56p3")
+theme_override_font_sizes/font_size = 30
+text = "+1"
 
 [connection signal="area_entered" from="ground" to="ground" method="_on_area_entered"]
 [connection signal="timeout" from="PipeTimer" to="." method="_on_pipe_timer_timeout"]

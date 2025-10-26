@@ -15,7 +15,9 @@ var music_tracks := {
 
 var sound_effects := {
     "scored": "res://Assets/Sound_effects/scored.mp3",
-    "hit": "res://Assets/Sound_effects/lightning-strike-386161_kP0k5uhh.mp3"
+    "hit": "res://Assets/Sound_effects/lightning-strike-386161_kP0k5uhh.mp3",
+    "ball": "res://Assets/Sound_effects/hit.mp3",
+    "fruit_missed":"res://Assets/Sound_effects/car-crash-sound-376882.mp3"
     }
                 
 
@@ -53,6 +55,10 @@ func play_music(track_name: String):
         bgm_player.stop()
         bgm_player.stream = stream
         bgm_player.play()
+    if track_name == "rr_bgm" and "ft_bgm":
+        bgm_player.volume_db = -10
+    else:
+        bgm_player.volume_db = 0
 
 func play_sound_effect(effect_name: String):
     if not sound_effects.has(effect_name):
@@ -66,6 +72,8 @@ func play_sound_effect(effect_name: String):
     
     sfx_player.stream = stream
     sfx_player.play()
+    if effect_name == "ball":
+        sfx_player.volume_db = 10
 
 func stop_music():
     bgm_player.stop()

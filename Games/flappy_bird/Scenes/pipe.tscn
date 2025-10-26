@@ -1,7 +1,7 @@
 [gd_scene load_steps=8 format=3 uid="uid://bpg5v18vclxr"]
 
-[ext_resource type="Script" uid="uid://n30gh10lj11n" path="res://Games/flappy_bird/Scripts/pipe.gd" id="1_vqdef"]
-[ext_resource type="Texture2D" uid="uid://c2ea7ixi38ucb" path="res://Assets/flappy_assets/pipe.png" id="2_fyq25"]
+[ext_resource type="Script" uid="uid://bjaupi35p1iwj" path="res://Games/flappy_bird/Scripts/pipe.gd" id="1_vqdef"]
+[ext_resource type="Texture2D" uid="uid://c2thervb2nvp1" path="res://Assets/flappy_assets/pipe.png" id="2_fyq25"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_ypilm"]
 size = Vector2(78, 36)

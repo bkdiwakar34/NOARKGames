@@ -1,10 +1,11 @@
-[gd_scene load_steps=6 format=3 uid="uid://dsn76tjtm17k5"]
+[gd_scene load_steps=7 format=3 uid="uid://dsn76tjtm17k5"]
 
 [ext_resource type="Script" uid="uid://b7uvb34c56wtj" path="res://Main_screen/Scripts/3d_games.gd" id="1_mxx4x"]
 [ext_resource type="Theme" uid="uid://87b78edsvd4i" path="res://Assets/Background/button_icon.tres" id="2_jcsql"]
 [ext_resource type="Texture2D" uid="uid://co0rmt1l8yn34" path="res://Assets/Background/image.png" id="2_qkk0p"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_t5h8i"]
 [ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="5_sl8hk"]
+[ext_resource type="Texture2D" uid="uid://bwyex75l5pbty" path="res://Assets/Background/Panda with blank sign cartoon Vector Image on VectorStock.png" id="6_r8isq"]
 
 [node name="3dGames" type="Node2D"]
 script = ExtResource("1_mxx4x")
@@ -85,28 +86,19 @@ theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_t5h8i")
 text = "Results"
 
-[node name="LoggedInAs" type="Label" parent="."]
-offset_left = 456.0
-offset_top = 40.0
-offset_right = 643.0
-offset_bottom = 70.0
-theme_override_fonts/font = ExtResource("2_t5h8i")
-theme_override_font_sizes/font_size = 22
-text = "Patient name :"
-
 [node name="TrainingLabel" type="Label" parent="."]
-offset_left = 413.0
-offset_top = 77.0
-offset_right = 652.0
-offset_bottom = 114.0
+offset_left = 387.0
+offset_top = 88.0
+offset_right = 741.0
+offset_bottom = 125.0
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_t5h8i")
 theme_override_font_sizes/font_size = 22
 
 [node name="2D_mode" type="CheckButton" parent="."]
-offset_left = 435.0
+offset_left = 421.0
 offset_top = 126.0
-offset_right = 694.0
+offset_right = 680.0
 offset_bottom = 161.0
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_t5h8i")
@@ -143,6 +135,25 @@ text = "Left hand"
 [node name="RightButton" type="Button" parent="HandSelectionPopup/HBoxContainer"]
 layout_mode = 2
 text = "Right hand"
+
+[node name="Logo" type="TextureRect" parent="."]
+offset_left = 415.0
+offset_top = 1.0
+offset_right = 673.0
+offset_bottom = 68.0
+texture = ExtResource("6_r8isq")
+expand_mode = 1
+
+[node name="LoggedInAs" type="Label" parent="Logo"]
+layout_mode = 0
+offset_left = 31.0
+offset_top = 27.0
+offset_right = 218.0
+offset_bottom = 57.0
+theme_override_colors/font_color = Color(0.24313726, 0.24313726, 0.24313726, 1)
+theme_override_fonts/font = ExtResource("2_t5h8i")
+theme_override_font_sizes/font_size = 22
+text = "Patient name :"
 
 [connection signal="pressed" from="RandomReach3D" to="." method="_on_random_reach_3d_pressed"]
 [connection signal="pressed" from="Exit" to="." method="_on_exit_pressed"]

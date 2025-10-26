@@ -1,9 +1,10 @@
-[gd_scene load_steps=9 format=4 uid="uid://vhx3bkgoif43"]
+[gd_scene load_steps=10 format=4 uid="uid://vhx3bkgoif43"]
 
-[ext_resource type="VideoStream" uid="uid://urk7t4x73swm" path="res://Assets/gifs/Hello.ogv" id="1_hwkvm"]
-[ext_resource type="Script" uid="uid://rt0eqog104is" path="res://Main_screen/Scripts/main_window.gd" id="3_54gjo"]
-[ext_resource type="Theme" uid="uid://dd5ut6ixbb3rj" path="res://Assets/Background/button.tres" id="3_oasjk"]
-[ext_resource type="FontFile" uid="uid://cmucnd8tl57sp" path="res://Assets/Fonts/Bungee-Regular.ttf" id="4_oasjk"]
+[ext_resource type="Texture2D" uid="uid://cn5bybhkdf35k" path="res://Assets/Background/動物イラスト｜無料イラスト・フリー素材なら「イラストAC」.png" id="1_54gjo"]
+[ext_resource type="VideoStream" uid="uid://8jyvye72a65e" path="res://Assets/gifs/Hello.ogv" id="1_hwkvm"]
+[ext_resource type="Script" uid="uid://dfesven8e7gry" path="res://Main_screen/Scripts/main_window.gd" id="3_54gjo"]
+[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="3_oasjk"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="4_oasjk"]
 
 [sub_resource type="Image" id="Image_hwkvm"]
 data = {
@@ -259,7 +260,9 @@ layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_bottom = 4.0
+offset_left = -11.0
+offset_right = -11.0
+offset_bottom = 19.0
 grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.537255, 0.760784, 0.482353, 0)
@@ -288,10 +291,10 @@ text = "EXIT"
 
 [node name="HospID" type="LineEdit" parent="TextureRect"]
 layout_mode = 0
-offset_left = 410.0
-offset_top = 183.0
-offset_right = 768.0
-offset_bottom = 249.0
+offset_left = 409.0
+offset_top = 215.0
+offset_right = 774.0
+offset_bottom = 294.0
 theme = ExtResource("3_oasjk")
 theme_override_fonts/font = ExtResource("4_oasjk")
 placeholder_text = "Hospital id:"
@@ -300,9 +303,9 @@ placeholder_text = "Hospital id:"
 texture_filter = 1
 layout_mode = 0
 offset_left = 598.0
-offset_top = 275.0
+offset_top = 315.0
 offset_right = 756.0
-offset_bottom = 340.0
+offset_bottom = 380.0
 theme = ExtResource("3_oasjk")
 theme_override_fonts/font = ExtResource("4_oasjk")
 text = "New Patient"
@@ -310,9 +313,9 @@ text = "New Patient"
 [node name="PlayButton" type="Button" parent="."]
 layout_mode = 0
 offset_left = 412.0
-offset_top = 275.0
+offset_top = 315.0
 offset_right = 573.0
-offset_bottom = 340.0
+offset_bottom = 380.0
 theme = ExtResource("3_oasjk")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 text = "Play"
@@ -374,14 +377,24 @@ offset_bottom = 81.0
 theme_override_fonts/font = ExtResource("4_oasjk")
 text = "Ok"
 
-[node name="Label" type="Label" parent="."]
+[node name="Logo" type="TextureRect" parent="."]
 layout_mode = 0
-offset_left = 442.0
-offset_top = 53.0
-offset_right = 752.0
-offset_bottom = 159.0
+offset_left = 371.0
+offset_top = 22.0
+offset_right = 803.0
+offset_bottom = 215.0
+texture = ExtResource("1_54gjo")
+expand_mode = 1
+
+[node name="Label" type="Label" parent="Logo"]
+layout_mode = 0
+offset_left = 107.0
+offset_top = 81.0
+offset_right = 404.0
+offset_bottom = 187.0
+theme_override_colors/font_color = Color(0.2231029, 0.2231029, 0.22310287, 1)
 theme_override_fonts/font = ExtResource("4_oasjk")
-theme_override_font_sizes/font_size = 80
+theme_override_font_sizes/font_size = 60
 text = "NOARK"
 
 [connection signal="pressed" from="TextureRect/ExitButton" to="PlayButton" method="_on_exit_button_pressed"]

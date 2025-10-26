@@ -3,7 +3,7 @@ extends Control
 # Constants
 const SCROLL_SPEED: float = 7.0
 const PIPE_DELAY: int = 50
-const PIPE_RANGE: int = 180
+const PIPE_RANGE: int = 200
 const TIMER_DELAY: int = 2
 const LOG_INTERVAL: float = 0.02
 const INITIAL_HEALTH: int = 3
@@ -65,6 +65,7 @@ var screen_size: Vector2i
 var ground_height: int
 var pipes: Array = []
 var health: int = INITIAL_HEALTH
+@onready var plus_one = $"+1"
 
 # Timer and countdown variables
 var countdown_time: int = 0
@@ -348,7 +349,7 @@ func generate_pipe() -> void:
 
 func _setup_pipe_position(pipe: Node) -> void:
     pipe.position.x = screen_size.x / 1.5 + PIPE_DELAY
-    pipe.position.y = 400 + randi_range(-PIPE_RANGE, PIPE_RANGE)
+    pipe.position.y =  275 + randi_range(-PIPE_RANGE, PIPE_RANGE)
 
     # Update target position based on mode - similar to RandomReach logic
     target_x = (pipe.position.x - GlobalScript.X_SCREEN_OFFSET) / GlobalScript.PLAYER_POS_SCALER_X
@@ -416,13 +417,26 @@ func _handle_game_over() -> void:
     status = "restarting"
     plane_crashed.emit()
     stop_game()
-
+    
+    
 func scored() -> void:
     if not can_score:
         return  
     can_score = false  
     MusicManager.play_sound_effect("scored")
     score += 1
+
+    # Show +1 animation properly
+    plus_one.visible = true
+    plus_one.modulate.a = 1.0  # Reset alpha
+    plus_one.position = Vector2(100, 100)  # Adjust position to visible area
+    var tween = create_tween()
+    tween.tween_property(plus_one, "position:y", plus_one.position.y - 50, 0.5)
+    tween.parallel().tween_property(plus_one, "modulate:a", 0.0, 0.5)
+    tween.finished.connect(func():
+        plus_one.visible = false
+    )
+
     ScoreManager.update_top_score(GlobalSignals.current_patient_id, game_name, score)
     _update_top_score_display()
     status = "reached"
