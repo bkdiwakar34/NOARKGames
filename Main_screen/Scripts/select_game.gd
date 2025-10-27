@@ -1,6 +1,6 @@
 extends Control
 
-@onready var logged_in_as = $LoggedInAs
+@onready var logged_in_as = $Logo/LoggedInAs
 @onready var training_label = $TrainingLabel
 
 # Preload all scenes at start (loads into memory for faster switching)

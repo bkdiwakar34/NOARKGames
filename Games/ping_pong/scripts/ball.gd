@@ -78,6 +78,7 @@ func _physics_process(delta):
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "player":
+                MusicManager.play_sound_effect("ball")
                 _reset_side_hit_counter()
                 status = "player"
                 GlobalSignals.hit_player = collision_point
@@ -85,6 +86,7 @@ func _physics_process(delta):
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
                 
             "computer":
+                MusicManager.play_sound_effect("ball")
                 _reset_side_hit_counter()
                 status = "computer"
                 GlobalSignals.hit_computer = collision_point

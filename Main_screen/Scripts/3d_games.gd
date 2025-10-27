@@ -1,6 +1,6 @@
 extends Node2D
 
-@onready var logged_in_as = $LoggedInAs
+@onready var logged_in_as = $Logo/LoggedInAs
 @onready var training_label = $TrainingLabel
 @onready var left_button = $HandSelectionPopup/HBoxContainer/LeftButton
 @onready var right_button = $HandSelectionPopup/HBoxContainer/RightButton
