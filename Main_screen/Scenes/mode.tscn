@@ -1,10 +1,11 @@
-[gd_scene load_steps=6 format=3 uid="uid://qun5skrf4fwq"]
+[gd_scene load_steps=7 format=3 uid="uid://qun5skrf4fwq"]
 
 [ext_resource type="Script" uid="uid://djkm422xonvir" path="res://Main_screen/Scripts/mode.gd" id="1_pnk74"]
 [ext_resource type="Texture2D" uid="uid://b3vybovnn7ifm" path="res://Assets/Background/modebg-2.png" id="2_sarbq"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="3_ymswy"]
 [ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="4_ymswy"]
 [ext_resource type="Texture2D" uid="uid://bryy1sgjoxil5" path="res://Assets/Background/ .png" id="5_c4lh5"]
+[ext_resource type="Theme" uid="uid://87b78edsvd4i" path="res://Assets/Background/button_icon.tres" id="6_xel0p"]
 
 [node name="Mode" type="Node2D"]
 script = ExtResource("1_pnk74")
@@ -16,20 +17,20 @@ texture = ExtResource("2_sarbq")
 expand_mode = 1
 
 [node name="3D Games" type="Button" parent="."]
-offset_left = 592.0
-offset_top = 245.0
-offset_right = 865.0
-offset_bottom = 373.0
+offset_left = 600.0
+offset_top = 237.0
+offset_right = 873.0
+offset_bottom = 365.0
 theme = ExtResource("4_ymswy")
 theme_override_fonts/font = ExtResource("3_ymswy")
 theme_override_font_sizes/font_size = 35
 text = "3D Games"
 
 [node name="2D Games" type="Button" parent="."]
-offset_left = 301.0
-offset_top = 245.0
-offset_right = 576.0
-offset_bottom = 371.0
+offset_left = 293.0
+offset_top = 237.0
+offset_right = 568.0
+offset_bottom = 363.0
 theme = ExtResource("4_ymswy")
 theme_override_fonts/font = ExtResource("3_ymswy")
 theme_override_font_sizes/font_size = 35
@@ -45,9 +46,9 @@ theme_override_fonts/title_font = ExtResource("3_ymswy")
 
 [node name="Logo" type="TextureRect" parent="."]
 offset_left = 266.0
-offset_top = 33.0
+offset_top = 9.0
 offset_right = 882.0
-offset_bottom = 271.0
+offset_bottom = 247.0
 texture = ExtResource("5_c4lh5")
 expand_mode = 1
 
@@ -62,5 +63,16 @@ theme_override_fonts/font = ExtResource("3_ymswy")
 theme_override_font_sizes/font_size = 40
 text = "Select game mode !"
 
+[node name="Main_menu" type="Button" parent="."]
+offset_left = 450.0
+offset_top = 417.0
+offset_right = 727.0
+offset_bottom = 515.0
+theme = ExtResource("6_xel0p")
+theme_override_fonts/font = ExtResource("3_ymswy")
+theme_override_font_sizes/font_size = 25
+text = "MAIN MENU"
+
 [connection signal="pressed" from="3D Games" to="." method="_on_3d_games_pressed"]
 [connection signal="pressed" from="2D Games" to="." method="_on_2d_games_pressed"]
+[connection signal="pressed" from="Main_menu" to="." method="_on_main_menu_pressed"]
