@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=4 uid="uid://cjanwm3sy2x37"]
+[gd_scene load_steps=20 format=4 uid="uid://cjanwm3sy2x37"]
 
 [ext_resource type="PackedScene" uid="uid://cyti38f0lagf2" path="res://Games/Jumpify/Scenes/Prefabs/LevelFinishDoor.tscn" id="1_oqkjg"]
 [ext_resource type="Texture2D" uid="uid://dq0fpat00ukhu" path="res://Assets/Background/Space.jpg" id="1_t1ylk"]
@@ -6,11 +6,15 @@
 [ext_resource type="PackedScene" uid="uid://w7m6tehvvy3g" path="res://Games/Jumpify/Scenes/Prefabs/player.tscn" id="2_pay8t"]
 [ext_resource type="Texture2D" uid="uid://jaegp53ccc7w" path="res://Games/Jumpify/Assets/Spritesheet/platformPack_tilesheet.png" id="5_wqbaa"]
 [ext_resource type="Script" uid="uid://domyi75bwl5ad" path="res://Games/Jumpify/Scripts/GameUI.gd" id="6_66mfc"]
-[ext_resource type="Texture2D" uid="uid://clreg520jah1j" path="res://Games/Jumpify/Assets/platformPack_item008.png" id="7_j7jun"]
 [ext_resource type="FontFile" uid="uid://qgc4vi5osk7v" path="res://Games/Jumpify/Assets/Fonts/Star Choco.ttf" id="8_gwcy2"]
+[ext_resource type="Texture2D" uid="uid://duy2nt0awvgpw" path="res://Assets/Background/diamond.png" id="8_t1ylk"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="9_uy5mx"]
-[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="10_pvb7v"]
+[ext_resource type="Theme" uid="uid://ddok1g1ht0h30" path="res://Assets/Background/home.tres" id="10_t1ylk"]
 [ext_resource type="PackedScene" uid="uid://bfmh3fm2de78o" path="res://Games/Jumpify/Scenes/Prefabs/Coin.tscn" id="10_uy5mx"]
+[ext_resource type="Script" uid="uid://cxv5ofvbu1ktx" path="res://Games/Jumpify/Scenes/Levels/circular_timer.gd" id="12_t1ylk"]
+[ext_resource type="Texture2D" uid="uid://eb6kjjg3k8gm" path="res://Assets/Background/Old Paper Scroll PNG Transparent Background, Free Download #26394 - FreeIconsPNG.png" id="13_7px14"]
+[ext_resource type="FontFile" uid="uid://bjokva26isnj4" path="res://Assets/Fonts/Oswald-SemiBold.ttf" id="14_a8a3y"]
+[ext_resource type="Theme" uid="uid://5bq88mc6do74" path="res://Assets/Background/okay.tres" id="14_vi2ok"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_gs0qk"]
 texture = ExtResource("5_wqbaa")
@@ -63,10 +67,6 @@ next_scene = ExtResource("2_0ac5u")
 [node name="Player" parent="." instance=ExtResource("2_pay8t")]
 z_index = 1
 position = Vector2(85, 577)
-movement_smoothing = null
-use_scaled_position = null
-ground_level = null
-max_score = null
 
 [node name="Level" type="Node2D" parent="."]
 
@@ -101,6 +101,7 @@ script = ExtResource("6_66mfc")
 [node name="CountdownTimer" type="Timer" parent="UserInterface/GameUI"]
 
 [node name="CountdownLabel" type="Label" parent="UserInterface/GameUI"]
+visible = false
 layout_mode = 0
 offset_left = 462.0
 offset_top = 68.0
@@ -120,20 +121,21 @@ offset_bottom = 40.0
 [node name="ScoreTexture" type="TextureRect" parent="UserInterface/GameUI/Score"]
 unique_name_in_owner = true
 layout_mode = 0
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 116.0
-offset_bottom = 116.0
-texture = ExtResource("7_j7jun")
+offset_left = 15.0
+offset_top = 3.0
+offset_right = 190.0
+offset_bottom = 125.0
+texture = ExtResource("8_t1ylk")
+expand_mode = 1
 stretch_mode = 4
 
 [node name="ScoreLabel" type="Label" parent="UserInterface/GameUI/Score"]
 unique_name_in_owner = true
 layout_mode = 0
-offset_left = 104.0
-offset_top = 42.0
-offset_right = 148.0
-offset_bottom = 84.0
+offset_left = 98.0
+offset_top = 46.0
+offset_right = 143.0
+offset_bottom = 85.0
 theme_override_colors/font_color = Color(0.910156, 0.730469, 0, 1)
 theme_override_colors/font_outline_color = Color(1, 1, 1, 1)
 theme_override_constants/outline_size = 10
@@ -143,14 +145,12 @@ text = "x 3"
 
 [node name="Logout" type="Button" parent="UserInterface/GameUI"]
 layout_mode = 0
-offset_left = 32.0
-offset_top = 616.0
-offset_right = 171.0
-offset_bottom = 667.0
-theme = ExtResource("10_pvb7v")
+offset_left = 23.0
+offset_top = 599.0
+offset_right = 115.0
+offset_bottom = 673.0
+theme = ExtResource("10_t1ylk")
 theme_override_fonts/font = ExtResource("9_uy5mx")
-text = "⬅️ logout
-"
 
 [node name="ColorRect" type="ColorRect" parent="UserInterface/GameUI"]
 visible = false
@@ -202,45 +202,11 @@ text = "ADAPT PROM"
 
 [node name="TopScoreLabel" type="Label" parent="UserInterface/GameUI"]
 layout_mode = 0
-offset_left = 1026.0
-offset_top = 47.0
-offset_right = 1155.0
-offset_bottom = 81.0
+offset_left = 40.0
+offset_top = 104.0
+offset_right = 169.0
+offset_bottom = 138.0
 theme_override_fonts/font = ExtResource("9_uy5mx")
-
-[node name="Window" type="Window" parent="UserInterface/GameUI"]
-auto_translate_mode = 1
-initial_position = 2
-size = Vector2i(610, 200)
-visible = false
-
-[node name="Label" type="Label" parent="UserInterface/GameUI/Window"]
-offset_left = -1.0
-offset_top = 17.0
-offset_right = 615.0
-offset_bottom = 149.0
-theme_override_fonts/font = ExtResource("9_uy5mx")
-text = "ASSESSMENT NOT COMPLETED YET!
-PLEASE COMPLETE THE ASSESSMENT BEFORE ENABLING ADAPTIVE ROM."
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="HBoxContainer" type="HBoxContainer" parent="UserInterface/GameUI/Window"]
-offset_left = 176.0
-offset_top = 128.0
-offset_right = 404.0
-offset_bottom = 168.0
-theme_override_constants/separation = 20
-
-[node name="do_asses" type="Button" parent="UserInterface/GameUI/Window/HBoxContainer"]
-layout_mode = 2
-theme_override_fonts/font = ExtResource("9_uy5mx")
-text = "Do assessment"
-
-[node name="close_asses" type="Button" parent="UserInterface/GameUI/Window/HBoxContainer"]
-layout_mode = 2
-theme_override_fonts/font = ExtResource("9_uy5mx")
-text = "Close"
 
 [node name="PauseButton" type="Button" parent="UserInterface/GameUI"]
 visible = false
@@ -255,9 +221,60 @@ text = "pause"
 [node name="Coin" parent="." instance=ExtResource("10_uy5mx")]
 position = Vector2(564, 302)
 
+[node name="CircularTimer" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 1069.0
+offset_top = -8.0
+offset_right = 1109.0
+offset_bottom = 32.0
+script = ExtResource("12_t1ylk")
+
+[node name="Warning" type="TextureRect" parent="."]
+visible = false
+offset_left = 303.0
+offset_top = 165.0
+offset_right = 772.0
+offset_bottom = 388.0
+texture = ExtResource("13_7px14")
+expand_mode = 1
+
+[node name="Label" type="Label" parent="Warning"]
+layout_mode = 0
+offset_left = 37.0
+offset_top = 66.0
+offset_right = 433.0
+offset_bottom = 113.0
+theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
+theme_override_fonts/font = ExtResource("14_a8a3y")
+theme_override_font_sizes/font_size = 14
+text = "ASSESSMENT NOT COMPLETED YET! 
+PLEASE COMPLETE THE ASSESSMENT BEFORE ENABLING ADAPTIVE ROM."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Warning"]
+layout_mode = 0
+offset_left = 104.0
+offset_top = 123.0
+offset_right = 345.0
+offset_bottom = 163.0
+theme = ExtResource("14_vi2ok")
+theme_override_constants/separation = 20
+
+[node name="do_asses" type="Button" parent="Warning/HBoxContainer"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("9_uy5mx")
+text = "  Do assessment  "
+
+[node name="close_asses" type="Button" parent="Warning/HBoxContainer"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("9_uy5mx")
+text = "  Close  "
+
 [connection signal="pressed" from="UserInterface/GameUI/Logout" to="Player" method="_on_logout_button_pressed"]
 [connection signal="pressed" from="UserInterface/GameUI/ColorRect/GameOverLabel/RetryButton" to="Player" method="_on_retry_button_pressed"]
 [connection signal="toggled" from="UserInterface/GameUI/AdaptProm" to="Player" method="_on_adapt_rom_toggled"]
-[connection signal="pressed" from="UserInterface/GameUI/Window/HBoxContainer/do_asses" to="Player" method="_on_do_assess_pressed"]
-[connection signal="pressed" from="UserInterface/GameUI/Window/HBoxContainer/close_asses" to="Player" method="_on_close_assess_pressed"]
 [connection signal="pressed" from="UserInterface/GameUI/PauseButton" to="Player" method="_on_pause_button_pressed"]
+[connection signal="pressed" from="Warning/HBoxContainer/do_asses" to="Player" method="_on_do_assess_pressed"]
+[connection signal="pressed" from="Warning/HBoxContainer/close_asses" to="Player" method="_on_close_assess_pressed"]

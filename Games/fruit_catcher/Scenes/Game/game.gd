@@ -42,9 +42,9 @@ var log_timer: Timer
 @onready var paddle: Area2D = $Paddle
 @onready var score_sound: AudioStreamPlayer2D = $ScoreSound
 @onready var sound: AudioStreamPlayer = $Sound
-@onready var score_label: Label = $ScoreLabel
+@onready var score_label: Label = $Fruit_Score/ScoreLabel
 @onready var game_over_label: ColorRect = $ColorRect
-@onready var countdown_display: Label = $CountdownLabel
+@onready var countdown_display: Control = $CircularTimer
 @onready var top_score_label: Label = $TopScoreLabel
 
 # Button nodes (cleaned up)
@@ -54,7 +54,7 @@ var log_timer: Timer
     "close_assess": $Window/HBoxContainer/close_asses,
     "do_assess": $Window/HBoxContainer/do_asses,
     "adapt_prom": $AdaptProm,
-    "warning_window": $Window
+    "warning_window": $Warning
 }
 
 func _init() -> void:
@@ -124,10 +124,12 @@ func _on_global_timer_close_pressed() -> void:
     countdown_display.hide()
     start_game_without_timer()
 
+      
 func start_game_with_timer(time: int) -> void:
     countdown_active = true
     countdown_time = time
     countdown_display.visible = true
+    countdown_display.set_time(time)  
     GlobalTimerManager.start_countdown_with_time(time)
     start_game()
     
@@ -142,7 +144,7 @@ func _on_global_countdown_finished() -> void:
 
 func _on_global_countdown_updated(time_left: int) -> void:
     countdown_time = time_left
-    countdown_display.text = GlobalTimerManager.get_countdown_display_text()
+    countdown_display.update_time(time_left)
 
 func _process(delta: float) -> void:
     if not game_started:
@@ -223,7 +225,7 @@ func _on_paddle_area_entered(area: Area2D) -> void:
         show_score_popup(area.position)
         
         _score += 1
-        score_label.text = "SCORE: " + str(_score)
+        score_label.text = str(_score)
         print("Gem caught! Score: ", _score)
         status = "gem_caught"
         
@@ -276,7 +278,7 @@ func pause_game() -> void:
     if current_gem and is_instance_valid(current_gem):
         current_gem.set_process(false)
     
-    button_nodes.pause_button.text = "Resume"
+    
     pause_state = 0
     status = "paused"
 
@@ -290,7 +292,7 @@ func resume_game() -> void:
     if current_gem and is_instance_valid(current_gem):
         current_gem.set_process(true)
     
-    button_nodes.pause_button.text = "Pause"
+
     pause_state = 1
     status = "playing"
 
@@ -408,6 +410,7 @@ func _on_do_asses_pressed() -> void:
     get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
 
 func _on_close_asses_pressed() -> void:
+    resume_game()
     button_nodes.warning_window.visible = false
 
 func _notification(what: int) -> void:

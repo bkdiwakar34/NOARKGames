@@ -1,9 +1,9 @@
-[gd_scene load_steps=6 format=3 ]
+[gd_scene load_steps=6 format=3 uid="uid://de5dqa6t5f6py"]
 
-[ext_resource type="Script"  path="res://Games/assessment/workspace.gd" id="1_vm5ig"]
-[ext_resource type="Theme" path="res://Assets/Background/button.tres" id="2_3kta3"]
-[ext_resource type="FontFile"  path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_gocbw"]
-[ext_resource type="Texture2D"  path="res://Assets/pp_assets/arts/Ball.png" id="3_jae2j"]
+[ext_resource type="Script" uid="uid://cedht487nl6p3" path="res://Games/assessment/workspace.gd" id="1_vm5ig"]
+[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="2_3kta3"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_gocbw"]
+[ext_resource type="Texture2D" uid="uid://dy8y607pjywvd" path="res://Assets/pp_assets/arts/Ball.png" id="3_jae2j"]
 
 [sub_resource type="CanvasTexture" id="CanvasTexture_lqn52"]
 
@@ -255,6 +255,7 @@ text = "0.0"
 
 [node name="SaveDialogBox" type="Window" parent="."]
 auto_translate_mode = 1
+oversampling_override = 1.0
 initial_position = 2
 size = Vector2i(400, 152)
 visible = false

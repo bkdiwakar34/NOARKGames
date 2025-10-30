@@ -16,8 +16,8 @@ enum AffectedHand { LEFT, RIGHT, BOTH, UNSPECIFIED = -1 }
 @onready var auth_window = $TextureRect/Auth
 @onready var patient_display = $TextureRect/scroll/Patient_display
 @onready var invalid_details = $TextureRect/InvalidDetails
-@onready var login_to_patient = $TextureRect/LoginSelectPatient
-@onready var patient_name_label: Label = $TextureRect/LoginSelectPatient/PatientName
+@onready var login_to_patient = $LoginAs
+@onready var patient_name_label: Label = $LoginAs/PatientName
 
 # Form field references
 @onready var patient_name_field = $Reg/PatientName

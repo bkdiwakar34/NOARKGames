@@ -60,11 +60,11 @@ var log_timer := Timer.new()
 # Node references - UI elements (cleaned up)
 @onready var ui_nodes = {
     "score_board": %ScoreLabel,
-    "countdown_display": $"../UserInterface/GameUI/CountdownLabel",
+    "countdown_display":$"../CircularTimer",
     "game_over_label": $"../UserInterface/GameUI/ColorRect/GameOverLabel",
     "top_score_label": $"../UserInterface/GameUI/TopScoreLabel",
     "color_rect": $"../UserInterface/GameUI/ColorRect",
-    "warning_window": $"../UserInterface/GameUI/Window"
+    "warning_window": $"../Warning"
 }
 
 @onready var panel_nodes = {
@@ -74,8 +74,6 @@ var log_timer := Timer.new()
 @onready var button_nodes = {
     "logout_button": $"../UserInterface/GameUI/ColorRect/GameOverLabel/LogoutButton",
     "retry_button": $"../UserInterface/GameUI/ColorRect/GameOverLabel/RetryButton",
-    "close_assess": $"../UserInterface/GameUI/Window/HBoxContainer/close_asses",
-    "do_assess": $"../UserInterface/GameUI/Window/HBoxContainer/do_asses",
     "adapt_prom": $"../UserInterface/GameUI/AdaptProm"
 }
 
@@ -154,11 +152,12 @@ func _on_global_timer_close_pressed() -> void:
     ui_nodes.countdown_display.hide()
     start_game_without_timer()
     setup_game_logging()
-
+    
 func start_game_with_timer(time: int) -> void:
     countdown_active = true
     countdown_time = time
     ui_nodes.countdown_display.visible = true
+    ui_nodes.countdown_display.set_time(time)  
     GlobalTimerManager.start_countdown_with_time(time)
     
 func start_game_without_timer() -> void:
@@ -169,9 +168,10 @@ func start_game_without_timer() -> void:
 func _on_global_countdown_finished() -> void:
     show_game_over()
 
+    
 func _on_global_countdown_updated(time_left: int) -> void:
     countdown_time = time_left
-    ui_nodes.countdown_display.text = GlobalTimerManager.get_countdown_display_text()
+    ui_nodes.countdown_display.update_time(time_left)
 
 func _physics_process(delta):
     if game_started and not is_paused:

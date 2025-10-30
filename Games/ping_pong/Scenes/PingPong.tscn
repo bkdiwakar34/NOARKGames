@@ -1,4 +1,4 @@
-[gd_scene load_steps=22 format=4 uid="uid://w15x815lgg7o"]
+[gd_scene load_steps=27 format=4 uid="uid://w15x815lgg7o"]
 
 [ext_resource type="Texture2D" uid="uid://dq0fpat00ukhu" path="res://Assets/Background/Space.jpg" id="1_koe3q"]
 [ext_resource type="PackedScene" uid="uid://cqbhdd3f3ysqn" path="res://Games/ping_pong/Scenes/pp_player.tscn" id="2_x01ca"]
@@ -8,12 +8,17 @@
 [ext_resource type="Script" uid="uid://bxqi2oc3x6whx" path="res://Games/ping_pong/scripts/pp_computer.gd" id="4_mxgn3"]
 [ext_resource type="Script" uid="uid://qe7u2dgdar7d" path="res://Games/ping_pong/scripts/ball.gd" id="5_cp50h"]
 [ext_resource type="PackedScene" uid="uid://i3uo1tqj0yob" path="res://Games/ping_pong/Scenes/wall.tscn" id="9_p63tb"]
+[ext_resource type="Theme" uid="uid://ddok1g1ht0h30" path="res://Assets/Background/home.tres" id="10_ckgwo"]
 [ext_resource type="Script" uid="uid://dj606ct7uo4ou" path="res://Games/ping_pong/scripts/timer_label.gd" id="10_g2848"]
 [ext_resource type="Texture2D" uid="uid://bl10pbij7t6ge" path="res://Assets/Paddle/paddle.png" id="10_rod25"]
-[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="10_tg0pj"]
+[ext_resource type="Theme" uid="uid://bf6gf87lm0nvu" path="res://Assets/Background/pause.tres" id="13_koe3q"]
 [ext_resource type="Texture2D" uid="uid://g3xuhbbrhthp" path="res://Games/random_reach/Sprites/medal.webp" id="13_m35pc"]
 [ext_resource type="Texture2D" uid="uid://cwqtv62nto34u" path="res://Assets/Terrian/Terrain (16x16).png" id="14_pu5g1"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="15_koe3q"]
+[ext_resource type="Script" uid="uid://rku5bdipa82w" path="res://Games/ping_pong/Scenes/circular_timer.gd" id="16_ckgwo"]
+[ext_resource type="Texture2D" uid="uid://eb6kjjg3k8gm" path="res://Assets/Background/Old Paper Scroll PNG Transparent Background, Free Download #26394 - FreeIconsPNG.png" id="17_f5xin"]
+[ext_resource type="FontFile" uid="uid://bjokva26isnj4" path="res://Assets/Fonts/Oswald-SemiBold.ttf" id="18_nvv74"]
+[ext_resource type="Theme" uid="uid://5bq88mc6do74" path="res://Assets/Background/okay.tres" id="19_p6iqu"]
 
 [sub_resource type="Image" id="Image_j7a8p"]
 data = {
@@ -513,20 +518,20 @@ rotation = 1.5708
 
 [node name="PlayerScore" type="Label" parent="."]
 layout_mode = 0
-offset_left = 990.0
-offset_top = 569.0
-offset_right = 1138.0
-offset_bottom = 611.0
+offset_left = 932.0
+offset_top = 591.0
+offset_right = 1080.0
+offset_bottom = 633.0
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 theme_override_font_sizes/font_size = 25
 text = "Player "
 
 [node name="ComputerScore" type="Label" parent="."]
 layout_mode = 0
-offset_left = 968.0
-offset_top = 36.0
-offset_right = 1181.0
-offset_bottom = 76.0
+offset_left = 21.0
+offset_top = 38.0
+offset_right = 234.0
+offset_bottom = 78.0
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 theme_override_font_sizes/font_size = 25
 text = "Computer "
@@ -534,13 +539,12 @@ text = "Computer "
 [node name="logout" type="Button" parent="."]
 layout_mode = 0
 offset_left = 6.0
-offset_top = 562.0
-offset_right = 143.0
-offset_bottom = 616.0
-theme = ExtResource("10_tg0pj")
+offset_top = 568.0
+offset_right = 90.0
+offset_bottom = 634.0
+theme = ExtResource("10_ckgwo")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
 theme_override_font_sizes/font_size = 18
-text = "⬅️ logout"
 
 [node name="AdaptRom" type="CheckButton" parent="."]
 layout_mode = 0
@@ -566,6 +570,7 @@ offset_bottom = 64.0
 [node name="CountdownTimer" type="Timer" parent="CanvasLayer"]
 
 [node name="CountdownLabel" type="Label" parent="CanvasLayer"]
+visible = false
 offset_left = 15.0
 offset_top = 36.0
 offset_right = 183.0
@@ -577,6 +582,7 @@ theme_override_font_sizes/font_size = 25
 text = "Time left :"
 
 [node name="GameOverLabel" type="Label" parent="CanvasLayer"]
+visible = false
 offset_left = 452.0
 offset_top = 269.0
 offset_right = 673.0
@@ -607,19 +613,18 @@ theme_override_fonts/font = ExtResource("15_koe3q")
 text = "🔄:Retry"
 
 [node name="PauseButton" type="Button" parent="CanvasLayer"]
-offset_left = 981.0
-offset_top = 82.0
-offset_right = 1085.0
-offset_bottom = 123.0
-theme = ExtResource("10_tg0pj")
+offset_left = 1063.0
+offset_top = 569.0
+offset_right = 1147.0
+offset_bottom = 635.0
+theme = ExtResource("13_koe3q")
 theme_override_fonts/font = SubResource("FontFile_o1ivk")
-text = "Pause"
 
 [node name="TextureRect" type="TextureRect" parent="CanvasLayer"]
-offset_left = 19.0
-offset_top = 123.0
-offset_right = 90.0
-offset_bottom = 206.0
+offset_left = 17.0
+offset_top = 80.0
+offset_right = 88.0
+offset_bottom = 163.0
 texture = ExtResource("13_m35pc")
 expand_mode = 1
 
@@ -645,44 +650,63 @@ position = Vector2(8, 8)
 tile_map_data = PackedByteArray("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")
 tile_set = SubResource("TileSet_vwar1")
 
-[node name="Window" type="Window" parent="."]
-auto_translate_mode = 1
-initial_position = 2
-size = Vector2i(610, 200)
-visible = false
+[node name="CircularTimer" type="Control" parent="."]
+layout_mode = 1
+anchor_right = 0.892
+anchor_bottom = 0.085
+offset_left = 1069.0
+offset_top = 11.0
+offset_right = 81.416016
+offset_bottom = -4.080002
+script = ExtResource("16_ckgwo")
 
-[node name="Label" type="Label" parent="Window"]
-offset_left = -1.0
-offset_top = 17.0
-offset_right = 615.0
-offset_bottom = 149.0
-theme_override_fonts/font = ExtResource("15_koe3q")
+[node name="Warning" type="TextureRect" parent="."]
+visible = false
+layout_mode = 0
+offset_left = 306.0
+offset_top = 168.0
+offset_right = 837.0
+offset_bottom = 422.0
+texture = ExtResource("17_f5xin")
+expand_mode = 1
+
+[node name="Label" type="Label" parent="Warning"]
+layout_mode = 0
+offset_left = 36.0
+offset_top = 31.0
+offset_right = 489.0
+offset_bottom = 183.0
+theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
+theme_override_fonts/font = ExtResource("18_nvv74")
 text = "ASSESSMENT NOT COMPLETED YET!
 PLEASE COMPLETE THE ASSESSMENT BEFORE ENABLING ADAPTIVE ROM."
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="HBoxContainer" type="HBoxContainer" parent="Window"]
-offset_left = 176.0
-offset_top = 128.0
-offset_right = 404.0
-offset_bottom = 168.0
+[node name="HBoxContainer" type="HBoxContainer" parent="Warning"]
+layout_mode = 0
+offset_left = 128.0
+offset_top = 145.0
+offset_right = 369.0
+offset_bottom = 185.0
 theme_override_constants/separation = 20
 
-[node name="do_asses" type="Button" parent="Window/HBoxContainer"]
+[node name="do_asses" type="Button" parent="Warning/HBoxContainer"]
 layout_mode = 2
+theme = ExtResource("19_p6iqu")
 theme_override_fonts/font = ExtResource("15_koe3q")
-text = "Do assessment"
+text = "  Do assessment  "
 
-[node name="close_asses" type="Button" parent="Window/HBoxContainer"]
+[node name="close_asses" type="Button" parent="Warning/HBoxContainer"]
 layout_mode = 2
+theme = ExtResource("19_p6iqu")
 theme_override_fonts/font = ExtResource("15_koe3q")
-text = "Close"
+text = "  Close  "
 
 [connection signal="ready" from="player" to="player" method="_on_ready"]
 [connection signal="ready" from="computer" to="computer" method="_on_ready"]
 [connection signal="ready" from="Ball" to="Ball" method="_on_ready"]
 [connection signal="pressed" from="logout" to="player" method="_on_logout_pressed"]
 [connection signal="toggled" from="AdaptRom" to="player" method="_on_adapt_rom_toggled"]
-[connection signal="pressed" from="Window/HBoxContainer/do_asses" to="player" method="_on_do_asses_pressed"]
-[connection signal="pressed" from="Window/HBoxContainer/close_asses" to="player" method="_on_close_asses_pressed"]
+[connection signal="pressed" from="Warning/HBoxContainer/do_asses" to="player" method="_on_do_asses_pressed"]
+[connection signal="pressed" from="Warning/HBoxContainer/close_asses" to="player" method="_on_close_asses_pressed"]

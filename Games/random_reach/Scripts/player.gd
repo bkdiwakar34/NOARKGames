@@ -16,15 +16,17 @@ const LOG_INTERVAL = 0.02
 }
 
 @onready var _ui_nodes = {
-    "score_board": $"../ScoreBoard/Score",
+    "score_board":$"../Apple_Score/Score",
     "time_display": $"../Panel/TimeSeconds",
-    "countdown_display": $"../TileMap/CanvasLayer/CountdownLabel",
-    "game_over_label": $"../TileMap/CanvasLayer/ColorRect/GameOverLabel",
-    "top_score_label":$"../TileMap/CanvasLayer/TextureRect/TopScoreLabel",
+    "countdown_display": $"../CircularTimer",
+    "game_over_label": $"../TileMap/CanvasLayer/ColorRect/Celebration/GameOverLabel",
+    "top_score_label":$"../TileMap/CanvasLayer/TopScore/TopScoreLabel",
     "color_rect": $"../TileMap/CanvasLayer/ColorRect",
-    "warning_window":$"../Window",
+    "warning_window":$"../Assesment",
     "bg_2d":$"../2DRR",
-    "bg_3d":$"../3DRR"
+    "bg_3d":$"../3DRR",
+    "score_go":$"../TileMap/CanvasLayer/ColorRect/Score",
+    "highscore_go":$"../TileMap/CanvasLayer/ColorRect/High_logo/Highscore"
 }
 
 @onready var _timer_nodes = {
@@ -36,10 +38,8 @@ const LOG_INTERVAL = 0.02
 }
 
 @onready var _button_nodes = {
-    "logout_button": $"../TileMap/CanvasLayer/ColorRect/GameOverLabel/LogoutButton",
-    "retry_button": $"../TileMap/CanvasLayer/ColorRect/GameOverLabel/RetryButton",
-    "close_assess": $"../Window/HBoxContainer/close_asses",
-    "do_assess": $"../Window/HBoxContainer/do_asses",
+    "logout_button": $"../TileMap/CanvasLayer/ColorRect/Celebration/LogoutButton",
+    "retry_button": $"../TileMap/CanvasLayer/ColorRect/Celebration/RetryButton",
     "adapt_prom": $"../AdaptRom"
 }
 
@@ -170,12 +170,15 @@ func _on_global_timer_close_pressed() -> void:
     _start_game_without_timer()
     _setup_game_logging()
 
+
 func _start_game_with_timer(time: int) -> void:
     countdown_active = true
     countdown_time = time
     _ui_nodes.countdown_display.visible = true
+    _ui_nodes.countdown_display.set_time(time)  # Initialize the timer
     GlobalTimerManager.start_countdown_with_time(time)
-
+    
+    
 func _start_game_without_timer() -> void:
     countdown_active = false
     GlobalTimer.start_timer()
@@ -186,8 +189,9 @@ func _on_global_countdown_finished() -> void:
 
 func _on_global_countdown_updated(time_left: int) -> void:
     countdown_time = time_left
-    _ui_nodes.countdown_display.text = GlobalTimerManager.get_countdown_display_text()
-
+    _ui_nodes.countdown_display.update_time(time_left)
+    
+    
 func _physics_process(delta):
     if not game_started:
         return
@@ -334,18 +338,19 @@ func _on_PauseButton_pressed() -> void:
 func _pause_game() -> void:
     GlobalTimer.pause_timer()
     GlobalTimerManager.pause_countdown()
-    _panel_nodes.pause_button.text = "Resume"
     game_started = false
     pause_state = 0
 
 func _resume_game() -> void:
     GlobalTimer.resume_timer()
     GlobalTimerManager.resume_countdown()
-    _panel_nodes.pause_button.text = "Pause"
     game_started = true
     pause_state = 1
 
 func show_game_over() -> void:
+    var top_score = ScoreManager.get_top_score(patient_id, game_name)
+    _ui_nodes.highscore_go.text = str(top_score)
+    _ui_nodes.score_go.text = "SCORE  - " + str(score)
     GlobalTimer.stop_timer()
     game_started = false
     save_final_score_to_log(score)
@@ -447,6 +452,7 @@ func _on_logout_pressed() -> void:
         get_tree().change_scene_to_file("res://Main_screen/Scenes/3d_games.tscn")
 
 func _on_adapt_rom_toggled(toggled_on: bool) -> void:
+    _pause_game()
     if toggled_on and not GlobalSignals.assessment_done:
         _button_nodes.adapt_prom.button_pressed = false
         _ui_nodes.warning_window.visible = true
@@ -488,4 +494,5 @@ func _on_do_asses_pressed() -> void:
     get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
 
 func _on_close_asses_pressed() -> void:
+    _resume_game()
     _ui_nodes.warning_window.visible = false

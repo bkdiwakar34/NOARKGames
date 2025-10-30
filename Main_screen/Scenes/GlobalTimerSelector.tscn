@@ -1,9 +1,9 @@
-[gd_scene load_steps=5 format=3 ]
+[gd_scene load_steps=5 format=3 uid="uid://cltnsqb4v0dgu"]
 
-[ext_resource type="Script"  path="res://Main_screen/Scripts/global_timer_selector.gd" id="1_vkyq6"]
-[ext_resource type="Texture2D"  path="res://Assets/scoring_system/Background.png" id="2_nrxdl"]
-[ext_resource type="FontFile" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_vkyq6"]
-[ext_resource type="Theme"  path="res://Assets/Background/button_icon.tres" id="3_nrxdl"]
+[ext_resource type="Script" uid="uid://b7e158umrl6gk" path="res://Main_screen/Scripts/global_timer_selector.gd" id="1_vkyq6"]
+[ext_resource type="Texture2D" uid="uid://chno14wxf5g0e" path="res://Assets/scoring_system/Background.png" id="2_nrxdl"]
+[ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_vkyq6"]
+[ext_resource type="Theme" uid="uid://87b78edsvd4i" path="res://Assets/Background/button_icon.tres" id="3_nrxdl"]
 
 [node name="Control" type="Control"]
 layout_mode = 3
@@ -15,6 +15,7 @@ offset_bottom = 630.0
 script = ExtResource("1_vkyq6")
 
 [node name="Window" type="Window" parent="."]
+oversampling_override = 1.0
 initial_position = 2
 size = Vector2i(350, 270)
 
@@ -42,10 +43,10 @@ offset_top = 95.0
 offset_right = 138.0
 offset_bottom = 145.0
 theme = ExtResource("3_nrxdl")
-theme_override_colors/icon_hover_pressed_color = Color(0, 0, 0, 1)
-theme_override_colors/icon_pressed_color = Color(0, 0, 0, 1)
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_colors/font_pressed_color = Color(0, 0, 0, 1)
+theme_override_colors/icon_pressed_color = Color(0, 0, 0, 1)
+theme_override_colors/icon_hover_pressed_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_vkyq6")
 text = "-5"
 

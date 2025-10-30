@@ -76,7 +76,8 @@ func _update_paddle_position() -> void:
 
 func _on_adapt_prom_toggled(toggled_on: bool) -> void:
     if toggled_on and not GlobalSignals.assessment_done:
-        game._button_nodes.adapt_prom.button_pressed = false
-        game._button_nodes.warning_window.visible = true
+        game.pause_game()
+        game.button_nodes.adapt_prom.button_pressed = false
+        game.button_nodes.warning_window.visible = true
         return
     adapt_toggle = toggled_on

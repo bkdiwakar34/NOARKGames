@@ -53,9 +53,9 @@ var game_log_file
 @onready var ball: Node = $"../Ball"
 
 # UI Labels
-@onready var countdown_display: Label = $"../CanvasLayer/CountdownLabel"
+@onready var countdown_display: Control = $"../CircularTimer"
 @onready var top_score_label: Label = $"../CanvasLayer/TextureRect/TopScoreLabel"
-@onready var warning_window: Window = $"../Window"
+@onready var warning_window: TextureRect= $"../Warning"
 @onready var adapt_prom: Button = $"../AdaptRom"
 
 # UI Panels
@@ -128,10 +128,13 @@ func _on_global_timer_close_pressed() -> void:
     _start_game_without_timer()
     _setup_game_logging()
 
+    
 func _start_game_with_timer(time: int) -> void:
     countdown_active = true
     countdown_time = time
     countdown_display.visible = true
+    countdown_display.set_time(time)  
+    GlobalTimerManager.start_countdown_with_time(time)
     ball.game_started = true
     GlobalTimerManager.start_countdown_with_time(time)
     
@@ -146,7 +149,7 @@ func _on_global_countdown_finished() -> void:
 
 func _on_global_countdown_updated(time_left: int) -> void:
     countdown_time = time_left
-    countdown_display.text = GlobalTimerManager.get_countdown_display_text()
+    countdown_display.update_time(time_left)
 
 func _physics_process(delta: float) -> void:
     if not game_started:
@@ -215,14 +218,12 @@ func _pause_game() -> void:
     GlobalTimer.pause_timer()
     GlobalTimerManager.pause_countdown()
     ball.game_started = false
-    _game_buttons.pause.text = "Resume"
     pause_state = 0
 
 func _resume_game() -> void:
     GlobalTimer.resume_timer()
     GlobalTimerManager.resume_countdown()
     ball.game_started = true
-    _game_buttons.pause.text = "Pause"
     pause_state = 1
 
 func show_game_over() -> void:
@@ -285,6 +286,7 @@ func _on_logout_pressed() -> void:
 
 func _on_adapt_rom_toggled(toggled_on: bool) -> void:
     if toggled_on and not GlobalSignals.assessment_done:
+        _pause_game()
         adapt_prom.button_pressed = false
         warning_window.visible = true
         return
@@ -294,4 +296,5 @@ func _on_do_asses_pressed() -> void:
     get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
 
 func _on_close_asses_pressed() -> void:
+    _resume_game()
     warning_window.visible = false

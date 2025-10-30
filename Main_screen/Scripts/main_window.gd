@@ -2,8 +2,8 @@ extends Button
 
 @onready var patient_name: String = ""
 @onready var hosp_id: String = ""
-@onready var popup = $"../Window"
-@onready var patient_notfound = $"../patient_notfound"
+@onready var popup = $"../Warning"
+@onready var patient_notfound = $"../Patient_notfound"
 @onready var loading_dialog: AcceptDialog = AcceptDialog.new()
 var registry_scene = preload("res://Main_screen/Scenes/registry.tscn")
 var endgame : bool
