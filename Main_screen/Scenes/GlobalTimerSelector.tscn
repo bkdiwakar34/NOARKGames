@@ -15,6 +15,7 @@ offset_bottom = 630.0
 script = ExtResource("1_vkyq6")
 
 [node name="Window" type="Window" parent="."]
+canvas_item_default_texture_filter = 0
 oversampling_override = 1.0
 initial_position = 2
 size = Vector2i(350, 270)

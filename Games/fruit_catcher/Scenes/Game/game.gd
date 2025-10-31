@@ -43,16 +43,17 @@ var log_timer: Timer
 @onready var score_sound: AudioStreamPlayer2D = $ScoreSound
 @onready var sound: AudioStreamPlayer = $Sound
 @onready var score_label: Label = $Fruit_Score/ScoreLabel
-@onready var game_over_label: ColorRect = $ColorRect
+@onready var game_over_label: TextureRect =$Gameover
 @onready var countdown_display: Control = $CircularTimer
-@onready var top_score_label: Label = $TopScoreLabel
+@onready var top_score_label: Label = $Highscore_/TopScoreLabel
+@onready var pause_screen: TextureRect = $Paused
+@onready var current_score: Label = $Gameover/CurrentScore
+@onready var high_score: Label = $Gameover/HighScore
 
 # Button nodes (cleaned up)
 @onready var button_nodes = {
     "pause_button": $PauseButton,
     "retry_button": $ColorRect/GameOverLabel/RetryButton,
-    "close_assess": $Window/HBoxContainer/close_asses,
-    "do_assess": $Window/HBoxContainer/do_asses,
     "adapt_prom": $AdaptProm,
     "warning_window": $Warning
 }
@@ -109,7 +110,7 @@ func initialize_game_state() -> void:
 func update_top_score_display() -> void:
     var patient_id = GlobalSignals.current_patient_id if GlobalSignals.current_patient_id else "default"
     var top_score = ScoreManager.get_top_score(patient_id, GAME_NAME)
-    top_score_label.text = "Top Score: " + str(top_score)
+    top_score_label.text = str(top_score)
     print("Top score for patient ", patient_id, " in ", GAME_NAME, ": ", top_score)
 
 # Global Timer Callbacks
@@ -262,11 +263,8 @@ func show_score_popup(gem_position: Vector2) -> void:
     tween.tween_callback(popup_label.queue_free)
 
 func _on_pause_button_pressed() -> void:
-    if is_paused:
-        resume_game()
-    else:
-        pause_game()
-    is_paused = !is_paused
+    pause_screen.show()
+    pause_game()
 
 func pause_game() -> void:
     GlobalTimer.pause_timer()
@@ -318,6 +316,10 @@ func end_game() -> void:
     # Show game over UI
     GlobalTimer.stop_timer()
     game_over_label.visible = true
+    current_score.text = "CURRENT SCORE - " + str(_score)
+    var patient_id = GlobalSignals.current_patient_id if GlobalSignals.current_patient_id else "default"
+    var top_score = ScoreManager.get_top_score(patient_id, GAME_NAME)
+    high_score.text = str(top_score)
 
 func save_final_score() -> void:
     print("Saving final score: ", _score)
@@ -424,3 +426,17 @@ func _on_gameover_logout_pressed() -> void:
     GlobalTimerManager.remove_timer_selector_from_game()
     get_tree().paused = false
     get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+
+
+func _on_home_pressed() -> void:
+   get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+
+
+func _on_resume_pressed() -> void:
+  pause_screen.hide()
+  resume_game()
+
+
+func _on_restart_pressed() -> void:
+   pause_screen.hide()
+   _on_retry_button_pressed()

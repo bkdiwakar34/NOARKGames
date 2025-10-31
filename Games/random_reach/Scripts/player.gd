@@ -19,14 +19,15 @@ const LOG_INTERVAL = 0.02
     "score_board":$"../Apple_Score/Score",
     "time_display": $"../Panel/TimeSeconds",
     "countdown_display": $"../CircularTimer",
-    "game_over_label": $"../TileMap/CanvasLayer/ColorRect/Celebration/GameOverLabel",
+    "game_over_label": $"../TileMap/CanvasLayer/ColorRect",
     "top_score_label":$"../TileMap/CanvasLayer/TopScore/TopScoreLabel",
     "color_rect": $"../TileMap/CanvasLayer/ColorRect",
     "warning_window":$"../Assesment",
     "bg_2d":$"../2DRR",
     "bg_3d":$"../3DRR",
-    "score_go":$"../TileMap/CanvasLayer/ColorRect/Score",
-    "highscore_go":$"../TileMap/CanvasLayer/ColorRect/High_logo/Highscore"
+    "current_score":$"../TileMap/CanvasLayer/ColorRect/CurrentScore",
+    "highscore":$"../TileMap/CanvasLayer/ColorRect/Highscore",
+    "Paused":$"../Paused"
 }
 
 @onready var _timer_nodes = {
@@ -38,8 +39,6 @@ const LOG_INTERVAL = 0.02
 }
 
 @onready var _button_nodes = {
-    "logout_button": $"../TileMap/CanvasLayer/ColorRect/Celebration/LogoutButton",
-    "retry_button": $"../TileMap/CanvasLayer/ColorRect/Celebration/RetryButton",
     "adapt_prom": $"../AdaptRom"
 }
 
@@ -56,7 +55,6 @@ var zero_offset = Vector2.ZERO
 var game_over = false
 var countdown_time = 0
 var countdown_active = false
-var is_paused = false
 var pause_state = 1
 var adapt_toggle: bool = false
 var is_3d_mode := false
@@ -136,7 +134,7 @@ func _setup_timers() -> void:
 
 func _setup_ui() -> void:
     _ui_nodes.color_rect.visible = false
-    _ui_nodes.game_over_label.visible = false
+    _ui_nodes.game_over_label.hide()
     _ui_nodes.game_over_label.hide()
     _ui_nodes.color_rect.hide()
     _ui_nodes.countdown_display.visible = false
@@ -144,8 +142,6 @@ func _setup_ui() -> void:
 
 func _connect_signals() -> void:
     # Button connections
-    _button_nodes.logout_button.pressed.connect(_on_logout_button_pressed)
-    _button_nodes.retry_button.pressed.connect(_on_retry_button_pressed)
     _panel_nodes.pause_button.pressed.connect(_on_PauseButton_pressed)
 
 func _initialize_game_state() -> void:
@@ -327,15 +323,12 @@ func _update_timer_display() -> void:
         else:
             if status != "captured":
                 status = "missed"
-
+    
 func _on_PauseButton_pressed() -> void:
-    if is_paused:
-        _resume_game()
-    else:
-        _pause_game()
-    is_paused = !is_paused
+   _pause_game()
 
 func _pause_game() -> void:
+    _ui_nodes.Paused.show()
     GlobalTimer.pause_timer()
     GlobalTimerManager.pause_countdown()
     game_started = false
@@ -349,12 +342,12 @@ func _resume_game() -> void:
 
 func show_game_over() -> void:
     var top_score = ScoreManager.get_top_score(patient_id, game_name)
-    _ui_nodes.highscore_go.text = str(top_score)
-    _ui_nodes.score_go.text = "SCORE  - " + str(score)
+    _ui_nodes.highscore.text = str(top_score)
+    _ui_nodes.current_score.text = "CURRENT SCORE - " + str(score)
     GlobalTimer.stop_timer()
     game_started = false
     save_final_score_to_log(score)
-    _ui_nodes.game_over_label.visible = true
+    _ui_nodes.game_over_label.show()
     _ui_nodes.color_rect.visible = true
 
 func _on_logout_button_pressed() -> void:
@@ -496,3 +489,15 @@ func _on_do_asses_pressed() -> void:
 func _on_close_asses_pressed() -> void:
     _resume_game()
     _ui_nodes.warning_window.visible = false
+
+
+func _on_home_pressed() -> void:
+   get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+
+func _on_resume_pressed() -> void:
+    _ui_nodes.Paused.hide()
+    _resume_game()
+
+func _on_restart_pressed() -> void:
+  _ui_nodes.Paused.hide()
+  _on_retry_button_pressed()

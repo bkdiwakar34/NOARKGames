@@ -8,7 +8,7 @@ var computer_score = 0
 var status = ""
 @export var INITIAL_BALL_SPEED = 15
 @export var speed_multiplier = 1
-@onready var player_score_label = $"../PlayerScore"
+@onready var player_score_label = $"../Ball_Image/PlayerScore"
 @onready var computer_score_label: Label = $"../ComputerScore"
 @onready var top_score_label = $"../CanvasLayer/TextureRect/TopScoreLabel"
 
@@ -94,7 +94,7 @@ func _physics_process(delta):
                 velocity = velocity.bounce(collision.get_normal()) * speed_multiplier
         
         # Update score labels
-        player_score_label.text = "Player " + str(player_score)
+        player_score_label.text = str(player_score)
         computer_score_label.text = "Computer " + str(computer_score)
         
     else:

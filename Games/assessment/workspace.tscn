@@ -1,9 +1,11 @@
-[gd_scene load_steps=6 format=3 uid="uid://de5dqa6t5f6py"]
+[gd_scene load_steps=8 format=3 uid="uid://de5dqa6t5f6py"]
 
 [ext_resource type="Script" uid="uid://cedht487nl6p3" path="res://Games/assessment/workspace.gd" id="1_vm5ig"]
 [ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="2_3kta3"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="2_gocbw"]
 [ext_resource type="Texture2D" uid="uid://dy8y607pjywvd" path="res://Assets/pp_assets/arts/Ball.png" id="3_jae2j"]
+[ext_resource type="Texture2D" uid="uid://eb6kjjg3k8gm" path="res://Assets/Background/Old Paper Scroll PNG Transparent Background, Free Download #26394 - FreeIconsPNG.png" id="5_kvyf2"]
+[ext_resource type="Theme" uid="uid://5bq88mc6do74" path="res://Assets/Background/okay.tres" id="6_3hogt"]
 
 [sub_resource type="CanvasTexture" id="CanvasTexture_lqn52"]
 
@@ -253,22 +255,26 @@ theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_gocbw")
 text = "0.0"
 
-[node name="SaveDialogBox" type="Window" parent="."]
-auto_translate_mode = 1
-oversampling_override = 1.0
-initial_position = 2
-size = Vector2i(400, 152)
+[node name="SaveDialogBox" type="TextureRect" parent="."]
 visible = false
+offset_left = 375.0
+offset_top = 195.0
+offset_right = 747.0
+offset_bottom = 389.0
+texture = ExtResource("5_kvyf2")
+expand_mode = 1
 
 [node name="Label" type="Label" parent="SaveDialogBox"]
+layout_mode = 1
 anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
-offset_left = -198.0
-offset_top = 16.0
-offset_right = 200.0
-offset_bottom = 133.0
+offset_left = -123.0
+offset_top = 62.0
+offset_right = 122.0
+offset_bottom = 109.0
 grow_horizontal = 2
+theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
 theme_override_fonts/font = ExtResource("2_gocbw")
 text = "The Active and Training workspaces are saved."
 horizontal_alignment = 1
@@ -276,19 +282,21 @@ vertical_alignment = 1
 autowrap_mode = 1
 
 [node name="close_button" type="Button" parent="SaveDialogBox"]
+layout_mode = 1
 anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -30.0
-offset_top = -38.0
-offset_right = 20.0
-offset_bottom = -7.0
+offset_left = -43.0
+offset_top = -78.0
+offset_right = 36.0
+offset_bottom = -41.0
 grow_horizontal = 2
 grow_vertical = 0
+theme = ExtResource("6_3hogt")
 theme_override_fonts/font = ExtResource("2_gocbw")
-text = "Close"
+text = "  Close  "
 
 [connection signal="mouse_entered" from="StopButton" to="." method="_on_stop_button_mouse_entered"]
 [connection signal="mouse_exited" from="StopButton" to="." method="_on_stop_button_mouse_exited"]

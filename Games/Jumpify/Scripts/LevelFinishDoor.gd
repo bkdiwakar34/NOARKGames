@@ -6,7 +6,7 @@ extends Area2D
 
 # Load next level scene when player collide with level finish door.
 func _on_body_entered(body):
-	if body.is_in_group("Player2D"):
-		get_tree().call_group("Player2D", "death_tween") # death_tween is called here just to give the feeling of player entering the door.
-		AudioManager.level_complete_sfx.play()
-		SceneTransition.load_scene(next_scene)
+    if body.is_in_group("Player2D"):
+        get_tree().call_group("Player2D", "death_tween") # death_tween is called here just to give the feeling of player entering the door.
+        AudioManager.level_complete_sfx.play()
+        SceneTransition.load_scene(next_scene)

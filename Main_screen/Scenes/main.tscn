@@ -284,9 +284,9 @@ text = "EXIT"
 [node name="HospID" type="LineEdit" parent="TextureRect"]
 layout_mode = 0
 offset_left = 409.0
-offset_top = 215.0
+offset_top = 212.0
 offset_right = 774.0
-offset_bottom = 294.0
+offset_bottom = 291.0
 theme = ExtResource("3_oasjk")
 theme_override_fonts/font = ExtResource("4_oasjk")
 placeholder_text = "Hospital id:"
@@ -315,10 +315,10 @@ script = ExtResource("3_54gjo")
 
 [node name="Logo" type="TextureRect" parent="."]
 layout_mode = 0
-offset_left = 371.0
-offset_top = 22.0
-offset_right = 803.0
-offset_bottom = 215.0
+offset_left = 364.0
+offset_top = -12.0
+offset_right = 796.0
+offset_bottom = 181.0
 texture = ExtResource("1_54gjo")
 expand_mode = 1
 
@@ -408,6 +408,17 @@ theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
 theme_override_fonts/font = ExtResource("7_jo38k")
 theme_override_font_sizes/font_size = 20
 text = "Patient not found !"
+
+[node name="Label" type="Label" parent="."]
+layout_mode = 0
+offset_left = 387.0
+offset_top = 169.0
+offset_right = 804.0
+offset_bottom = 199.0
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9764706)
+theme_override_fonts/font = ExtResource("4_oasjk")
+theme_override_font_sizes/font_size = 22
+text = "DEPARTMENT OF BIOENGINEERING"
 
 [connection signal="pressed" from="TextureRect/ExitButton" to="PlayButton" method="_on_exit_button_pressed"]
 [connection signal="text_submitted" from="TextureRect/HospID" to="PlayButton" method="_on_hosp_id_text_submitted"]
