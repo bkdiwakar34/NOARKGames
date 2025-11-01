@@ -295,6 +295,7 @@ func resume_game() -> void:
     status = "playing"
 
 func end_game() -> void:
+    MusicManager.play_sound_effect("game_over")
     print("Game Over! Final Score: ", _score)
     game_active = false
     game_started = false

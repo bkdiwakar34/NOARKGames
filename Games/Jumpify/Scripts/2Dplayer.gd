@@ -330,6 +330,7 @@ func on_coin_collected() -> void:
 
 # Game Over and Restart
 func show_game_over() -> void:
+    MusicManager.play_sound_effect("game_over")
     ui_nodes.current_score.text = "CURRENT SCORE - " + str(score)
     var top_score = ScoreManager.get_top_score(patient_id, game_name)
     ui_nodes.high_score.text = str(top_score)

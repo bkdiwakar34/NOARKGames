@@ -235,6 +235,7 @@ func _resume_game() -> void:
     pause_state = 1
 
 func show_game_over() -> void:
+    MusicManager.play_sound_effect("game_over")
     _ui_nodes.current_score.text = "CURRENT SCORE - " + str(score)
     var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, game_name)
     _ui_nodes.high_score.text = str(top_score)

@@ -26,7 +26,8 @@ var sound_effects := {
     "scored": "res://Assets/Sound_effects/scored.mp3",
     "hit": "res://Assets/Sound_effects/lightning-strike-386161_kP0k5uhh.mp3",
     "ball": "res://Assets/Sound_effects/hit.mp3",
-    "fruit_missed": "res://Assets/Sound_effects/car-crash-sound-376882.mp3"
+    "fruit_missed": "res://Assets/Sound_effects/car-crash-sound-376882.mp3",
+    "game_over":"res://Assets/Sound_effects/level-up-04-243762.mp3"
 }
 
 
@@ -34,7 +35,8 @@ var sfx_volumes := {
     "scored": 0.0,
     "hit": 0.0,
     "ball": 10.0,
-    "fruit_missed": 0.0
+    "fruit_missed": 0.0,
+    "game_over":0.0
 }
                 
 func _ready():
