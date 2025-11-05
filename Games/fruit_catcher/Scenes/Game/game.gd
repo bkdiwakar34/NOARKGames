@@ -42,19 +42,20 @@ var log_timer: Timer
 @onready var paddle: Area2D = $Paddle
 @onready var score_sound: AudioStreamPlayer2D = $ScoreSound
 @onready var sound: AudioStreamPlayer = $Sound
-@onready var score_label: Label = $ScoreLabel
-@onready var game_over_label: ColorRect = $ColorRect
-@onready var countdown_display: Label = $CountdownLabel
-@onready var top_score_label: Label = $TopScoreLabel
+@onready var score_label: Label = $Fruit_Score/ScoreLabel
+@onready var game_over_label: TextureRect =$Gameover
+@onready var countdown_display: Control = $CircularTimer
+@onready var top_score_label: Label = $Highscore_/TopScoreLabel
+@onready var pause_screen: TextureRect = $Paused
+@onready var current_score: Label = $Gameover/CurrentScore
+@onready var high_score: Label = $Gameover/HighScore
 
 # Button nodes (cleaned up)
 @onready var button_nodes = {
     "pause_button": $PauseButton,
     "retry_button": $ColorRect/GameOverLabel/RetryButton,
-    "close_assess": $Window/HBoxContainer/close_asses,
-    "do_assess": $Window/HBoxContainer/do_asses,
     "adapt_prom": $AdaptProm,
-    "warning_window": $Window
+    "warning_window": $Warning
 }
 
 func _init() -> void:
@@ -109,7 +110,7 @@ func initialize_game_state() -> void:
 func update_top_score_display() -> void:
     var patient_id = GlobalSignals.current_patient_id if GlobalSignals.current_patient_id else "default"
     var top_score = ScoreManager.get_top_score(patient_id, GAME_NAME)
-    top_score_label.text = "Top Score: " + str(top_score)
+    top_score_label.text = str(top_score)
     print("Top score for patient ", patient_id, " in ", GAME_NAME, ": ", top_score)
 
 # Global Timer Callbacks
@@ -124,10 +125,12 @@ func _on_global_timer_close_pressed() -> void:
     countdown_display.hide()
     start_game_without_timer()
 
+      
 func start_game_with_timer(time: int) -> void:
     countdown_active = true
     countdown_time = time
     countdown_display.visible = true
+    countdown_display.set_time(time)  
     GlobalTimerManager.start_countdown_with_time(time)
     start_game()
     
@@ -142,7 +145,7 @@ func _on_global_countdown_finished() -> void:
 
 func _on_global_countdown_updated(time_left: int) -> void:
     countdown_time = time_left
-    countdown_display.text = GlobalTimerManager.get_countdown_display_text()
+    countdown_display.update_time(time_left)
 
 func _process(delta: float) -> void:
     if not game_started:
@@ -223,7 +226,7 @@ func _on_paddle_area_entered(area: Area2D) -> void:
         show_score_popup(area.position)
         
         _score += 1
-        score_label.text = "SCORE: " + str(_score)
+        score_label.text = str(_score)
         print("Gem caught! Score: ", _score)
         status = "gem_caught"
         
@@ -260,11 +263,8 @@ func show_score_popup(gem_position: Vector2) -> void:
     tween.tween_callback(popup_label.queue_free)
 
 func _on_pause_button_pressed() -> void:
-    if is_paused:
-        resume_game()
-    else:
-        pause_game()
-    is_paused = !is_paused
+    pause_screen.show()
+    pause_game()
 
 func pause_game() -> void:
     GlobalTimer.pause_timer()
@@ -276,7 +276,7 @@ func pause_game() -> void:
     if current_gem and is_instance_valid(current_gem):
         current_gem.set_process(false)
     
-    button_nodes.pause_button.text = "Resume"
+    
     pause_state = 0
     status = "paused"
 
@@ -290,11 +290,12 @@ func resume_game() -> void:
     if current_gem and is_instance_valid(current_gem):
         current_gem.set_process(true)
     
-    button_nodes.pause_button.text = "Pause"
+
     pause_state = 1
     status = "playing"
 
 func end_game() -> void:
+    MusicManager.play_sound_effect("game_over")
     print("Game Over! Final Score: ", _score)
     game_active = false
     game_started = false
@@ -316,6 +317,10 @@ func end_game() -> void:
     # Show game over UI
     GlobalTimer.stop_timer()
     game_over_label.visible = true
+    current_score.text = "CURRENT SCORE - " + str(_score)
+    var patient_id = GlobalSignals.current_patient_id if GlobalSignals.current_patient_id else "default"
+    var top_score = ScoreManager.get_top_score(patient_id, GAME_NAME)
+    high_score.text = str(top_score)
 
 func save_final_score() -> void:
     print("Saving final score: ", _score)
@@ -408,6 +413,7 @@ func _on_do_asses_pressed() -> void:
     get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
 
 func _on_close_asses_pressed() -> void:
+    resume_game()
     button_nodes.warning_window.visible = false
 
 func _notification(what: int) -> void:
@@ -421,3 +427,17 @@ func _on_gameover_logout_pressed() -> void:
     GlobalTimerManager.remove_timer_selector_from_game()
     get_tree().paused = false
     get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+
+
+func _on_home_pressed() -> void:
+   get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+
+
+func _on_resume_pressed() -> void:
+  pause_screen.hide()
+  resume_game()
+
+
+func _on_restart_pressed() -> void:
+   pause_screen.hide()
+   _on_retry_button_pressed()

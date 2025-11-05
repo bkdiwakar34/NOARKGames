@@ -54,6 +54,7 @@ func anim_change():
     
 func _on_adapt_rom_toggled(toggled_on: bool) -> void:
      if toggled_on and not GlobalSignals.assessment_done:
+        flappy._pause_game()
         flappy._button_nodes.adapt_prom.button_pressed = false
         flappy._ui_nodes.warning_window.visible = true
         return

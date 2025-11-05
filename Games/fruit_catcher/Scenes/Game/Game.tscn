@@ -1,18 +1,29 @@
-[gd_scene load_steps=7 format=3 uid="uid://dv4g57qgdfg33"]
+[gd_scene load_steps=18 format=3 uid="uid://dv4g57qgdfg33"]
 
 [ext_resource type="Script" uid="uid://chlk3v2pashqe" path="res://Games/fruit_catcher/Scenes/Game/game.gd" id="1_ln2h6"]
 [ext_resource type="PackedScene" uid="uid://dqhaj3fx1ah8r" path="res://Games/fruit_catcher/Scenes/Paddle/paddle.tscn" id="2_gwu2e"]
 [ext_resource type="Texture2D" uid="uid://d04q4wfpcqudk" path="res://Games/fruit_catcher/assets/vecteezy_deep-forest-scene-with-trees-cartoon-background-vector_9577135-1.jpg" id="2_y3kpf"]
-[ext_resource type="Theme" uid="uid://dlaxw02mgrmhn" path="res://Assets/Background/button.tres" id="5_do66n"]
+[ext_resource type="Theme" uid="uid://bf6gf87lm0nvu" path="res://Assets/Background/pause.tres" id="5_jldhi"]
 [ext_resource type="AudioStream" uid="uid://nunov43qa4b0" path="res://Games/fruit_catcher/assets/spell1_0.wav" id="5_y3kpf"]
+[ext_resource type="Theme" uid="uid://ddok1g1ht0h30" path="res://Assets/Background/home.tres" id="7_d32l4"]
 [ext_resource type="FontFile" uid="uid://b54m8n1w2ouio" path="res://Assets/Fonts/Bungee-Regular.ttf" id="8_5dybn"]
+[ext_resource type="Script" uid="uid://cfo038yr17bco" path="res://Games/fruit_catcher/Scenes/Game/circular_timer.gd" id="8_d32l4"]
+[ext_resource type="Texture2D" uid="uid://cjst4wuxx2vdc" path="res://Assets/Background/fruit_score-2.png" id="9_d32l4"]
+[ext_resource type="Texture2D" uid="uid://eb6kjjg3k8gm" path="res://Assets/Background/Old Paper Scroll PNG Transparent Background, Free Download #26394 - FreeIconsPNG.png" id="10_ldqwr"]
+[ext_resource type="FontFile" uid="uid://bjokva26isnj4" path="res://Assets/Fonts/Oswald-SemiBold.ttf" id="11_e8avm"]
+[ext_resource type="Theme" uid="uid://5bq88mc6do74" path="res://Assets/Background/okay.tres" id="12_wj1oy"]
+[ext_resource type="Texture2D" uid="uid://cu0rlyq4vp23l" path="res://Assets/Background/png-clipart-trophy-computer-icons-prize-gold-medal-prize-game-medal.png" id="13_e8avm"]
+[ext_resource type="Texture2D" uid="uid://dh0bv7ifofiw3" path="res://Assets/Background/ui pause.png" id="14_q4xww"]
+[ext_resource type="Theme" uid="uid://c0tjwkhuqbs60" path="res://Assets/Background/resume.tres" id="15_xnuwd"]
+[ext_resource type="Theme" uid="uid://bhefon1yrfgw7" path="res://Assets/Background/retry.tres" id="16_8h3co"]
+[ext_resource type="Texture2D" uid="uid://cff41ggt33x23" path="res://Assets/Background/gameover-2.png" id="17_xnuwd"]
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_ln2h6")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-position = Vector2(575, 374.5)
-scale = Vector2(0.598958, 0.659894)
+position = Vector2(575, 371.99997)
+scale = Vector2(0.598958, 0.6643109)
 texture = ExtResource("2_y3kpf")
 
 [node name="Paddle" parent="." instance=ExtResource("2_gwu2e")]
@@ -30,39 +41,24 @@ stream = ExtResource("5_y3kpf")
 volume_db = 8.466
 
 [node name="PauseButton" type="Button" parent="."]
-offset_left = 966.0
-offset_top = 58.0
-offset_right = 1071.0
-offset_bottom = 104.0
-theme = ExtResource("5_do66n")
+offset_left = 1045.0
+offset_top = 566.0
+offset_right = 1139.0
+offset_bottom = 648.0
+theme = ExtResource("5_jldhi")
 theme_override_fonts/font = ExtResource("8_5dybn")
-text = "Pause"
-
-[node name="ScoreLabel" type="Label" parent="."]
-offset_left = 5.0
-offset_top = 10.0
-offset_right = 178.0
-offset_bottom = 74.0
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_constants/shadow_offset_x = 2
-theme_override_constants/shadow_offset_y = 2
-theme_override_constants/outline_size = 5
-theme_override_constants/shadow_outline_size = 3
-theme_override_fonts/font = ExtResource("8_5dybn")
-theme_override_font_sizes/font_size = 30
 
 [node name="Button" type="Button" parent="."]
-offset_left = 12.0
-offset_top = 581.0
-offset_right = 165.0
-offset_bottom = 638.0
-theme = ExtResource("5_do66n")
+offset_left = -4.0
+offset_top = 573.0
+offset_right = 90.0
+offset_bottom = 655.0
+theme = ExtResource("7_d32l4")
 theme_override_fonts/font = ExtResource("8_5dybn")
 theme_override_font_sizes/font_size = 20
-text = "⬅️ logout
-"
 
 [node name="CountdownLabel" type="Label" parent="."]
+visible = false
 offset_left = 435.0
 offset_top = 50.0
 offset_right = 638.0
@@ -74,90 +70,6 @@ text = "Time left:"
 
 [node name="CountdownTimer" type="Timer" parent="."]
 
-[node name="TopScoreLabel" type="Label" parent="."]
-offset_left = 928.0
-offset_top = 13.0
-offset_right = 1096.0
-offset_bottom = 49.0
-theme_override_colors/font_color = Color(0.9813, 0.98219, 0.986231, 1)
-theme_override_fonts/font = ExtResource("8_5dybn")
-theme_override_font_sizes/font_size = 25
-text = "HIGH SCORE"
-horizontal_alignment = 1
-
-[node name="Window" type="Window" parent="."]
-auto_translate_mode = 1
-initial_position = 2
-size = Vector2i(610, 200)
-visible = false
-
-[node name="Label" type="Label" parent="Window"]
-offset_left = -1.0
-offset_top = 17.0
-offset_right = 615.0
-offset_bottom = 149.0
-theme_override_fonts/font = ExtResource("8_5dybn")
-text = "ASSESSMENT NOT COMPLETED YET!
-PLEASE COMPLETE THE ASSESSMENT BEFORE ENABLING ADAPTIVE ROM."
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="HBoxContainer" type="HBoxContainer" parent="Window"]
-offset_left = 176.0
-offset_top = 128.0
-offset_right = 404.0
-offset_bottom = 168.0
-theme_override_constants/separation = 20
-
-[node name="do_asses" type="Button" parent="Window/HBoxContainer"]
-layout_mode = 2
-theme_override_fonts/font = ExtResource("8_5dybn")
-text = "Do assessment"
-
-[node name="close_asses" type="Button" parent="Window/HBoxContainer"]
-layout_mode = 2
-theme_override_fonts/font = ExtResource("8_5dybn")
-text = "Close"
-
-[node name="ColorRect" type="ColorRect" parent="."]
-visible = false
-offset_top = -23.0
-offset_right = 1159.0
-offset_bottom = 680.0
-color = Color(0, 0, 0, 0.784314)
-
-[node name="GameOverLabel" type="Label" parent="ColorRect"]
-layout_mode = 0
-offset_left = 427.0
-offset_top = 277.0
-offset_right = 689.0
-offset_bottom = 338.0
-theme_override_colors/font_color = Color(0.894922, 0.894922, 0.894922, 1)
-theme_override_colors/font_shadow_color = Color(0.546968, 0.546968, 0.546968, 1)
-theme_override_fonts/font = ExtResource("8_5dybn")
-theme_override_font_sizes/font_size = 40
-text = "GAME OVER!"
-
-[node name="GameoverLogout" type="Button" parent="ColorRect/GameOverLabel"]
-layout_mode = 0
-offset_left = -39.0
-offset_top = 91.0
-offset_right = 103.0
-offset_bottom = 133.0
-theme_override_fonts/font = ExtResource("8_5dybn")
-theme_override_font_sizes/font_size = 25
-text = "⬅️ Logout"
-
-[node name="RetryButton" type="Button" parent="ColorRect/GameOverLabel"]
-layout_mode = 0
-offset_left = 136.0
-offset_top = 91.0
-offset_right = 272.0
-offset_bottom = 137.0
-theme_override_fonts/font = ExtResource("8_5dybn")
-theme_override_font_sizes/font_size = 25
-text = "🔄:Retry"
-
 [node name="AdaptProm" type="CheckButton" parent="."]
 offset_left = 471.0
 offset_top = 14.0
@@ -166,13 +78,220 @@ offset_bottom = 44.0
 theme_override_fonts/font = ExtResource("8_5dybn")
 text = "Adapt prom"
 
+[node name="CircularTimer" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 1061.0
+offset_top = -9.0
+offset_right = 1101.0
+offset_bottom = 31.0
+script = ExtResource("8_d32l4")
+
+[node name="Fruit_Score" type="TextureRect" parent="."]
+offset_right = 161.0
+offset_bottom = 95.0
+texture = ExtResource("9_d32l4")
+expand_mode = 1
+
+[node name="ScoreLabel" type="Label" parent="Fruit_Score"]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 39.0
+offset_right = 127.0
+offset_bottom = 73.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_constants/outline_size = 5
+theme_override_constants/shadow_outline_size = 3
+theme_override_fonts/font = ExtResource("8_5dybn")
+theme_override_font_sizes/font_size = 25
+
+[node name="Warning" type="TextureRect" parent="."]
+visible = false
+offset_left = 261.0
+offset_top = 186.0
+offset_right = 817.0
+offset_bottom = 446.0
+texture = ExtResource("10_ldqwr")
+expand_mode = 1
+
+[node name="Label" type="Label" parent="Warning"]
+layout_mode = 0
+offset_left = 43.0
+offset_top = 48.0
+offset_right = 514.0
+offset_bottom = 166.0
+theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
+theme_override_fonts/font = ExtResource("11_e8avm")
+text = "ASSESSMENT NOT COMPLETED YET!
+PLEASE COMPLETE THE ASSESSMENT BEFORE ENABLING ADAPTIVE ROM."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Warning"]
+layout_mode = 0
+offset_left = 144.0
+offset_top = 158.0
+offset_right = 385.0
+offset_bottom = 198.0
+theme_override_constants/separation = 20
+
+[node name="do_asses" type="Button" parent="Warning/HBoxContainer"]
+layout_mode = 2
+theme = ExtResource("12_wj1oy")
+theme_override_fonts/font = ExtResource("8_5dybn")
+text = "  Do assessment  "
+
+[node name="close_asses" type="Button" parent="Warning/HBoxContainer"]
+layout_mode = 2
+theme = ExtResource("12_wj1oy")
+theme_override_fonts/font = ExtResource("8_5dybn")
+text = "  Close  "
+
+[node name="Highscore_" type="TextureRect" parent="."]
+offset_left = 127.0
+offset_top = -15.0
+offset_right = 253.0
+offset_bottom = 105.0
+texture = ExtResource("13_e8avm")
+expand_mode = 1
+
+[node name="TopScoreLabel" type="Label" parent="Highscore_"]
+layout_mode = 0
+offset_left = 48.0
+offset_top = 48.0
+offset_right = 79.0
+offset_bottom = 73.0
+theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
+theme_override_fonts/font = ExtResource("8_5dybn")
+theme_override_font_sizes/font_size = 18
+horizontal_alignment = 1
+
+[node name="Paused" type="TextureRect" parent="."]
+visible = false
+offset_left = 245.46243
+offset_top = -15.776294
+offset_right = 845.1492
+offset_bottom = 631.05176
+texture = ExtResource("14_q4xww")
+expand_mode = 1
+
+[node name="Home" type="Button" parent="Paused"]
+layout_mode = 0
+offset_left = 345.24393
+offset_top = 275.0991
+offset_right = 456.9992
+offset_bottom = 367.78482
+theme = ExtResource("7_d32l4")
+
+[node name="Resume" type="Button" parent="Paused"]
+layout_mode = 0
+offset_left = 229.49745
+offset_top = 265.23892
+offset_right = 351.23083
+offset_bottom = 371.72888
+theme = ExtResource("15_xnuwd")
+
+[node name="Restart" type="Button" parent="Paused"]
+layout_mode = 0
+offset_left = 127.7203
+offset_top = 275.09912
+offset_right = 232.49088
+offset_bottom = 364.82678
+theme = ExtResource("16_8h3co")
+
+[node name="Label" type="Label" parent="Paused"]
+layout_mode = 0
+offset_left = 225.50615
+offset_top = 178.46931
+offset_right = 372.50616
+offset_bottom = 225.46931
+theme_override_colors/font_color = Color(0.8964504, 0.00038711564, 0.09287324, 1)
+theme_override_fonts/font = ExtResource("8_5dybn")
+theme_override_font_sizes/font_size = 35
+text = "Paused"
+
+[node name="Gameover" type="TextureRect" parent="."]
+visible = false
+offset_left = 321.0
+offset_top = 7.0
+offset_right = 813.0
+offset_bottom = 606.0
+texture = ExtResource("17_xnuwd")
+expand_mode = 1
+
+[node name="TimeupLabel" type="Label" parent="Gameover"]
+layout_mode = 0
+offset_left = 149.0
+offset_top = 154.0
+offset_right = 349.0
+offset_bottom = 196.0
+theme_override_colors/font_color = Color(0.78039217, 0.13333334, 0.1254902, 1)
+theme_override_colors/font_shadow_color = Color(0.914062, 0.914062, 0.914062, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_fonts/font = ExtResource("8_5dybn")
+theme_override_font_sizes/font_size = 30
+text = "TIME'S UP !"
+
+[node name="LogoutButton" type="Button" parent="Gameover"]
+layout_mode = 0
+offset_left = 99.0
+offset_top = 363.0
+offset_right = 240.0
+offset_bottom = 485.0
+theme = ExtResource("7_d32l4")
+theme_override_fonts/font = ExtResource("8_5dybn")
+
+[node name="RetryButton" type="Button" parent="Gameover"]
+layout_mode = 0
+offset_left = 250.0
+offset_top = 364.0
+offset_right = 391.0
+offset_bottom = 486.0
+theme = ExtResource("16_8h3co")
+theme_override_fonts/font = ExtResource("8_5dybn")
+
+[node name="Trophy" type="TextureRect" parent="Gameover"]
+layout_mode = 0
+offset_left = 137.0
+offset_top = 214.0
+offset_right = 344.0
+offset_bottom = 397.0
+texture = ExtResource("13_e8avm")
+expand_mode = 1
+
+[node name="CurrentScore" type="Label" parent="Gameover"]
+layout_mode = 0
+offset_left = 110.0
+offset_top = 216.0
+offset_right = 379.0
+offset_bottom = 250.0
+theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
+theme_override_fonts/font = ExtResource("8_5dybn")
+theme_override_font_sizes/font_size = 25
+
+[node name="HighScore" type="Label" parent="Gameover"]
+layout_mode = 0
+offset_left = 223.0
+offset_top = 289.0
+offset_right = 257.0
+offset_bottom = 323.0
+theme_override_colors/font_color = Color(0.1764706, 0.1764706, 0.1764706, 1)
+theme_override_fonts/font = ExtResource("8_5dybn")
+theme_override_font_sizes/font_size = 25
+text = "24"
+
 [connection signal="area_entered" from="Paddle" to="." method="_on_paddle_area_entered"]
 [connection signal="timeout" from="SpawnTimer" to="." method="_on_timer_timeout"]
 [connection signal="pressed" from="PauseButton" to="." method="_on_pause_button_pressed"]
 [connection signal="pressed" from="Button" to="." method="_on_logout_button_pressed"]
 [connection signal="timeout" from="CountdownTimer" to="." method="_on_countdown_timer_timeout"]
-[connection signal="pressed" from="Window/HBoxContainer/do_asses" to="." method="_on_do_asses_pressed"]
-[connection signal="pressed" from="Window/HBoxContainer/close_asses" to="." method="_on_close_asses_pressed"]
-[connection signal="pressed" from="ColorRect/GameOverLabel/GameoverLogout" to="." method="_on_gameover_logout_pressed"]
-[connection signal="pressed" from="ColorRect/GameOverLabel/RetryButton" to="." method="_on_retry_button_pressed"]
 [connection signal="toggled" from="AdaptProm" to="Paddle" method="_on_adapt_prom_toggled"]
+[connection signal="pressed" from="Warning/HBoxContainer/do_asses" to="." method="_on_do_asses_pressed"]
+[connection signal="pressed" from="Warning/HBoxContainer/close_asses" to="." method="_on_close_asses_pressed"]
+[connection signal="pressed" from="Paused/Home" to="." method="_on_home_pressed"]
+[connection signal="pressed" from="Paused/Resume" to="." method="_on_resume_pressed"]
+[connection signal="pressed" from="Paused/Restart" to="." method="_on_restart_pressed"]
+[connection signal="pressed" from="Gameover/LogoutButton" to="." method="_on_gameover_logout_pressed"]
+[connection signal="pressed" from="Gameover/RetryButton" to="." method="_on_retry_button_pressed"]

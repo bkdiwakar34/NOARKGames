@@ -11,7 +11,6 @@ var fruit_catcher = preload("res://Games/fruit_catcher/Scenes/Game/Game.tscn")
 var assessment_scene = preload("res://Games/assessment/workspace.tscn")
 var results_scene = preload("res://Results/scenes/user_progress.tscn")
 var main_menu_scene = preload("res://Main_screen/Scenes/main.tscn")
-
 var endgame : bool
 
 

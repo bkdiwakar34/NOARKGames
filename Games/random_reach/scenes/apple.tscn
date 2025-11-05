@@ -83,7 +83,7 @@ texture_filter = 1
 position = Vector2(-1.7881393e-06, -0.9999991)
 scale = Vector2(0.081521735, 0.07880435)
 sprite_frames = SubResource("SpriteFrames_ymlfl")
-animation = &"apple"
+animation = &"collected"
 autoplay = "apple"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]

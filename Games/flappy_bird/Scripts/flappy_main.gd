@@ -28,24 +28,25 @@ signal game_started
 }
 
 @onready var _ui_nodes = {
-    "score_label": $Score,
+    "score_label": $Pilot_score/Score,
     "missed_label": $CanvasLayer/MissedLabel,
-    "countdown_display": $CanvasLayer/CountdownTimer/CountdownLabel,
-    "game_over_label": $CanvasLayer/GameOverLabel,
-    "top_score_label": $CanvasLayer/TextureRect/TopScoreLabel,
-    "warning_window": $Window
+    "countdown_display": $CircularTimer,
+    "game_over_label": $Gameover,
+    "top_score_label":$CanvasLayer/TextureRect/TopScoreLabel,
+    "warning_window": $Warning,
+    "Paused_screen":$Paused,
+    "current_score":$Gameover/CurrentScore,
+    "high_score":$Gameover/HighScore
 }
 
 @onready var _panel_nodes = {
     "game_over_scene": $GameOver,
-    "pause_button": $CanvasLayer/PauseButton
+    "pause_button":$CanvasLayer/PauseButton
 }
 
 @onready var _button_nodes = {
-    "logout_button": $CanvasLayer/GameOverLabel/LogoutButton,
-    "retry_button": $CanvasLayer/GameOverLabel/RetryButton,
-    "do_assess": $Window/HBoxContainer/do_asses,
-    "close_assess": $Window/HBoxContainer/close_asses,
+    #"logout_button": $CanvasLayer/GameOverLabel/LogoutButton,
+    #"retry_button": $CanvasLayer/GameOverLabel/RetryButton,
     "adapt_prom": $AdaptRom
 }
 
@@ -70,7 +71,6 @@ var health: int = INITIAL_HEALTH
 # Timer and countdown variables
 var countdown_time: int = 0
 var countdown_active: bool = false
-var is_paused: bool = false
 var is_3d_mode := false
 var pause_state: int = 1
 
@@ -148,9 +148,7 @@ func _setup_ui() -> void:
     _update_top_score_display()
 
 func _connect_signals() -> void:
-    # Button connections
-    _button_nodes.logout_button.pressed.connect(_on_logout_button_pressed)
-    _button_nodes.retry_button.pressed.connect(_on_retry_button_pressed)
+   
     _panel_nodes.pause_button.pressed.connect(_on_PauseButton_pressed)
 
     # Timer connections
@@ -186,11 +184,14 @@ func _on_global_timer_close_pressed() -> void:
     _ui_nodes.countdown_display.hide()
     _start_game_without_timer()
     _setup_game_logging()
-
+    
+    
 func _start_game_with_timer(time: int) -> void:
     countdown_active = true
     countdown_time = time
     _ui_nodes.countdown_display.visible = true
+    _ui_nodes.countdown_display.set_time(time)  
+    GlobalTimerManager.start_countdown_with_time(time)
     GlobalTimerManager.start_countdown_with_time(time)
     _timer_nodes.pipe_timer.start()
 
@@ -205,7 +206,7 @@ func _on_global_countdown_finished() -> void:
 
 func _on_global_countdown_updated(time_left: int) -> void:
     countdown_time = time_left
-    _ui_nodes.countdown_display.text = GlobalTimerManager.get_countdown_display_text()
+    _ui_nodes.countdown_display.update_time(time_left)
 
 func _setup_game_logging() -> void:
     _timer_nodes.log_timer.timeout.connect(_on_log_timer_timeout)
@@ -218,27 +219,26 @@ func _setup_game_logging() -> void:
     ]))
 
 func _on_PauseButton_pressed() -> void:
-    if is_paused:
-        _resume_game()
-    else:
-        _pause_game()
-    is_paused = !is_paused
+   _ui_nodes.Paused_screen.show()
+   _pause_game()
 
 func _pause_game() -> void:
     GlobalTimer.pause_timer()
     GlobalTimerManager.pause_countdown()
     game_running = false
-    _panel_nodes.pause_button.text = "Resume"
     pause_state = 0
 
 func _resume_game() -> void:
     GlobalTimer.resume_timer()
     GlobalTimerManager.resume_countdown()
     game_running = true
-    _panel_nodes.pause_button.text = "Pause"
     pause_state = 1
 
 func show_game_over() -> void:
+    MusicManager.play_sound_effect("game_over")
+    _ui_nodes.current_score.text = "CURRENT SCORE - " + str(score)
+    var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, game_name)
+    _ui_nodes.high_score.text = str(top_score)
     print("Game Over!")
     game_running = false
     save_final_score_to_log(score)
@@ -495,4 +495,19 @@ func _on_do_asses_pressed() -> void:
     get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
 
 func _on_close_asses_pressed() -> void:
+    _resume_game()
     _ui_nodes.warning_window.visible = false
+
+
+func _on_home_pressed() -> void:
+   get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+
+
+func _on_resume_pressed() -> void:
+  _ui_nodes.Paused_screen.hide()
+  _resume_game()
+
+
+func _on_restart_pressed() -> void:
+    _ui_nodes.Paused_screen.hide()
+    _on_retry_button_pressed()

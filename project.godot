@@ -34,6 +34,7 @@ SceneTransition="*res://Games/Jumpify/Scenes/Managers/SceneTransition.tscn"
 GlobalTimerManager="*res://Main_screen/Scripts/GlobalTimerManager.gd"
 MusicManager="*res://Main_screen/Scripts/MusicManager.gd"
 ButtonSoundManager="*res://Main_screen/Scripts/btn_sound_manager.gd"
+CircularTimer="*res://Games/random_reach/scenes/circular_timer.gd"
 
 [display]
 

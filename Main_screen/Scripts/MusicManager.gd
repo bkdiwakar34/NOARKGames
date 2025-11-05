@@ -1,9 +1,8 @@
 extends Node
-
 var bgm_player: AudioStreamPlayer
 var sfx_player: AudioStreamPlayer
 
-# Dictionary for cleaner music management
+
 var music_tracks := {
     "main": "res://Assets/Sound_effects/Clash-of-Clans-Main-Theme.mp3",
     "pp_bgm": "res://Assets/Sound_effects/smooth-midieval-332632-2.mp3",
@@ -13,24 +12,41 @@ var music_tracks := {
     "jy_bgm": "res://Assets/Sound_effects/Kids-2.mp3"
 }
 
+
+var bgm_volumes := {
+    "main": 0.0,
+    "pp_bgm": -10.0,
+    "rr_bgm": -15.0,
+    "ft_bgm": -15.0,
+    "fc_bgm": -10.0,
+    "jy_bgm": 0.0
+}
+
 var sound_effects := {
     "scored": "res://Assets/Sound_effects/scored.mp3",
     "hit": "res://Assets/Sound_effects/lightning-strike-386161_kP0k5uhh.mp3",
     "ball": "res://Assets/Sound_effects/hit.mp3",
-    "fruit_missed":"res://Assets/Sound_effects/car-crash-sound-376882.mp3"
-    }
-                
+    "fruit_missed": "res://Assets/Sound_effects/car-crash-sound-376882.mp3",
+    "game_over":"res://Assets/Sound_effects/level-up-04-243762.mp3"
+}
 
+
+var sfx_volumes := {
+    "scored": 0.0,
+    "hit": 0.0,
+    "ball": 10.0,
+    "fruit_missed": 0.0,
+    "game_over":0.0
+}
+                
 func _ready():
     # Create background music player
     bgm_player = AudioStreamPlayer.new()
     add_child(bgm_player)
-    bgm_player.volume_db = 0
     
     # Create sound effect player
     sfx_player = AudioStreamPlayer.new()
     add_child(sfx_player)
-    sfx_player.volume_db = 0
     
     play_music("main")
 
@@ -54,11 +70,8 @@ func play_music(track_name: String):
     if bgm_player.stream != stream:
         bgm_player.stop()
         bgm_player.stream = stream
+        bgm_player.volume_db = bgm_volumes[track_name]  # Set individual volume
         bgm_player.play()
-    if track_name == "rr_bgm" and "ft_bgm":
-        bgm_player.volume_db = -10
-    else:
-        bgm_player.volume_db = 0
 
 func play_sound_effect(effect_name: String):
     if not sound_effects.has(effect_name):
@@ -71,9 +84,8 @@ func play_sound_effect(effect_name: String):
         return
     
     sfx_player.stream = stream
+    sfx_player.volume_db = sfx_volumes[effect_name] 
     sfx_player.play()
-    if effect_name == "ball":
-        sfx_player.volume_db = 10
 
 func stop_music():
     bgm_player.stop()

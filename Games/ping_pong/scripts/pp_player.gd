@@ -13,7 +13,6 @@ var centre: Vector2 = Vector2(120, 200)
 
 # Game state
 var game_started: bool = false
-var is_paused: bool = false
 var pause_state: int = 1
 var score: int = 0
 
@@ -53,19 +52,20 @@ var game_log_file
 @onready var ball: Node = $"../Ball"
 
 # UI Labels
-@onready var countdown_display: Label = $"../CanvasLayer/CountdownLabel"
+@onready var countdown_display: Control = $"../CircularTimer"
 @onready var top_score_label: Label = $"../CanvasLayer/TextureRect/TopScoreLabel"
-@onready var warning_window: Window = $"../Window"
+@onready var warning_window: TextureRect= $"../Warning"
 @onready var adapt_prom: Button = $"../AdaptRom"
+@onready var paused_screen: TextureRect = $"../Paused"
+@onready var current_score: Label =$"../Gameover/CurrentScore"
+@onready var high_score: Label =$"../Gameover/HighScore"
 
 # UI Panels
-@onready var game_over_label: Control = $"../CanvasLayer/GameOverLabel"
+@onready var game_over_label: TextureRect = $"../Gameover"
 
 # UI Buttons - organized by functionality
 @onready var _game_buttons: Dictionary = {
     "pause": $"../CanvasLayer/PauseButton",
-    "logout": $"../CanvasLayer/GameOverLabel/LogoutButton",
-    "retry": $"../CanvasLayer/GameOverLabel/RetryButton"
 }
 
 func _ready() -> void:
@@ -99,12 +99,9 @@ func _setup_ui() -> void:
 func _connect_signals() -> void:
     # Game control buttons
     _game_buttons.pause.pressed.connect(_on_pause_button_pressed)
-    _game_buttons.logout.pressed.connect(_on_logout_button_pressed)
-    _game_buttons.retry.pressed.connect(_on_retry_button_pressed)
 
 func _initialize_game_state() -> void:
     game_started = false  # Changed to false - wait for timer selection
-    is_paused = false
     pause_state = 1
 
 func _setup_logging() -> void:
@@ -128,10 +125,13 @@ func _on_global_timer_close_pressed() -> void:
     _start_game_without_timer()
     _setup_game_logging()
 
+    
 func _start_game_with_timer(time: int) -> void:
     countdown_active = true
     countdown_time = time
     countdown_display.visible = true
+    countdown_display.set_time(time)  
+    GlobalTimerManager.start_countdown_with_time(time)
     ball.game_started = true
     GlobalTimerManager.start_countdown_with_time(time)
     
@@ -146,7 +146,7 @@ func _on_global_countdown_finished() -> void:
 
 func _on_global_countdown_updated(time_left: int) -> void:
     countdown_time = time_left
-    countdown_display.text = GlobalTimerManager.get_countdown_display_text()
+    countdown_display.update_time(time_left)
 
 func _physics_process(delta: float) -> void:
     if not game_started:
@@ -205,28 +205,26 @@ func _calculate_player_game_position() -> void:
         game_z = (position.y - GlobalScript.Y_SCREEN_OFFSET) / (GlobalScript.PLAYER_POS_SCALER_Y * GlobalSignals.global_scalar_y)
 
 func _on_pause_button_pressed() -> void:
-    if is_paused:
-        _resume_game()
-    else:
-        _pause_game()
-    is_paused = !is_paused
+    paused_screen.show()
+    _pause_game()
 
 func _pause_game() -> void:
     GlobalTimer.pause_timer()
     GlobalTimerManager.pause_countdown()
     ball.game_started = false
-    _game_buttons.pause.text = "Resume"
     pause_state = 0
 
 func _resume_game() -> void:
     GlobalTimer.resume_timer()
     GlobalTimerManager.resume_countdown()
     ball.game_started = true
-    _game_buttons.pause.text = "Pause"
     pause_state = 1
 
 func show_game_over() -> void:
-    print("Game Over!")
+    MusicManager.play_sound_effect("game_over")
+    current_score.text = "CURRENT SCORE - " + str(score)
+    var top_score = ScoreManager.get_top_score(GlobalSignals.current_patient_id, GAME_NAME)
+    high_score.text = str(top_score)
     ball.game_started = false
     save_final_score_to_log(GlobalScript.current_score)
     GlobalTimer.stop_timer()
@@ -285,6 +283,7 @@ func _on_logout_pressed() -> void:
 
 func _on_adapt_rom_toggled(toggled_on: bool) -> void:
     if toggled_on and not GlobalSignals.assessment_done:
+        _pause_game()
         adapt_prom.button_pressed = false
         warning_window.visible = true
         return
@@ -294,4 +293,17 @@ func _on_do_asses_pressed() -> void:
     get_tree().change_scene_to_file("res://Games/assessment/workspace.tscn")
 
 func _on_close_asses_pressed() -> void:
+    _resume_game()
     warning_window.visible = false
+
+
+func _on_home_pressed() -> void:
+    get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+
+func _on_resume_pressed() -> void:
+    paused_screen.hide()
+    _resume_game()
+
+func _on_restart_pressed() -> void:
+    paused_screen.hide()
+    get_tree().reload_current_scene()

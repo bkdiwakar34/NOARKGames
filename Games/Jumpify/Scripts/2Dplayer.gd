@@ -26,7 +26,6 @@ var score: int = 0
 var game_over = false
 var countdown_time = 0
 var countdown_active = false
-var is_paused = false
 var pause_state = 1
 var adapt_toggle: bool = false
 
@@ -60,11 +59,14 @@ var log_timer := Timer.new()
 # Node references - UI elements (cleaned up)
 @onready var ui_nodes = {
     "score_board": %ScoreLabel,
-    "countdown_display": $"../UserInterface/GameUI/CountdownLabel",
-    "game_over_label": $"../UserInterface/GameUI/ColorRect/GameOverLabel",
-    "top_score_label": $"../UserInterface/GameUI/TopScoreLabel",
-    "color_rect": $"../UserInterface/GameUI/ColorRect",
-    "warning_window": $"../UserInterface/GameUI/Window"
+    "countdown_display":$"../CircularTimer",
+    "game_over_label": $"../Gameover",
+    "top_score_label": $"../HighScore/TopScoreLabel",
+    "color_rect": $"../Gameover",
+    "warning_window": $"../Warning",
+    "paused_screen":$"../Paused",
+    "current_score":$"../Gameover/CurrentScore",
+    "high_score":$"../Gameover/HighScore"
 }
 
 @onready var panel_nodes = {
@@ -72,10 +74,6 @@ var log_timer := Timer.new()
 }
 
 @onready var button_nodes = {
-    "logout_button": $"../UserInterface/GameUI/ColorRect/GameOverLabel/LogoutButton",
-    "retry_button": $"../UserInterface/GameUI/ColorRect/GameOverLabel/RetryButton",
-    "close_assess": $"../UserInterface/GameUI/Window/HBoxContainer/close_asses",
-    "do_assess": $"../UserInterface/GameUI/Window/HBoxContainer/do_asses",
     "adapt_prom": $"../UserInterface/GameUI/AdaptProm"
 }
 
@@ -115,7 +113,7 @@ func setup_timers() -> void:
     add_child(log_timer)
 
 func setup_ui() -> void:
-    ui_nodes.color_rect.visible = false
+    ui_nodes.color_rect.show()
     ui_nodes.game_over_label.visible = false
     ui_nodes.game_over_label.hide()
     ui_nodes.color_rect.hide()
@@ -139,7 +137,7 @@ func initialize_game_state() -> void:
 
 func update_top_score_display() -> void:
     var top_score = ScoreManager.get_top_score(patient_id, game_name)
-    ui_nodes.top_score_label.text = "HIGH SCORE: " + str(top_score)
+    ui_nodes.top_score_label.text = str(top_score)
 
 # Global Timer Callbacks
 func _on_global_timer_play_pressed(time: int) -> void:
@@ -154,11 +152,12 @@ func _on_global_timer_close_pressed() -> void:
     ui_nodes.countdown_display.hide()
     start_game_without_timer()
     setup_game_logging()
-
+    
 func start_game_with_timer(time: int) -> void:
     countdown_active = true
     countdown_time = time
     ui_nodes.countdown_display.visible = true
+    ui_nodes.countdown_display.set_time(time)  
     GlobalTimerManager.start_countdown_with_time(time)
     
 func start_game_without_timer() -> void:
@@ -169,12 +168,13 @@ func start_game_without_timer() -> void:
 func _on_global_countdown_finished() -> void:
     show_game_over()
 
+    
 func _on_global_countdown_updated(time_left: int) -> void:
     countdown_time = time_left
-    ui_nodes.countdown_display.text = GlobalTimerManager.get_countdown_display_text()
+    ui_nodes.countdown_display.update_time(time_left)
 
 func _physics_process(delta):
-    if game_started and not is_paused:
+    if game_started:
         update_player_position()
         update_animations()
         update_status_based_on_timers(delta)
@@ -291,11 +291,8 @@ func update_animations():
 
 # Pause System
 func _on_pause_button_pressed() -> void:
-    if is_paused:
-        resume_game()
-    else:
-        pause_game()
-    is_paused = !is_paused
+    ui_nodes.paused_screen.show()
+    pause_game()
 
 func pause_game() -> void:
     GlobalTimer.pause_timer()
@@ -333,11 +330,15 @@ func on_coin_collected() -> void:
 
 # Game Over and Restart
 func show_game_over() -> void:
+    MusicManager.play_sound_effect("game_over")
+    ui_nodes.current_score.text = "CURRENT SCORE - " + str(score)
+    var top_score = ScoreManager.get_top_score(patient_id, game_name)
+    ui_nodes.high_score.text = str(top_score)
     GlobalTimer.stop_timer()
     game_started = false
     save_final_score_to_log(score)
     ui_nodes.game_over_label.visible = true
-    ui_nodes.color_rect.visible = true
+    ui_nodes.color_rect.show()
 
 func _on_logout_button_pressed() -> void:
     MusicManager.play_music("main")
@@ -347,7 +348,7 @@ func _on_logout_button_pressed() -> void:
 
 func _on_retry_button_pressed() -> void:
     get_tree().paused = false
-    ui_nodes.color_rect.visible = false
+    ui_nodes.color_rect.hide()
     ui_nodes.game_over_label.hide()
     
     # Reset game state
@@ -416,3 +417,18 @@ func _notification(what) -> void:
         if game_log_file:
             game_log_file.close()
         GlobalTimerManager.remove_timer_selector_from_game()
+
+
+func _on_home_pressed() -> void:
+   get_tree().change_scene_to_file("res://Main_screen/Scenes/select_game.tscn")
+
+
+func _on_resume_pressed() -> void:
+    ui_nodes.paused_screen.hide()
+    resume_game()
+
+
+func _on_restart_pressed() -> void:
+    ui_nodes.paused_screen.hide()
+    _on_retry_button_pressed()
+    
