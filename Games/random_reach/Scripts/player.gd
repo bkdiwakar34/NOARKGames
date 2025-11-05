@@ -447,6 +447,8 @@ func _on_logout_pressed() -> void:
 
 func _on_adapt_rom_toggled(toggled_on: bool) -> void:
     _pause_game()
+    _ui_nodes.Paused.show()
+    _ui_nodes.Paused.hide()
     if toggled_on and not GlobalSignals.assessment_done:
         _button_nodes.adapt_prom.button_pressed = false
         _ui_nodes.warning_window.visible = true
