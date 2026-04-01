@@ -91,3 +91,4 @@ crash_handler_*.txt
 *.md5
 *.ctex
 imported
+pyscripts/
