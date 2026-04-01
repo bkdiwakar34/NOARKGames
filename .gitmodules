@@ -1,0 +1,3 @@
+[submodule "gdble_src"]
+	path = gdble_src
+	url = https://github.com/SujithChristopher/gdble.git
