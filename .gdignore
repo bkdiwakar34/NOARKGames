@@ -36,6 +36,7 @@ docs/
 __pycache__/
 *.py[cod]
 venv/
+.venv/
 env/
 
 # Node.js

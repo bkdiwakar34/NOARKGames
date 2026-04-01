@@ -1,0 +1,10 @@
+[project]
+name = "noarkgames"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "opencv-contrib-python>=4.13.0.92",
+    "scipy>=1.17.1",
+]
