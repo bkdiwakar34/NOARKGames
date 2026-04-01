@@ -31,8 +31,12 @@ var clamp_vector_x = Vector2(MIN_X, MIN_Y)
 var clamp_vector_y = Vector2(MAX_X, MAX_Y)
 
 # ── transport settings ────────────────────────────────────────────────────────
-var stream_type: String = "udp"          # "udp" or "ble"
+var stream_type: String = "udp"
 var ble_device_name: String = "NOARK_Tracker"
+
+const BLE_SERVICE_UUID  = "4e4f4152-4b00-0000-0000-000000000000"
+const BLE_POSITION_UUID = "4e4f4152-4b01-0000-0000-000000000000"
+const BLE_COMMAND_UUID  = "4e4f4152-4b02-0000-0000-000000000000"
 
 # ── UDP ───────────────────────────────────────────────────────────────────────
 @onready var udp: PacketPeerUDP = PacketPeerUDP.new()
@@ -41,14 +45,9 @@ var ble_device_name: String = "NOARK_Tracker"
 @onready var thread_path_check = Thread.new()
 
 # ── BLE ───────────────────────────────────────────────────────────────────────
-const BLE_SERVICE_UUID  = "4e4f4152-4b00-0000-0000-000000000000"
-const BLE_POSITION_UUID = "4e4f4152-4b01-0000-0000-000000000000"
-const BLE_COMMAND_UUID  = "4e4f4152-4b02-0000-0000-000000000000"
-
-var bluetooth_manager = null
-var ble_device = null
-var _ble_connecting: bool = false   # guard against duplicate connect_device() calls
-var _ble_connect_timer: SceneTreeTimer = null
+var _ble_manager = null   # GdBLE instance
+var ble_device = null     # BLEDevice instance (set from scan thread)
+var thread_ble = Thread.new()
 
 # ── connection state ──────────────────────────────────────────────────────────
 @onready var connected: bool = false
@@ -127,7 +126,7 @@ func _ready() -> void:
 		"ble":
 			_init_ble()
 		_:
-			push_error("Unknown stream_type '%s' in settings.json — falling back to UDP" % stream_type)
+			push_error("Unknown stream_type '%s' — falling back to UDP" % stream_type)
 			stream_type = "udp"
 			_init_udp()
 
@@ -160,141 +159,41 @@ func handle_udp_packet() -> void:
 # ── BLE ───────────────────────────────────────────────────────────────────────
 
 func _init_ble() -> void:
-	print("[BLE] Initialising BluetoothManager…")
-	bluetooth_manager = BluetoothManager.new()
-	add_child(bluetooth_manager)
-	bluetooth_manager.adapter_initialized.connect(_on_ble_adapter_initialized)
-	bluetooth_manager.device_discovered.connect(_on_ble_device_discovered)
-	bluetooth_manager.device_updated.connect(_on_ble_device_updated)
-	bluetooth_manager.scan_started.connect(_on_ble_scan_started)
-	bluetooth_manager.scan_stopped.connect(_on_ble_scan_stopped)
-	bluetooth_manager.device_connecting.connect(_on_ble_device_connecting)
-	bluetooth_manager.device_connected.connect(_on_ble_device_connected)
-	bluetooth_manager.device_disconnected.connect(_on_ble_device_disconnected)
-	bluetooth_manager.error_occurred.connect(_on_ble_error)
-	bluetooth_manager.initialize()
-
-
-func _on_ble_adapter_initialized(success: bool, error: String) -> void:
-	if success:
-		print("[BLE] Adapter ready — starting scan (target: '%s')…" % ble_device_name)
-		bluetooth_manager.start_scan(15)
-	else:
-		push_error("[BLE] Adapter failed to initialise: " + error)
-
-
-func _on_ble_scan_started() -> void:
-	print("[BLE] Scan started")
-
-
-func _on_ble_scan_stopped() -> void:
-	print("[BLE] Scan stopped")
-	# Only restart if we are not already mid-connection and not fully connected
-	if ble_device == null and not _ble_connecting and not disconnected:
-		print("[BLE] Target not found — restarting scan in 1 s…")
-		await get_tree().create_timer(1.0).timeout
-		bluetooth_manager.start_scan(15)
-
-
-func _on_ble_device_discovered(device_info: Dictionary) -> void:
-	var name    = device_info.get("name", "<no name>")
-	var address = device_info.get("address", "??:??:??:??:??:??")
-	var rssi    = device_info.get("rssi", 0)
-	print("[BLE] Discovered: '%s'  addr=%s  rssi=%d" % [name, address, rssi])
-	# Guard: only attempt one connection at a time
-	if name == ble_device_name and not _ble_connecting and ble_device == null:
-		_ble_connecting = true
-		bluetooth_manager.stop_scan()
-		print("[BLE] Target found! Connecting to %s…" % address)
-		bluetooth_manager.connect_device(address)
-		# Safety timeout: if device_connected never fires within 10 s, reset and re-scan
-		_ble_connect_timer = get_tree().create_timer(10.0)
-		_ble_connect_timer.timeout.connect(_on_ble_connect_timeout)
-
-
-func _on_ble_device_updated(device_info: Dictionary) -> void:
-	# Fires on RSSI updates — only log if it's our target to avoid spam
-	if device_info.get("name", "") == ble_device_name:
-		print("[BLE] Target updated: rssi=%d" % device_info.get("rssi", 0))
-
-
-func _on_ble_device_connecting(address: String) -> void:
-	print("[BLE] Connecting to %s…" % address)
-
-
-func _on_ble_device_connected(address: String) -> void:
-	print("[BLE] Connected to %s — discovering services…" % address)
-	_ble_connecting = false
-	_ble_connect_timer = null   # cancel timeout
-	ble_device = bluetooth_manager.get_device(address)
-	ble_device.services_discovered.connect(_on_ble_services_discovered)
-	ble_device.characteristic_notified.connect(_on_ble_position_notified)
-	ble_device.connection_failed.connect(_on_ble_connection_failed)
-	ble_device.operation_failed.connect(_on_ble_operation_failed)
-	ble_device.discover_services()
-
-
-func _on_ble_connect_timeout() -> void:
-	if _ble_connecting and ble_device == null:
-		push_error("[BLE] Connection timed out — resetting and re-scanning…")
-		_ble_connecting = false
-		_ble_connect_timer = null
-		bluetooth_manager.start_scan(15)
-
-
-func _on_ble_connection_failed(error: String) -> void:
-	push_error("[BLE] Connection failed: " + error)
-	_ble_connecting = false
-	_ble_connect_timer = null
-	ble_device = null
-	await get_tree().create_timer(2.0).timeout
-	bluetooth_manager.start_scan(15)
-
-
-func _on_ble_device_disconnected(address: String) -> void:
-	print("[BLE] Disconnected from %s" % address)
-	_ble_connecting = false
-	_ble_connect_timer = null
-	connected  = false
-	ble_device = null
-	if not disconnected:
-		print("[BLE] Reconnecting in 2 s…")
-		await get_tree().create_timer(2.0).timeout
-		bluetooth_manager.start_scan(15)
-
-
-func _on_ble_services_discovered(services: Array) -> void:
-	print("[BLE] %d service(s) discovered:" % services.size())
-	for svc in services:
-		print("       service  %s" % svc.get("uuid", "?"))
-		var chars = svc.get("characteristics", [])
-		for ch in chars:
-			print("         char  %s  props=%s" % [ch.get("uuid", "?"), str(ch.get("properties", {}))])
-	if ble_device == null:
+	_ble_manager = GdBLE.new()
+	if not _ble_manager.initialize():
+		push_error("[BLE] Failed to initialise Bluetooth adapter")
 		return
-	print("[BLE] Subscribing to position characteristic…")
-	ble_device.subscribe_characteristic(BLE_SERVICE_UUID, BLE_POSITION_UUID)
-	connected = true
-	print("[BLE] Ready — receiving position data")
+	print("[BLE] Adapter ready — launching scan thread…")
+	thread_ble.start(_ble_scan_and_connect)
 
 
-func _on_ble_operation_failed(operation: String, error: String) -> void:
-	push_error("[BLE] Operation '%s' failed: %s" % [operation, error])
+func _ble_scan_and_connect() -> void:
+	# Runs on a background thread — scan() blocks for the full duration.
+	while not disconnected and not endgame:
+		print("[BLE] Scanning 10 s for '%s'…" % ble_device_name)
+		var devices: Array = _ble_manager.scan(10.0)
+		print("[BLE] Scan complete — %d device(s) found" % devices.size())
+
+		for device in devices:
+			var dname = device.get_name()
+			var daddr = device.get_address()
+			print("[BLE] Device: '%s'  addr=%s" % [dname, daddr])
+
+			if dname == ble_device_name:
+				print("[BLE] Connecting to %s…" % daddr)
+				if device.connect():
+					ble_device = device
+					device.subscribe(BLE_SERVICE_UUID, BLE_POSITION_UUID)
+					connected = true
+					print("[BLE] Connected and subscribed — streaming position data")
+					return   # stay connected; _process polls from here
+				else:
+					print("[BLE] Connection failed — will rescan")
+
+		print("[BLE] Target not found — rescanning…")
 
 
-func _on_ble_error(error_message: String) -> void:
-	push_error("[BLE] Adapter error: " + error_message)
-
-
-func _on_ble_position_notified(char_uuid: String, data: PackedByteArray) -> void:
-	if char_uuid.to_lower() != BLE_POSITION_UUID.to_lower():
-		return
-	var floats = data.to_float32_array()
-	if floats.size() >= 4:
-		_apply_position_packet(floats)
-
-
-# ── shared position update ────────────────────────────────────────────────────
+# ── shared position update (UDP + BLE) ───────────────────────────────────────
 
 func _apply_position_packet(my_floats: PackedFloat32Array) -> void:
 	_incoming_message = my_floats[0]
@@ -328,10 +227,8 @@ func _send_transport_message(message: String) -> void:
 			udp.put_packet(message.to_utf8_buffer())
 		"ble":
 			if ble_device != null and ble_device.is_connected():
-				ble_device.write_characteristic(
-					BLE_SERVICE_UUID, BLE_COMMAND_UUID,
-					message.to_utf8_buffer(), false
-				)
+				ble_device.write(BLE_SERVICE_UUID, BLE_COMMAND_UUID,
+								 message.to_utf8_buffer())
 
 
 func _on_heartbeat_tick() -> void:
@@ -341,6 +238,22 @@ func _on_heartbeat_tick() -> void:
 # ── process ───────────────────────────────────────────────────────────────────
 
 func _process(_delta: float) -> void:
+	# BLE: poll latest notification each frame
+	if stream_type == "ble":
+		if ble_device != null and ble_device.is_connected():
+			var data: PackedByteArray = ble_device.poll_notification(BLE_POSITION_UUID)
+			if data.size() >= 16:
+				_apply_position_packet(data.to_float32_array())
+		elif ble_device != null and not ble_device.is_connected() and not disconnected:
+			# Lost connection — restart scan
+			print("[BLE] Connection lost — rescanning…")
+			connected  = false
+			ble_device = null
+			if not thread_ble.is_alive():
+				thread_ble = Thread.new()
+				thread_ble.start(_ble_scan_and_connect)
+
+	# UDP: watchdog to restart Python if it crashes
 	if stream_type == "udp" and not thread_python.is_alive() and not endgame and not debug:
 		thread_python = Thread.new()
 		thread_python.start(python_thread, Thread.PRIORITY_HIGH)
@@ -359,7 +272,7 @@ func _process(_delta: float) -> void:
 			reset_position = true
 
 
-# ── python launcher ───────────────────────────────────────────────────────────
+# ── UDP threads ───────────────────────────────────────────────────────────────
 
 func python_thread() -> void:
 	if not debug:
@@ -394,6 +307,11 @@ func _notification(what: int) -> void:
 		handle_quit_request()
 		if stream_type == "udp":
 			thread_python.wait_to_finish()
+		elif stream_type == "ble":
+			if ble_device != null:
+				ble_device.disconnect()
+			if thread_ble.is_alive():
+				thread_ble.wait_to_finish()
 		get_tree().quit()
 
 

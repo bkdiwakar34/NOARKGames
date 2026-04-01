@@ -121,6 +121,8 @@ class BLEStreamer:
         )
 
         await self._server.start()
+        # Give BlueZ time to register the GATT application before accepting connections
+        await asyncio.sleep(2.0)
         self._running = True
         self._ready.set()
         print(f"[BLE] Advertising as '{self.device_name}'")
