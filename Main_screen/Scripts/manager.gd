@@ -2,7 +2,7 @@ extends Node
 
 
 var json = JSON.new()
-var path = "res://debug.json"
+var path = "res://settings.json"
 var debug:bool
 
 

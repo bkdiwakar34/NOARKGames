@@ -1,0 +1,5 @@
+{
+    "debug": true,
+    "stream_type": "udp",
+    "ble_device_name": "NOARK_Tracker"
+}

@@ -7,7 +7,7 @@ func _ready() -> void:
     load_settings()
 
 func load_settings():
-    var path = "res://debug.json"
+    var path = "res://settings.json"
     if FileAccess.file_exists(path):
         var json_text = FileAccess.get_file_as_string(path)
         var parsed = JSON.parse_string(json_text)
@@ -15,6 +15,6 @@ func load_settings():
             config = parsed
             debug_mode = config.get("debug", false)
         else:
-            push_error("debug.json is not a valid dictionary")
+            push_error("settings.json is not a valid dictionary")
     else:
-        push_error("debug.json not found!")
+        push_error("settings.json not found!")
