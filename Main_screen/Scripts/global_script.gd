@@ -158,53 +158,111 @@ func handle_udp_packet() -> void:
 # ── BLE ───────────────────────────────────────────────────────────────────────
 
 func _init_ble() -> void:
+	print("[BLE] Initialising BluetoothManager…")
 	bluetooth_manager = BluetoothManager.new()
 	add_child(bluetooth_manager)
 	bluetooth_manager.adapter_initialized.connect(_on_ble_adapter_initialized)
 	bluetooth_manager.device_discovered.connect(_on_ble_device_discovered)
+	bluetooth_manager.device_updated.connect(_on_ble_device_updated)
+	bluetooth_manager.scan_started.connect(_on_ble_scan_started)
+	bluetooth_manager.scan_stopped.connect(_on_ble_scan_stopped)
+	bluetooth_manager.device_connecting.connect(_on_ble_device_connecting)
 	bluetooth_manager.device_connected.connect(_on_ble_device_connected)
 	bluetooth_manager.device_disconnected.connect(_on_ble_device_disconnected)
+	bluetooth_manager.error_occurred.connect(_on_ble_error)
 	bluetooth_manager.initialize()
 
 
 func _on_ble_adapter_initialized(success: bool, error: String) -> void:
 	if success:
-		print("BLE adapter ready — scanning for '%s'…" % ble_device_name)
+		print("[BLE] Adapter ready — starting scan (target: '%s')…" % ble_device_name)
 		bluetooth_manager.start_scan(15)
 	else:
-		push_error("BLE adapter failed to initialise: " + error)
+		push_error("[BLE] Adapter failed to initialise: " + error)
+
+
+func _on_ble_scan_started() -> void:
+	print("[BLE] Scan started")
+
+
+func _on_ble_scan_stopped() -> void:
+	print("[BLE] Scan stopped")
+	# Restart scan if we still haven't connected
+	if ble_device == null and not disconnected:
+		print("[BLE] Target not found — restarting scan in 1 s…")
+		await get_tree().create_timer(1.0).timeout
+		bluetooth_manager.start_scan(15)
 
 
 func _on_ble_device_discovered(device_info: Dictionary) -> void:
-	if device_info.get("name", "") == ble_device_name:
+	var name    = device_info.get("name", "<no name>")
+	var address = device_info.get("address", "??:??:??:??:??:??")
+	var rssi    = device_info.get("rssi", 0)
+	print("[BLE] Discovered: '%s'  addr=%s  rssi=%d" % [name, address, rssi])
+	if name == ble_device_name:
 		bluetooth_manager.stop_scan()
-		print("BLE device found: %s (%s)" % [device_info.get("name"), device_info.get("address")])
-		bluetooth_manager.connect_device(device_info.get("address"))
+		print("[BLE] Target found! Connecting to %s…" % address)
+		bluetooth_manager.connect_device(address)
+
+
+func _on_ble_device_updated(device_info: Dictionary) -> void:
+	# Fires on RSSI updates — only log if it's our target to avoid spam
+	if device_info.get("name", "") == ble_device_name:
+		print("[BLE] Target updated: rssi=%d" % device_info.get("rssi", 0))
+
+
+func _on_ble_device_connecting(address: String) -> void:
+	print("[BLE] Connecting to %s…" % address)
 
 
 func _on_ble_device_connected(address: String) -> void:
-	print("BLE connected: " + address)
+	print("[BLE] Connected to %s — discovering services…" % address)
 	ble_device = bluetooth_manager.get_device(address)
 	ble_device.services_discovered.connect(_on_ble_services_discovered)
 	ble_device.characteristic_notified.connect(_on_ble_position_notified)
+	ble_device.connection_failed.connect(_on_ble_connection_failed)
+	ble_device.operation_failed.connect(_on_ble_operation_failed)
 	ble_device.discover_services()
 
 
+func _on_ble_connection_failed(error: String) -> void:
+	push_error("[BLE] Connection failed: " + error)
+	ble_device = null
+	await get_tree().create_timer(2.0).timeout
+	bluetooth_manager.start_scan(15)
+
+
 func _on_ble_device_disconnected(address: String) -> void:
-	print("BLE disconnected: " + address)
+	print("[BLE] Disconnected from %s" % address)
 	connected  = false
 	ble_device = null
 	if not disconnected:
+		print("[BLE] Reconnecting in 2 s…")
 		await get_tree().create_timer(2.0).timeout
 		bluetooth_manager.start_scan(15)
 
 
-func _on_ble_services_discovered(_services: Array) -> void:
+func _on_ble_services_discovered(services: Array) -> void:
+	print("[BLE] %d service(s) discovered:" % services.size())
+	for svc in services:
+		print("       service  %s" % svc.get("uuid", "?"))
+		var chars = svc.get("characteristics", [])
+		for ch in chars:
+			print("         char  %s  props=%s" % [ch.get("uuid", "?"), str(ch.get("properties", {}))])
 	if ble_device == null:
 		return
+	print("[BLE] Subscribing to position characteristic…")
 	ble_device.subscribe_characteristic(BLE_SERVICE_UUID, BLE_POSITION_UUID)
 	connected = true
-	print("BLE subscribed to position characteristic")
+	print("[BLE] Ready — receiving position data")
+
+
+func _on_ble_operation_failed(operation: String, error: String) -> void:
+	push_error("[BLE] Operation '%s' failed: %s" % [operation, error])
+
+
+func _on_ble_error(error_message: String) -> void:
+	push_error("[BLE] Adapter error: " + error_message)
 
 
 func _on_ble_position_notified(char_uuid: String, data: PackedByteArray) -> void:
