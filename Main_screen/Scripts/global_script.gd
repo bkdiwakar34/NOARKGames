@@ -181,7 +181,7 @@ func _ble_scan_and_connect() -> void:
 
 			if dname == ble_device_name:
 				print("[BLE] Connecting to %s…" % daddr)
-				if device.connect():
+				if device.ble_connect():
 					ble_device = device
 					device.subscribe(BLE_SERVICE_UUID, BLE_POSITION_UUID)
 					connected = true
@@ -226,7 +226,7 @@ func _send_transport_message(message: String) -> void:
 		"udp":
 			udp.put_packet(message.to_utf8_buffer())
 		"ble":
-			if ble_device != null and ble_device.is_connected():
+			if ble_device != null and ble_device.ble_is_connected():
 				ble_device.write(BLE_SERVICE_UUID, BLE_COMMAND_UUID,
 								 message.to_utf8_buffer())
 
@@ -240,11 +240,11 @@ func _on_heartbeat_tick() -> void:
 func _process(_delta: float) -> void:
 	# BLE: poll latest notification each frame
 	if stream_type == "ble":
-		if ble_device != null and ble_device.is_connected():
+		if ble_device != null and ble_device.ble_is_connected():
 			var data: PackedByteArray = ble_device.poll_notification(BLE_POSITION_UUID)
 			if data.size() >= 16:
 				_apply_position_packet(data.to_float32_array())
-		elif ble_device != null and not ble_device.is_connected() and not disconnected:
+		elif ble_device != null and not ble_device.ble_is_connected() and not disconnected:
 			# Lost connection — restart scan
 			print("[BLE] Connection lost — rescanning…")
 			connected  = false
@@ -309,7 +309,7 @@ func _notification(what: int) -> void:
 			thread_python.wait_to_finish()
 		elif stream_type == "ble":
 			if ble_device != null:
-				ble_device.disconnect()
+				ble_device.ble_disconnect()
 			if thread_ble.is_alive():
 				thread_ble.wait_to_finish()
 		get_tree().quit()
