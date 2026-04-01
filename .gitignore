@@ -163,3 +163,4 @@ mono_crash.*.json
 
 # Asset Store imports (if applicable)
 AssetStoreTools/
+.venv
