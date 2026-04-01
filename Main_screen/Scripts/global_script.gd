@@ -47,6 +47,8 @@ const BLE_COMMAND_UUID  = "4e4f4152-4b02-0000-0000-000000000000"
 
 var bluetooth_manager = null
 var ble_device = null
+var _ble_connecting: bool = false   # guard against duplicate connect_device() calls
+var _ble_connect_timer: SceneTreeTimer = null
 
 # ── connection state ──────────────────────────────────────────────────────────
 @onready var connected: bool = false
@@ -187,8 +189,8 @@ func _on_ble_scan_started() -> void:
 
 func _on_ble_scan_stopped() -> void:
 	print("[BLE] Scan stopped")
-	# Restart scan if we still haven't connected
-	if ble_device == null and not disconnected:
+	# Only restart if we are not already mid-connection and not fully connected
+	if ble_device == null and not _ble_connecting and not disconnected:
 		print("[BLE] Target not found — restarting scan in 1 s…")
 		await get_tree().create_timer(1.0).timeout
 		bluetooth_manager.start_scan(15)
@@ -199,10 +201,15 @@ func _on_ble_device_discovered(device_info: Dictionary) -> void:
 	var address = device_info.get("address", "??:??:??:??:??:??")
 	var rssi    = device_info.get("rssi", 0)
 	print("[BLE] Discovered: '%s'  addr=%s  rssi=%d" % [name, address, rssi])
-	if name == ble_device_name:
+	# Guard: only attempt one connection at a time
+	if name == ble_device_name and not _ble_connecting and ble_device == null:
+		_ble_connecting = true
 		bluetooth_manager.stop_scan()
 		print("[BLE] Target found! Connecting to %s…" % address)
 		bluetooth_manager.connect_device(address)
+		# Safety timeout: if device_connected never fires within 10 s, reset and re-scan
+		_ble_connect_timer = get_tree().create_timer(10.0)
+		_ble_connect_timer.timeout.connect(_on_ble_connect_timeout)
 
 
 func _on_ble_device_updated(device_info: Dictionary) -> void:
@@ -217,6 +224,8 @@ func _on_ble_device_connecting(address: String) -> void:
 
 func _on_ble_device_connected(address: String) -> void:
 	print("[BLE] Connected to %s — discovering services…" % address)
+	_ble_connecting = false
+	_ble_connect_timer = null   # cancel timeout
 	ble_device = bluetooth_manager.get_device(address)
 	ble_device.services_discovered.connect(_on_ble_services_discovered)
 	ble_device.characteristic_notified.connect(_on_ble_position_notified)
@@ -225,8 +234,18 @@ func _on_ble_device_connected(address: String) -> void:
 	ble_device.discover_services()
 
 
+func _on_ble_connect_timeout() -> void:
+	if _ble_connecting and ble_device == null:
+		push_error("[BLE] Connection timed out — resetting and re-scanning…")
+		_ble_connecting = false
+		_ble_connect_timer = null
+		bluetooth_manager.start_scan(15)
+
+
 func _on_ble_connection_failed(error: String) -> void:
 	push_error("[BLE] Connection failed: " + error)
+	_ble_connecting = false
+	_ble_connect_timer = null
 	ble_device = null
 	await get_tree().create_timer(2.0).timeout
 	bluetooth_manager.start_scan(15)
@@ -234,6 +253,8 @@ func _on_ble_connection_failed(error: String) -> void:
 
 func _on_ble_device_disconnected(address: String) -> void:
 	print("[BLE] Disconnected from %s" % address)
+	_ble_connecting = false
+	_ble_connect_timer = null
 	connected  = false
 	ble_device = null
 	if not disconnected:

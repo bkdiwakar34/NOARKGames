@@ -124,6 +124,10 @@ class BLEStreamer:
         self._running = True
         self._ready.set()
         print(f"[BLE] Advertising as '{self.device_name}'")
+        print(f"[BLE] Service UUID : {SERVICE_UUID}")
+        print(f"[BLE] Position char: {POSITION_CHAR_UUID}")
+        print(f"[BLE] Command char : {COMMAND_CHAR_UUID}")
+        print("[BLE] Peripheral ready — waiting for central to connect")
 
         while self._running:
             await asyncio.sleep(0.1)
