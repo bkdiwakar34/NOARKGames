@@ -54,6 +54,7 @@ var _ble_command_with_response: bool = false
 var _ble_scan_active: bool = false
 var _ble_services_requested: bool = false
 var _ble_subscription_ready: bool = false
+var _ble_shutting_down: bool = false
 
 # ── connection state ──────────────────────────────────────────────────────────
 @onready var connected: bool = false
@@ -297,15 +298,20 @@ func _on_ble_connection_failed(error: String) -> void:
 
 
 func _on_ble_device_disconnected() -> void:
-	print("[BLE] Device disconnected — rescanning…")
 	connected = false
 	_ble_connecting = false
 	_ble_can_write_command = false
+	_ble_scan_active = false
 	_ble_services_requested = false
 	_ble_subscription_ready = false
 	ble_device = null
 	_ble_target_address = ""
 
+	if _ble_shutting_down or disconnected or endgame:
+		print("[BLE] Device disconnected during shutdown")
+		return
+
+	print("[BLE] Device disconnected — rescanning…")
 	if not disconnected and not endgame:
 		_ble_start_scan(10.0)
 
@@ -463,6 +469,16 @@ func _path_checker() -> void:
 # ── quit / patient change ─────────────────────────────────────────────────────
 
 func handle_quit_request() -> void:
+	disconnected = true
+	endgame = true
+	_ble_shutting_down = true
+	_ble_scan_active = false
+	_ble_target_address = ""
+	connected = false
+
+	if is_instance_valid(message_timer):
+		message_timer.stop()
+
 	_outgoing_message = "STOP"
 	print("Camera closed properly")
 	_send_transport_message(_outgoing_message)
@@ -474,7 +490,6 @@ func change_patient() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		endgame = true
 		handle_quit_request()
 		if stream_type == "udp":
 			thread_python.wait_to_finish()
