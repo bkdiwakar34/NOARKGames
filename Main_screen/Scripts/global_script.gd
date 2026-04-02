@@ -245,8 +245,18 @@ func _process(_delta: float) -> void:
 				connected  = false
 				ble_device = null
 				_ble_manager.start_scan(10.0)
-			elif _ble_manager.is_scan_done():
-				_ble_process_scan_results()
+			else:
+				var err: String = _ble_manager.take_scan_error()
+				if err != "":
+					push_error("[BLE] Scan error: " + err + " — retrying in 3 s")
+					await get_tree().create_timer(3.0).timeout
+					_ble_manager.start_scan(10.0)
+				elif _ble_manager.is_scan_done():
+					_ble_process_scan_results()
+				elif not _ble_manager.is_scanning():
+					# Shouldn't normally happen — restart scan defensively
+					push_error("[BLE] Scan state is Idle unexpectedly — restarting")
+					_ble_manager.start_scan(10.0)
 
 	# UDP: watchdog to restart Python if it crashes
 	if stream_type == "udp" and not thread_python.is_alive() and not endgame and not debug:

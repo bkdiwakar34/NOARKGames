@@ -9,4 +9,5 @@ dependencies = [
 	"scipy>=1.17.1",
 	"toml>=0.10.2",
 	"bless>=0.1.7",
+	"bleak>=3.0.1",
 ]
