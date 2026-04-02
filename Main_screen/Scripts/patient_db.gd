@@ -22,30 +22,20 @@ func _init():
 	load_database()
 
 func _setup_paths() -> void:
-	# Get platform-appropriate documents directory
-	var documents_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS)
-
-	# Build paths using platform-appropriate separator
-	if OS.get_name() == "Windows":
-		records_path = documents_dir + "\\" + RECORDS_DIR.replace("//", "\\")
-		database_file_path = records_path + "\\" + DB_FILE
-	else:
-		records_path = documents_dir + "/" + RECORDS_DIR.replace("//", "/")
-		database_file_path = records_path + "/" + DB_FILE
+	var base_dir = OS.get_user_data_dir() if OS.get_name() == "Android" else OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS) + "/NOARK"
+	
+	records_path = base_dir.path_join("records")
+	database_file_path = records_path.path_join(DB_FILE)
 
 	print("Patient database path: ", database_file_path)
 
 func _ensure_directory_exists() -> void:
-	var dir = DirAccess.open(OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS))
-	if dir:
-		if not dir.dir_exists(records_path):
-			var result = DirAccess.make_dir_recursive_absolute(records_path)
-			if result == OK:
-				print("Created patient records directory: ", records_path)
-			else:
-				push_error("Failed to create patient records directory: ", records_path)
-	else:
-		push_error("Failed to access documents directory")
+	if not DirAccess.dir_exists_absolute(records_path):
+		var result = DirAccess.make_dir_recursive_absolute(records_path)
+		if result == OK:
+			print("Created patient records directory: ", records_path)
+		else:
+			push_error("Failed to create patient records directory: ", records_path)
 
 func load_database() -> bool:
 	if not FileAccess.file_exists(database_file_path):

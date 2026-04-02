@@ -165,3 +165,4 @@ mono_crash.*.json
 AssetStoreTools/
 .venv
 addons/gdble/~*
+android/build/
