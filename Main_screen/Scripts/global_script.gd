@@ -170,6 +170,14 @@ func _init_ble() -> void:
 		push_error("[BLE] BluetoothManager class not found. Check the GDBLE addon installation.")
 		return
 
+	# Android 12+ (API 31+) requires runtime permission grants for BLE scanning/connecting.
+	# Request them here and wait briefly for the system dialog before proceeding.
+	if OS.get_name() == "Android":
+		OS.request_permission("android.permission.BLUETOOTH_SCAN")
+		OS.request_permission("android.permission.BLUETOOTH_CONNECT")
+		OS.request_permission("android.permission.ACCESS_FINE_LOCATION")
+		await get_tree().create_timer(1.0).timeout
+
 	_ble_manager = ClassDB.instantiate("BluetoothManager")
 	if _ble_manager == null:
 		push_error("[BLE] Failed to instantiate BluetoothManager")
