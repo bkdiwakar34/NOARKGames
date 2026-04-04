@@ -345,6 +345,7 @@ class MainClass:
                     break
         finally:
             if self.stream_type == "ble" and hasattr(self, "ble_streamer"):
+                print("[BLE] Stopping BLE streamer")
                 self.ble_streamer.stop()
             cv2.destroyAllWindows()
 

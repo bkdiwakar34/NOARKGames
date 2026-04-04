@@ -1,25 +1,18 @@
 [configuration]
-
 entry_symbol = "gdext_rust_init"
-compatibility_minimum = 4.2
+compatibility_minimum = 4.1
+reloadable = true
 
 [libraries]
-
-linux.debug.x86_64 =     "res://addons/gdble/bin/linux-x86_64/libgdble.so"
-linux.release.x86_64 =   "res://addons/gdble/bin/linux-x86_64/libgdble.so"
-linux.debug.arm64 =      "res://addons/gdble/bin/linux-arm64/libgdble.so"
-linux.release.arm64 =    "res://addons/gdble/bin/linux-arm64/libgdble.so"
-windows.debug.x86_64 =   "res://addons/gdble/bin/windows-x86_64/gdble.dll"
-windows.release.x86_64 = "res://addons/gdble/bin/windows-x86_64/gdble.dll"
-windows.debug.arm64 =    "res://addons/gdble/bin/windows-arm64/gdble.dll"
-windows.release.arm64 =  "res://addons/gdble/bin/windows-arm64/gdble.dll"
-macos.debug.x86_64 =     "res://addons/gdble/bin/macos-x86_64/libgdble.dylib"
-macos.release.x86_64 =   "res://addons/gdble/bin/macos-x86_64/libgdble.dylib"
-macos.debug.arm64 =      "res://addons/gdble/bin/macos-arm64/libgdble.dylib"
-macos.release.arm64 =    "res://addons/gdble/bin/macos-arm64/libgdble.dylib"
-android.debug.arm64 =    "res://addons/gdble/bin/android/libgdble.so"
-android.release.arm64 =  "res://addons/gdble/bin/android/libgdble.so"
-
-[documentation]
-
-en = "res://addons/gdble/doc/en/"
+linux.debug.x86_64 =     "res://addons/gdble/libgdble.linux.x86_64.so"
+linux.release.x86_64 =   "res://addons/gdble/libgdble.linux.x86_64.so"
+windows.debug.x86_64 =   "res://addons/gdble/libgdble.windows.x86_64.dll"
+windows.release.x86_64 = "res://addons/gdble/libgdble.windows.x86_64.dll"
+macos.debug =            "res://addons/gdble/libgdble.macos.x86_64.dylib"
+macos.release =          "res://addons/gdble/libgdble.macos.x86_64.dylib"
+macos.debug.arm64 =      "res://addons/gdble/libgdble.macos.arm64.dylib"
+macos.release.arm64 =    "res://addons/gdble/libgdble.macos.arm64.dylib"
+android.debug.arm64 =     "res://addons/gdble/libgdble.android.arm64.so"
+android.release.arm64 =   "res://addons/gdble/libgdble.android.arm64.so"
+android.debug.x86_64 =    "res://addons/gdble/libgdble.android.x86_64.so"
+android.release.x86_64 =  "res://addons/gdble/libgdble.android.x86_64.so"

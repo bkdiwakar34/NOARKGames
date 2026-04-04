@@ -163,6 +163,13 @@ ScoreManager.get_all_scores_for_patient(patient_id)
 - **Stretch**: Canvas items, ignore aspect ratio
 - **Renderer**: OpenGL Compatibility (`gl_compatibility`) for Raspberry Pi support
 
+## Android GDExtension Gotchas
+
+- **Headless export vs GUI export**: Headless (`--export-debug`) may not package GDExtensions correctly for Android — the `.so` may not load at runtime even if present in the APK. Prefer GUI export for Android APKs.
+- **APK structure**: GDExtension `.so` files go in `lib/arm64-v8a/`, config goes in `assets/.godot/extension_list.cfg`
+- **BLE permissions**: Android 12+ requires runtime permission requests before BLE operations — see `_init_ble()` in `global_script.gd`
+- **extension_list.cfg**: If duplicate `.gdextension` files exist (e.g., from submodules), Godot may register both — use `.gdignore` in submodule dirs
+
 ## No Test Infrastructure
 
 There are no automated tests in this project.
