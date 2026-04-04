@@ -44,6 +44,8 @@ class BLEStreamer:
         self._latest_command: bytes = b""
         self._cmd_lock = threading.Lock()
         self._running = False
+        self._connected = False
+        self._streaming = False
 
     # ── public API (called from camera thread) ────────────────────────────────
 
@@ -58,6 +60,9 @@ class BLEStreamer:
         """Notify connected central with a 4-float position packet."""
         if not self._running or self._server is None:
             return
+        if not self._streaming:
+            self._streaming = True
+            print("[BLE] Streaming position data")
         data = bytearray(struct.pack("ffff", msg_code, x, y, z))
         char = self._server.get_characteristic(POSITION_CHAR_UUID)
         if char is None:
@@ -81,7 +86,11 @@ class BLEStreamer:
 
     def stop(self) -> None:
         """Gracefully stop advertising and the asyncio loop."""
+        if self._connected:
+            print("[BLE] Central disconnected")
         self._running = False
+        self._connected = False
+        self._streaming = False
         if self._loop and self._server:
             asyncio.run_coroutine_threadsafe(self._server.stop(), self._loop)
 
@@ -143,3 +152,6 @@ class BLEStreamer:
         if characteristic.uuid.lower() == COMMAND_CHAR_UUID.lower():
             with self._cmd_lock:
                 self._latest_command = bytes(value)
+            if not self._connected:
+                self._connected = True
+                print("[BLE] Central connected")
