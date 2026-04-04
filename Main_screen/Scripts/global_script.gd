@@ -45,8 +45,9 @@ const BLE_COMMAND_UUID  = "4e4f4152-4b02-0000-0000-000000000000"
 @onready var thread_path_check = Thread.new()
 
 # ── BLE ───────────────────────────────────────────────────────────────────────
-var _ble_manager = null   # BluetoothManager instance
-var ble_device = null     # BleDevice instance
+var _ble_manager = null          # BluetoothManager instance (gdble GDExtension — Windows/Linux)
+var _ble_android_plugin = null   # GdAndroidBLE singleton (Android plugin)
+var ble_device = null            # BleDevice instance (gdble only)
 var _ble_target_address: String = ""
 var _ble_connecting: bool = false
 var _ble_can_write_command: bool = false
@@ -166,17 +167,40 @@ func handle_udp_packet() -> void:
 # ── BLE ───────────────────────────────────────────────────────────────────────
 
 func _init_ble() -> void:
+	if OS.get_name() == "Android":
+		await _init_ble_android()
+	else:
+		_init_ble_gdextension()
+
+
+func _init_ble_android() -> void:
+	if not Engine.has_singleton("GdAndroidBLE"):
+		push_error("[BLE] GdAndroidBLE plugin singleton not found. Enable the plugin in Project Settings.")
+		return
+
+	OS.request_permission("android.permission.BLUETOOTH_SCAN")
+	OS.request_permission("android.permission.BLUETOOTH_CONNECT")
+	OS.request_permission("android.permission.ACCESS_FINE_LOCATION")
+	await get_tree().create_timer(1.0).timeout
+
+	_ble_android_plugin = Engine.get_singleton("GdAndroidBLE")
+	_ble_android_plugin.connect("adapter_initialized",   Callable(self, "_on_ble_adapter_initialized"))
+	_ble_android_plugin.connect("device_discovered",     Callable(self, "_on_ble_android_device_discovered"))
+	_ble_android_plugin.connect("scan_stopped",          Callable(self, "_on_ble_scan_stopped"))
+	_ble_android_plugin.connect("device_connected",      Callable(self, "_on_ble_device_connected"))
+	_ble_android_plugin.connect("device_disconnected",   Callable(self, "_on_ble_device_disconnected"))
+	_ble_android_plugin.connect("connection_failed",     Callable(self, "_on_ble_connection_failed"))
+	_ble_android_plugin.connect("services_discovered",   Callable(self, "_on_ble_android_services_discovered"))
+	_ble_android_plugin.connect("characteristic_notified", Callable(self, "_on_ble_characteristic_notified"))
+	_ble_android_plugin.connect("operation_failed",      Callable(self, "_on_ble_operation_failed"))
+	_ble_android_plugin.connect("manager_error",         Callable(self, "_on_ble_manager_error"))
+	_ble_android_plugin.initialize()
+
+
+func _init_ble_gdextension() -> void:
 	if not ClassDB.class_exists("BluetoothManager"):
 		push_error("[BLE] BluetoothManager class not found. Check the GDBLE addon installation.")
 		return
-
-	# Android 12+ (API 31+) requires runtime permission grants for BLE scanning/connecting.
-	# Request them here and wait briefly for the system dialog before proceeding.
-	if OS.get_name() == "Android":
-		OS.request_permission("android.permission.BLUETOOTH_SCAN")
-		OS.request_permission("android.permission.BLUETOOTH_CONNECT")
-		OS.request_permission("android.permission.ACCESS_FINE_LOCATION")
-		await get_tree().create_timer(1.0).timeout
 
 	_ble_manager = ClassDB.instantiate("BluetoothManager")
 	if _ble_manager == null:
@@ -197,13 +221,18 @@ func _init_ble() -> void:
 
 
 func _ble_start_scan(timeout_seconds: float = 10.0) -> void:
-	if _ble_manager == null or ble_device != null or _ble_connecting or _ble_scan_active:
+	if ble_device != null or _ble_connecting or _ble_scan_active:
+		return
+	if _ble_android_plugin == null and _ble_manager == null:
 		return
 
 	_ble_scan_active = true
 	_ble_target_address = ""
 	print("[BLE] Starting scan for %.1f seconds…" % timeout_seconds)
-	_ble_manager.start_scan(timeout_seconds)
+	if _ble_android_plugin:
+		_ble_android_plugin.start_scan(timeout_seconds)
+	else:
+		_ble_manager.start_scan(timeout_seconds)
 
 
 func _ble_connect_once(signal_ref: Signal, method_name: String) -> void:
@@ -256,7 +285,9 @@ func _on_ble_scan_stopped() -> void:
 
 
 func _ble_connect_to_target(address: String) -> void:
-	if address == "" or _ble_connecting or ble_device != null:
+	if address == "" or _ble_connecting:
+		return
+	if _ble_android_plugin == null and ble_device != null:
 		return
 
 	_ble_connecting = true
@@ -266,6 +297,11 @@ func _ble_connect_to_target(address: String) -> void:
 	_ble_subscription_ready = false
 
 	print("[BLE] Connecting to %s…" % address)
+
+	if _ble_android_plugin:
+		_ble_android_plugin.connect_device(address)
+		return
+
 	ble_device = _ble_manager.connect_device(address)
 	if ble_device == null:
 		_ble_connecting = false
@@ -284,13 +320,18 @@ func _ble_connect_to_target(address: String) -> void:
 
 
 func _on_ble_device_connected() -> void:
-	if ble_device == null or _ble_services_requested:
+	if _ble_services_requested:
+		return
+	if _ble_android_plugin == null and ble_device == null:
 		return
 
 	_ble_connecting = false
 	_ble_services_requested = true
 	print("[BLE] Device connected — discovering services…")
-	ble_device.discover_services()
+	if _ble_android_plugin:
+		_ble_android_plugin.discover_services()
+	else:
+		ble_device.discover_services()
 
 
 func _on_ble_connection_failed(error: String) -> void:
@@ -324,8 +365,22 @@ func _on_ble_device_disconnected() -> void:
 		_ble_start_scan(10.0)
 
 
+func _on_ble_android_device_discovered(dev_name: String, dev_address: String) -> void:
+	_on_ble_device_discovered({"name": dev_name, "address": dev_address})
+
+
+func _on_ble_android_services_discovered(services_json: String) -> void:
+	var services = JSON.parse_string(services_json)
+	if typeof(services) == TYPE_ARRAY:
+		_on_ble_services_discovered(services)
+	else:
+		push_error("[BLE] Failed to parse services JSON")
+
+
 func _on_ble_services_discovered(services: Array) -> void:
-	if ble_device == null or _ble_subscription_ready:
+	if _ble_subscription_ready:
+		return
+	if _ble_android_plugin == null and ble_device == null:
 		return
 
 	var found_position := false
@@ -358,7 +413,10 @@ func _on_ble_services_discovered(services: Array) -> void:
 		return
 
 	_ble_subscription_ready = true
-	ble_device.subscribe_characteristic(BLE_SERVICE_UUID, BLE_POSITION_UUID)
+	if _ble_android_plugin:
+		_ble_android_plugin.subscribe_characteristic(BLE_SERVICE_UUID, BLE_POSITION_UUID)
+	else:
+		ble_device.subscribe_characteristic(BLE_SERVICE_UUID, BLE_POSITION_UUID)
 	connected = true
 	print("[BLE] Connected and subscribed — streaming position data")
 
@@ -422,13 +480,15 @@ func _send_transport_message(message: String) -> void:
 		"udp":
 			udp.put_packet(message.to_utf8_buffer())
 		"ble":
-			if ble_device != null and ble_device.is_connected() and _ble_can_write_command:
+			if _ble_android_plugin:
+				if connected and _ble_can_write_command:
+					_ble_android_plugin.write_characteristic(
+						BLE_SERVICE_UUID, BLE_COMMAND_UUID,
+						message.to_utf8_buffer(), _ble_command_with_response)
+			elif ble_device != null and ble_device.is_connected() and _ble_can_write_command:
 				ble_device.write_characteristic(
-					BLE_SERVICE_UUID,
-					BLE_COMMAND_UUID,
-					message.to_utf8_buffer(),
-					_ble_command_with_response
-				)
+					BLE_SERVICE_UUID, BLE_COMMAND_UUID,
+					message.to_utf8_buffer(), _ble_command_with_response)
 
 
 func _on_heartbeat_tick() -> void:
@@ -502,10 +562,14 @@ func _notification(what: int) -> void:
 		if stream_type == "udp":
 			thread_python.wait_to_finish()
 		elif stream_type == "ble":
-			if ble_device != null:
-				ble_device.disconnect()
-			if _ble_manager != null:
-				_ble_manager.stop_scan()
+			if _ble_android_plugin:
+				_ble_android_plugin.stop_scan()
+				_ble_android_plugin.disconnect_device()
+			else:
+				if ble_device != null:
+					ble_device.disconnect()
+				if _ble_manager != null:
+					_ble_manager.stop_scan()
 		get_tree().quit()
 
 
