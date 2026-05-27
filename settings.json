@@ -1,5 +1,7 @@
 {
 	"debug": false,
-	"stream_type": "ble",
-	"ble_device_name": "NOARK_Tracker"
+	"stream_type": "udp",
+	"ble_device_name": "NOARK_Tracker",
+	"udp_port": 12345,
+	"launch_python": false
 }

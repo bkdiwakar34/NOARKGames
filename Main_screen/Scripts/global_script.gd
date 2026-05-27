@@ -33,6 +33,8 @@ var clamp_vector_y = Vector2(MAX_X, MAX_Y)
 # ── transport settings ────────────────────────────────────────────────────────
 var stream_type: String = "udp"
 var ble_device_name: String = "NOARK_Tracker"
+var udp_port: int = 8000
+var launch_python: bool = true
 
 const BLE_SERVICE_UUID  = "4e4f4152-4b00-0000-0000-000000000000"
 const BLE_POSITION_UUID = "4e4f4152-4b01-0000-0000-000000000000"
@@ -102,6 +104,8 @@ func _ready() -> void:
 	debug           = settings.get("debug", false)
 	stream_type     = settings.get("stream_type", "udp")
 	ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
+	udp_port        = settings.get("udp_port", 8000)
+	launch_python   = settings.get("launch_python", true)
 
 	current_date = get_date_string()
 	load_session_info()
@@ -124,9 +128,9 @@ func _ready() -> void:
 		pypath_checker_path = "E:\\CMC\\pyprojects\\programs_rpi\\rpi_python\\file_integrity.py"
 		interpreter_path    = "E:\\CMC\\py_env\\venv\\Scripts\\python.exe"
 	else:
-		pyscript_path       = "/home/sujith/Documents/rpi_python/stream_optimize.py"
+		pyscript_path       = "/home/sujith/Documents/NOARKGames/pyscripts/main.py"
 		pypath_checker_path = "/home/sujith/Documents/rpi_python/file_integrity.py"
-		interpreter_path    = "/home/sujith/Documents/rpi_python/venv/bin/python"
+		interpreter_path    = "/home/sujith/Documents/NOARKGames/.venv/bin/python"
 
 	match stream_type:
 		"udp":
@@ -144,8 +148,9 @@ func _ready() -> void:
 # ── UDP ───────────────────────────────────────────────────────────────────────
 
 func _init_udp() -> void:
-	udp.connect_to_host("127.0.0.1", 8000)
-	thread_python.start(python_thread, Thread.PRIORITY_HIGH)
+	udp.connect_to_host("127.0.0.1", udp_port)
+	if launch_python:
+		thread_python.start(python_thread, Thread.PRIORITY_HIGH)
 	thread_network.start(network_thread)
 
 
@@ -499,7 +504,7 @@ func _on_heartbeat_tick() -> void:
 
 func _process(_delta: float) -> void:
 	# UDP: watchdog to restart Python if it crashes
-	if stream_type == "udp" and not thread_python.is_alive() and not endgame and not debug:
+	if stream_type == "udp" and launch_python and not thread_python.is_alive() and not endgame and not debug:
 		thread_python = Thread.new()
 		thread_python.start(python_thread, Thread.PRIORITY_HIGH)
 
