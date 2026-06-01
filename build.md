@@ -48,6 +48,7 @@ v2/
 | 6g | Per-trial success rate graph in overlay | Done |
 | 6h | Graph: threshold line + sampling band per trial | Done |
 | 6i | Device integration: heartbeat fix + Z-axis mapping | Done |
+| 6j | Target rate selector on game_select (session override) | Done |
 | 7 | Godot auto-start on Pi boot | Not started |
 | 8 | Python tracker accuracy fixes | Not started |
 | 9 | Data sync to researcher server | Not started |
@@ -76,6 +77,7 @@ v2/
 - AdaptiveManager: calibration trial → window-around-threshold sampling → PI controller
 - UDPReceiver: proactive 100ms heartbeat so tracker.py learns reply address on startup
 - Device confirmed working: arm tracker drives sheep, workspace calibration runs correctly
+- Game select: "Target rate:" row with buttons 40/50/70/80/90/100% — session-only override, defaults to patient's registered rate, nothing written to patients.json
 
 ---
 
