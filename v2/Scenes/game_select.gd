@@ -1,8 +1,12 @@
 extends Control
 
+var _override_rate: float = 0.8
+var _rate_buttons: Array = []
+
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var patient := PatientDB.get_patient(PatientDB.current_patient_id)
+	_override_rate = patient.get("target_success_rate", 0.8)
 	_build_ui(patient.get("name", "Patient"))
 
 func _build_ui(patient_name: String) -> void:
@@ -32,6 +36,7 @@ func _build_ui(patient_name: String) -> void:
 		"res://v2/Games/random_reach/random_reach.tscn"
 	)
 
+	_add_rate_selector(vp)
 	_add_mode_toggle(vp)
 
 func _add_game_card(pos: Vector2, display_name: String, scene_path: String) -> void:
@@ -76,6 +81,66 @@ func _add_game_card(pos: Vector2, display_name: String, scene_path: String) -> v
 	btn.pressed.connect(func(): _start_game(scene_path))
 	add_child(btn)
 
+func _add_rate_selector(vp: Vector2) -> void:
+	var rates: Array = [0.4, 0.5, 0.7, 0.8, 0.9, 1.0]
+	var lbl := Label.new()
+	lbl.text = "Target rate:"
+	lbl.add_theme_font_size_override("font_size", 16)
+	lbl.add_theme_color_override("font_color", Color(0.28, 0.42, 0.60, 0.80))
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.custom_minimum_size = Vector2(vp.x, 28.0)
+	lbl.position = Vector2(0.0, vp.y * 0.70)
+	add_child(lbl)
+
+	var btn_w: float = 72.0
+	var btn_h: float = 36.0
+	var gap: float = 8.0
+	var total_w: float = rates.size() * btn_w + (rates.size() - 1) * gap
+	var start_x: float = vp.x * 0.5 - total_w * 0.5
+	var row_y: float = vp.y * 0.70 + 32.0
+
+	for i in rates.size():
+		var r: float = rates[i]
+		var btn := Button.new()
+		btn.text = "%d%%" % int(r * 100)
+		btn.custom_minimum_size = Vector2(btn_w, btn_h)
+		btn.size = Vector2(btn_w, btn_h)
+		btn.position = Vector2(start_x + i * (btn_w + gap), row_y)
+		btn.add_theme_font_size_override("font_size", 16)
+		_style_rate_btn(btn, r == _override_rate)
+		var captured_r := r
+		btn.pressed.connect(func():
+			_override_rate = captured_r
+			for b in _rate_buttons:
+				_style_rate_btn(b, false)
+			_style_rate_btn(btn, true)
+		)
+		_rate_buttons.append(btn)
+		add_child(btn)
+
+func _style_rate_btn(btn: Button, selected: bool) -> void:
+	var sb := StyleBoxFlat.new()
+	sb.corner_radius_top_left = 8
+	sb.corner_radius_top_right = 8
+	sb.corner_radius_bottom_left = 8
+	sb.corner_radius_bottom_right = 8
+	if selected:
+		sb.bg_color = Color(0.15, 0.50, 0.90)
+		btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
+	else:
+		sb.bg_color = Color(0.72, 0.82, 0.92, 0.70)
+		btn.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
+	btn.add_theme_stylebox_override("normal", sb)
+	btn.add_theme_stylebox_override("hover", sb)
+	btn.add_theme_stylebox_override("focus", sb)
+	var sb_pressed := StyleBoxFlat.new()
+	sb_pressed.corner_radius_top_left = 8
+	sb_pressed.corner_radius_top_right = 8
+	sb_pressed.corner_radius_bottom_left = 8
+	sb_pressed.corner_radius_bottom_right = 8
+	sb_pressed.bg_color = sb.bg_color.darkened(0.15)
+	btn.add_theme_stylebox_override("pressed", sb_pressed)
+
 func _add_mode_toggle(vp: Vector2) -> void:
 	var label := Label.new()
 	label.add_theme_font_size_override("font_size", 16)
@@ -108,8 +173,7 @@ func _update_mode_btn(btn: Button) -> void:
 
 func _start_game(scene_path: String) -> void:
 	if not AdaptiveManager.is_running:
-		var patient := PatientDB.get_patient(PatientDB.current_patient_id)
-		AdaptiveManager.start_session(patient.get("target_success_rate", 0.8))
+		AdaptiveManager.start_session(_override_rate)
 	get_tree().change_scene_to_file(scene_path)
 
 func _draw() -> void:
