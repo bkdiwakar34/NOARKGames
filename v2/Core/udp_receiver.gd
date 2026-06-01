@@ -48,7 +48,7 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 	raw_z = f[3]
 	screen_pos = Vector2(
 		raw_x * SCALER_X + _offset_x,
-		raw_z * SCALER_Z + _offset_y
+		(raw_z - 0.2) * 1400.0 + 40.0
 	)
 	connected = true
 
