@@ -37,8 +37,8 @@ var _trial_timer: Timer
 var _between_timer: Timer
 
 const DEAD_BAND: float = 0.05
-const GAIN_P: float = 0.15
-const GAIN_I: float = 0.02
+const GAIN_P: float = 0.35
+const GAIN_I: float = 0.05
 const WINDOW_WIDTH: float = 2.4      # seconds — lifetime sampling window width
 const WS_WINDOW_FRAC: float = 0.30   # fraction of ws_radius — workspace sampling window width
 const TRIAL_DURATION: float = 60.0
