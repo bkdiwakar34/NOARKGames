@@ -1,5 +1,5 @@
 # NOARKGames — Build Progress
-_Last updated: 2026-05-31_
+_Last updated: 2026-06-01_
 
 All new code lives in `v2/`. Old code in `Main_screen/` and `Games/` is untouched.
 
@@ -46,6 +46,8 @@ v2/
 | 6e | Algorithm redesign — window-around-threshold sampling | Done |
 | 6f | Workspace difficulty mode + mode toggle on game_select | Done |
 | 6g | Per-trial success rate graph in overlay | Done |
+| 6h | Graph: threshold line + sampling band per trial | Done |
+| 6i | Device integration: heartbeat fix + Z-axis mapping | Done |
 | 7 | Godot auto-start on Pi boot | Not started |
 | 8 | Python tracker accuracy fixes | Not started |
 | 9 | Data sync to researcher server | Not started |
@@ -53,7 +55,7 @@ v2/
 
 ---
 
-## What works right now (confirmed on Dell 14 laptop, 200% display scaling)
+## What works right now (confirmed on Dell 14 laptop + Raspberry Pi 5 with real device)
 
 - Project runs cleanly with 5 autoloads
 - Registration screen: therapist fills patient details + assigns 70/80/90% group
@@ -68,10 +70,12 @@ v2/
   - Between-trial amber card with "You caught X apples!"
   - **■ Stop** button top-left (70% opacity): stops session, shows session graph
 - Graph overlay (two graphs):
-  - Graph 1: apple lifetime (Y) vs apple number (X) — green=caught, red=missed
+  - Graph 1: apple lifetime (Y) vs apple number (X) — green=caught, red=missed, dashed orange threshold line, blue band per trial showing sampling window
   - Graph 2: per-trial success rate (Y) vs trial number (X) — orange line, dashed target line
   - "Back to menu" button
 - AdaptiveManager: calibration trial → window-around-threshold sampling → PI controller
+- UDPReceiver: proactive 100ms heartbeat so tracker.py learns reply address on startup
+- Device confirmed working: arm tracker drives sheep, workspace calibration runs correctly
 
 ---
 
@@ -141,8 +145,8 @@ Trial 2+ — window sampling:
 
 **Constants:**
 ```
-GAIN_P         = 0.15
-GAIN_I         = 0.02
+GAIN_P         = 0.35   # tuned for arm-based play (was 0.15 for mouse)
+GAIN_I         = 0.05   # tuned for arm-based play (was 0.02 for mouse)
 DEAD_BAND      = 0.05
 WINDOW_WIDTH   = 2.4     # seconds (lifetime mode)
 WS_WINDOW_FRAC = 0.30    # fraction of rect edge distance (workspace mode)
@@ -209,8 +213,17 @@ Active from trial 2 onward (after `ws_calibrated = true`):
 
 ---
 
+## Device integration notes (2026-06-01)
+
+- **Heartbeat fix**: `udp_receiver.gd` `_network_loop` now sends "CONNECTED" at 100ms intervals when no packet is available. Required because tracker.py only sends data after learning Godot's reply address from an incoming message.
+- **Z-axis mapping**: `screen_pos.y = (raw_z - 0.2) * 1400.0 + 40.0` — maps Z range 0.2–0.6m to screen Y 40–600px. Hardcoded for current tabletop setup. See SETUP_NOTES.md for context.
+- **EMA alpha**: Changed from 0.4 → 0.7 in `pyscripts/tracker.py` (Pi only, not in repo) — reduces curved tracking paths.
+- **PI gains tuned**: arm-based play catches more apples than mouse (natural deceleration near targets). Higher gains needed to push lifetime down fast enough.
+
+---
+
 ## Next session — Task 7: Godot auto-start on Pi boot
 
-Algorithm design is complete. Next steps:
-1. Test workspace mode with real arm tracker on Pi
-2. Configure Raspberry Pi to auto-launch Godot on boot (Task 7)
+Next steps:
+1. Configure Raspberry Pi to auto-launch Godot on boot (Task 7)
+2. Test workspace mode with real arm tracker on Pi
