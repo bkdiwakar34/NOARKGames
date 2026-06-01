@@ -92,6 +92,45 @@ func _draw() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, Color(1.0, 0.82, 0.28, 0.75))
 
 		var n: int = log.size()
+
+		# threshold line (dashed orange, starts where trial 2 begins)
+		var lt_thr: float = -1.0
+		for te1 in trial_log:
+			if te1.has("lt_threshold"):
+				lt_thr = float(te1.get("lt_threshold"))
+				break
+		if lt_thr > lmin:
+			var thr_x: float = gx
+			for ti1 in range(trial_log.size()):
+				if int(trial_log[ti1].get("trial", 1)) >= 2:
+					thr_x = gx + float(int(trial_log[ti1].get("apple_start", 0))) / float(max(n - 1, 1)) * gw
+					break
+			var thr_py: float = clamp(gy + gh - ((lt_thr - lmin) / (lmax - lmin)) * gh, gy, gy + gh)
+			draw_dashed_line(Vector2(thr_x, thr_py), Vector2(gx + gw, thr_py),
+				Color(1.0, 0.55, 0.15, 0.80), 1.5, 8.0)
+			draw_string(font, Vector2(gx + gw - 72, thr_py - 12), "threshold",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, Color(1.0, 0.55, 0.15, 0.95))
+
+		# trial bands (blue rect per trial, skip calibration trial = full range)
+		for ti2 in range(trial_log.size()):
+			var te2: Dictionary = trial_log[ti2]
+			if not te2.has("lt_lo") or not te2.has("lt_hi"):
+				continue
+			var band_lo: float = float(te2.get("lt_lo"))
+			var band_hi: float = float(te2.get("lt_hi"))
+			if band_lo <= lmin and band_hi >= lmax:
+				continue
+			var a_start: int = int(te2.get("apple_start", 0))
+			var a_end: int = int(trial_log[ti2 + 1].get("apple_start", n)) if ti2 + 1 < trial_log.size() else n
+			if a_end <= a_start:
+				continue
+			var bx1: float = gx + float(a_start) / float(max(n - 1, 1)) * gw
+			var bx2: float = gx + float(max(a_end - 1, a_start)) / float(max(n - 1, 1)) * gw
+			var by_top: float = clamp(gy + gh - (band_hi - lmin) / (lmax - lmin) * gh, gy, gy + gh)
+			var by_bot: float = clamp(gy + gh - (band_lo - lmin) / (lmax - lmin) * gh, gy, gy + gh)
+			draw_rect(Rect2(bx1, by_top, bx2 - bx1, by_bot - by_top), Color(0.38, 0.72, 1.0, 0.13))
+			draw_rect(Rect2(bx1, by_top, bx2 - bx1, by_bot - by_top), Color(0.38, 0.72, 1.0, 0.30), false, 1.0)
+
 		var prev_p: Vector2 = Vector2.ZERO
 		for i in range(n):
 			var entry: Dictionary = log[i]

@@ -29,6 +29,7 @@ var _last_spawn_pos: Vector2 = Vector2.ZERO
 
 var _trial_caught: int = 0
 var _trial_spawned: int = 0
+var _trial_apple_start: int = 0
 var _integral: float = 0.0
 var outcome_log: Array = []   # [{lt, hit, pos}] — one entry per apple
 var trial_log: Array = []     # [{trial, rate}] — one entry per completed trial
@@ -79,6 +80,7 @@ func _start_trial() -> void:
 	trial_number += 1
 	_trial_caught = 0
 	_trial_spawned = 0
+	_trial_apple_start = outcome_log.size()
 	_trial_timer.start(TRIAL_DURATION)
 	trial_started.emit(trial_number)
 
@@ -135,7 +137,11 @@ func _calibrate_from_trial1() -> void:
 	threshold = target_lt
 	offset = (assigned_rate - 0.5) * WINDOW_WIDTH
 	rolling_rate = float(n_caught) / float(data.size())
-	trial_log.append({"trial": trial_number, "rate": rolling_rate})
+	trial_log.append({
+		"trial": trial_number, "rate": rolling_rate,
+		"apple_start": _trial_apple_start,
+		"lt_lo": LIFETIME_MIN, "lt_hi": LIFETIME_MAX, "lt_threshold": threshold,
+	})
 
 func _rect_edge_dist(angle: float, dx: float, dy: float) -> float:
 	var cx := absf(cos(angle))
@@ -174,13 +180,12 @@ func _calibrate_workspace(data: Array) -> void:
 		ws_threshold = (max_caught_scale + min_missed_scale) * 0.5
 	ws_offset = (assigned_rate - 0.5) * WS_WINDOW_FRAC  # positive = easier = shift window inside edge
 	rolling_rate = float(n_caught) / float(data.size())
-	trial_log.append({"trial": trial_number, "rate": rolling_rate})
+	trial_log.append({"trial": trial_number, "rate": rolling_rate, "apple_start": _trial_apple_start})
 
 func _update_difficulty() -> void:
 	if _trial_spawned == 0:
 		return
 	rolling_rate = float(_trial_caught) / float(_trial_spawned)
-	trial_log.append({"trial": trial_number, "rate": rolling_rate})
 	var error := rolling_rate - assigned_rate
 	_integral += error
 	var correction: float = GAIN_I * _integral
@@ -188,11 +193,20 @@ func _update_difficulty() -> void:
 		correction += GAIN_P * error
 	if difficulty_mode == DifficultyMode.WORKSPACE:
 		var half_w: float = WS_WINDOW_FRAC * 0.5
-		var min_ws_offset: float = -ws_threshold + half_w         # window bottom at 0
-		var max_ws_offset: float = (1.0 - ws_threshold) - half_w  # window top at 1
+		var min_ws_offset: float = -ws_threshold + half_w
+		var max_ws_offset: float = (1.0 - ws_threshold) - half_w
+		trial_log.append({"trial": trial_number, "rate": rolling_rate, "apple_start": _trial_apple_start})
 		ws_offset = clamp(ws_offset - correction, min_ws_offset, max_ws_offset)
 	else:
 		var half_w: float = WINDOW_WIDTH * 0.5
+		var center: float = threshold + offset
+		trial_log.append({
+			"trial": trial_number, "rate": rolling_rate,
+			"apple_start": _trial_apple_start,
+			"lt_lo": clamp(center - half_w, LIFETIME_MIN, LIFETIME_MAX),
+			"lt_hi": clamp(center + half_w, LIFETIME_MIN, LIFETIME_MAX),
+			"lt_threshold": threshold,
+		})
 		var min_offset: float = LIFETIME_MIN - threshold + half_w
 		var max_offset: float = LIFETIME_MAX - threshold - half_w
 		offset = clamp(offset - correction, min_offset, max_offset)
