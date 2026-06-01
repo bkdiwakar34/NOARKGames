@@ -15,7 +15,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="NOARKGames"
-run/main_scene="uid://vhx3bkgoif43"
+run/main_scene="res://v2/Scenes/main.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 boot_splash/bg_color=Color(1, 1, 1, 1)
 boot_splash/stretch_mode=0
@@ -25,20 +25,11 @@ boot_splash/minimum_display_time=2000
 
 [autoload]
 
-PatientDB="*res://Main_screen/Scripts/patient_db.gd"
-Manager="*res://Main_screen/Scripts/manager.gd"
-GlobalSignals="*res://Main_screen/Scripts/global_signals.gd"
-GlobalScript="*res://Main_screen/Scripts/global_script.gd"
-SoundFx="*res://Main_screen/Scenes/SoundFx.tscn"
-GlobalTimer="*res://Main_screen/Scripts/global_timer.gd"
-ScoreManager="*res://Main_screen/Scripts/score_db.gd"
-DebugSettings="*res://Main_screen/Scripts/debug_settings.gd"
-AudioManager="*res://Games/Jumpify/Scenes/Managers/AudioManager.tscn"
-SceneTransition="*res://Games/Jumpify/Scenes/Managers/SceneTransition.tscn"
-GlobalTimerManager="*res://Main_screen/Scripts/GlobalTimerManager.gd"
-MusicManager="*res://Main_screen/Scripts/MusicManager.gd"
-ButtonSoundManager="*res://Main_screen/Scripts/btn_sound_manager.gd"
-CircularTimer="*res://Games/random_reach/scenes/circular_timer.gd"
+PatientDB="*res://v2/Core/patient_db.gd"
+GlobalSignals="*res://v2/Core/global_signals.gd"
+UDPReceiver="*res://v2/Core/udp_receiver.gd"
+SessionManager="*res://v2/Core/session_manager.gd"
+AdaptiveManager="*res://v2/Core/adaptive_manager.gd"
 
 [display]
 
