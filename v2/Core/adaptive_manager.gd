@@ -43,16 +43,16 @@ var gain_d: float = 0.0
 var _prev_error: float = 0.0
 
 const DEAD_BAND: float = 0.05
-const WINDOW_WIDTH: float = 2.4      # seconds — lifetime sampling window width
+var window_width: float = 2.4        # seconds — lifetime sampling window width
 const WS_WINDOW_FRAC: float = 0.30   # fraction of ws_radius — workspace sampling window width
-const TRIAL_DURATION: float = 60.0
+var trial_duration: float = 60.0     # revert to 60.0 for real patients
 const BETWEEN_DURATION: float = 3.0
 const LIFETIME_MAX: float = 8.0   # revert to 15.0 for real patients
 const LIFETIME_MIN: float = 0.1   # revert to 3.0 for real patients
 
 func _ready() -> void:
 	_trial_timer = Timer.new()
-	_trial_timer.wait_time = TRIAL_DURATION
+	_trial_timer.wait_time = trial_duration
 	_trial_timer.one_shot = true
 	_trial_timer.timeout.connect(_on_trial_timer_ended)
 	add_child(_trial_timer)
@@ -85,7 +85,7 @@ func _start_trial() -> void:
 	_trial_caught = 0
 	_trial_spawned = 0
 	_trial_apple_start = outcome_log.size()
-	_trial_timer.start(TRIAL_DURATION)
+	_trial_timer.start(trial_duration)
 	trial_started.emit(trial_number)
 
 func record_spawn() -> void:
@@ -104,7 +104,7 @@ func get_apple_lifetime() -> float:
 	if trial_number == 1:
 		return randf_range(LIFETIME_MIN, LIFETIME_MAX)
 	var center: float = threshold + offset
-	var half_w: float = WINDOW_WIDTH * 0.5
+	var half_w: float = window_width * 0.5
 	var lt_min: float = clamp(center - half_w, LIFETIME_MIN, LIFETIME_MAX)
 	var lt_max: float = clamp(center + half_w, LIFETIME_MIN, LIFETIME_MAX)
 	return randf_range(lt_min, max(lt_min + 0.01, lt_max))
@@ -140,7 +140,7 @@ func _calibrate_from_trial1() -> void:
 	else:
 		target_lt = (min_caught_lt + max_missed_lt) * 0.5
 	threshold = target_lt
-	offset = (assigned_rate - 0.5) * WINDOW_WIDTH
+	offset = (assigned_rate - 0.5) * window_width
 	rolling_rate = float(n_caught) / float(data.size())
 	_prev_error = rolling_rate - assigned_rate
 	trial_log.append({
@@ -206,7 +206,7 @@ func _update_difficulty() -> void:
 		trial_log.append({"trial": trial_number, "rate": rolling_rate, "apple_start": _trial_apple_start})
 		ws_offset = clamp(ws_offset - correction, min_ws_offset, max_ws_offset)
 	else:
-		var half_w: float = WINDOW_WIDTH * 0.5
+		var half_w: float = window_width * 0.5
 		var center: float = threshold + offset
 		trial_log.append({
 			"trial": trial_number, "rate": rolling_rate,

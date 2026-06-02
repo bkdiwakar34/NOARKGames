@@ -39,6 +39,7 @@ func _build_ui(patient_name: String) -> void:
 	_add_rate_selector(vp)
 	_add_mode_toggle(vp)
 	_add_pid_row(vp)
+	_add_testing_row(vp)
 
 func _add_game_card(pos: Vector2, display_name: String, scene_path: String) -> void:
 	var normal_sb := StyleBoxFlat.new()
@@ -90,7 +91,7 @@ func _add_rate_selector(vp: Vector2) -> void:
 	lbl.add_theme_color_override("font_color", Color(0.28, 0.42, 0.60, 0.80))
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.custom_minimum_size = Vector2(vp.x, 28.0)
-	lbl.position = Vector2(0.0, vp.y * 0.63)
+	lbl.position = Vector2(0.0, vp.y * 0.55)
 	add_child(lbl)
 
 	var btn_w: float = 72.0
@@ -98,7 +99,7 @@ func _add_rate_selector(vp: Vector2) -> void:
 	var gap: float = 8.0
 	var total_w: float = rates.size() * btn_w + (rates.size() - 1) * gap
 	var start_x: float = vp.x * 0.5 - total_w * 0.5
-	var row_y: float = vp.y * 0.63 + 32.0
+	var row_y: float = vp.y * 0.55 + 32.0
 
 	for i in rates.size():
 		var r: float = rates[i]
@@ -148,13 +149,13 @@ func _add_mode_toggle(vp: Vector2) -> void:
 	label.add_theme_color_override("font_color", Color(0.28, 0.42, 0.60, 0.80))
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.custom_minimum_size = Vector2(vp.x, 28.0)
-	label.position = Vector2(0.0, vp.y * 0.74)
+	label.position = Vector2(0.0, vp.y * 0.66)
 	label.text = "Difficulty mode:"
 	add_child(label)
 
 	var btn := Button.new()
 	btn.custom_minimum_size = Vector2(200.0, 40.0)
-	btn.position = Vector2(vp.x * 0.5 - 100.0, vp.y * 0.74 + 32.0)
+	btn.position = Vector2(vp.x * 0.5 - 100.0, vp.y * 0.66 + 32.0)
 	btn.add_theme_font_size_override("font_size", 18)
 	_update_mode_btn(btn)
 	btn.pressed.connect(func():
@@ -179,7 +180,7 @@ func _add_pid_row(vp: Vector2) -> void:
 	header.add_theme_color_override("font_color", Color(0.28, 0.42, 0.60, 0.80))
 	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	header.custom_minimum_size = Vector2(vp.x, 24.0)
-	header.position = Vector2(0.0, vp.y * 0.85)
+	header.position = Vector2(0.0, vp.y * 0.76)
 	add_child(header)
 
 	var configs: Array = [
@@ -192,7 +193,7 @@ func _add_pid_row(vp: Vector2) -> void:
 	var gap: float = 16.0
 	var total_w: float = configs.size() * group_w + (configs.size() - 1) * gap
 	var start_x: float = vp.x * 0.5 - total_w * 0.5
-	var row_y: float = vp.y * 0.85 + 28.0
+	var row_y: float = vp.y * 0.76 + 28.0
 	var btn_h: float = 32.0
 
 	for i in configs.size():
@@ -250,6 +251,105 @@ func _add_pid_row(vp: Vector2) -> void:
 			AdaptiveManager.set(captured_prop, nv)
 			captured_val_lbl.text = "%.2f" % nv
 		)
+
+func _add_testing_row(vp: Vector2) -> void:
+	var header := Label.new()
+	header.text = "Testing:"
+	header.add_theme_font_size_override("font_size", 16)
+	header.add_theme_color_override("font_color", Color(0.28, 0.42, 0.60, 0.80))
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.custom_minimum_size = Vector2(vp.x, 24.0)
+	header.position = Vector2(0.0, vp.y * 0.87)
+	add_child(header)
+
+	var row_y: float = vp.y * 0.87 + 28.0
+	var btn_h: float = 32.0
+
+	# Trial duration buttons
+	var durations: Array = [10.0, 20.0, 30.0, 60.0]
+	var dur_buttons: Array = []
+
+	var dur_lbl := Label.new()
+	dur_lbl.text = "Trial:"
+	dur_lbl.add_theme_font_size_override("font_size", 15)
+	dur_lbl.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
+	dur_lbl.custom_minimum_size = Vector2(40.0, btn_h)
+	dur_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var dur_total_w: float = 40.0 + durations.size() * 50.0 + (durations.size() - 1) * 6.0
+	var ww_group_w: float = 156.0
+	var section_gap: float = 30.0
+	var total_w: float = dur_total_w + section_gap + ww_group_w
+	var start_x: float = vp.x * 0.5 - total_w * 0.5
+	dur_lbl.position = Vector2(start_x, row_y)
+	add_child(dur_lbl)
+
+	var dur_x: float = start_x + 44.0
+	for i in durations.size():
+		var d: float = durations[i]
+		var b := Button.new()
+		b.text = "%ds" % int(d)
+		b.custom_minimum_size = Vector2(50.0, btn_h)
+		b.size = Vector2(50.0, btn_h)
+		b.position = Vector2(dur_x + i * 56.0, row_y)
+		b.add_theme_font_size_override("font_size", 14)
+		_style_rate_btn(b, d == AdaptiveManager.trial_duration)
+		var captured_d: float = d
+		var captured_b: Button = b
+		b.pressed.connect(func():
+			AdaptiveManager.trial_duration = captured_d
+			for db in dur_buttons:
+				_style_rate_btn(db, false)
+			_style_rate_btn(captured_b, true)
+		)
+		dur_buttons.append(b)
+		add_child(b)
+
+	# Window width +/- control
+	var ww_x: float = start_x + dur_total_w + section_gap
+
+	var ww_lbl := Label.new()
+	ww_lbl.text = "Width:"
+	ww_lbl.add_theme_font_size_override("font_size", 15)
+	ww_lbl.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
+	ww_lbl.custom_minimum_size = Vector2(46.0, btn_h)
+	ww_lbl.position = Vector2(ww_x, row_y)
+	ww_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	add_child(ww_lbl)
+
+	var ww_dec := Button.new()
+	ww_dec.text = "−"
+	ww_dec.custom_minimum_size = Vector2(30.0, btn_h)
+	ww_dec.size = Vector2(30.0, btn_h)
+	ww_dec.position = Vector2(ww_x + 50.0, row_y)
+	add_child(ww_dec)
+
+	var ww_val := Label.new()
+	ww_val.text = "%.1f" % AdaptiveManager.window_width
+	ww_val.add_theme_font_size_override("font_size", 15)
+	ww_val.add_theme_color_override("font_color", Color(0.10, 0.25, 0.50))
+	ww_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ww_val.custom_minimum_size = Vector2(46.0, btn_h)
+	ww_val.position = Vector2(ww_x + 84.0, row_y)
+	ww_val.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	add_child(ww_val)
+
+	var ww_inc := Button.new()
+	ww_inc.text = "+"
+	ww_inc.custom_minimum_size = Vector2(30.0, btn_h)
+	ww_inc.size = Vector2(30.0, btn_h)
+	ww_inc.position = Vector2(ww_x + 134.0, row_y)
+	add_child(ww_inc)
+
+	ww_dec.pressed.connect(func():
+		var nv: float = clamp(AdaptiveManager.window_width - 0.2, 0.4, 6.0)
+		AdaptiveManager.window_width = nv
+		ww_val.text = "%.1f" % nv
+	)
+	ww_inc.pressed.connect(func():
+		var nv: float = clamp(AdaptiveManager.window_width + 0.2, 0.4, 6.0)
+		AdaptiveManager.window_width = nv
+		ww_val.text = "%.1f" % nv
+	)
 
 func _start_game(scene_path: String) -> void:
 	if not AdaptiveManager.is_running:
