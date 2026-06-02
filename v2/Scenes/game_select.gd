@@ -38,6 +38,7 @@ func _build_ui(patient_name: String) -> void:
 
 	_add_rate_selector(vp)
 	_add_mode_toggle(vp)
+	_add_pid_row(vp)
 
 func _add_game_card(pos: Vector2, display_name: String, scene_path: String) -> void:
 	var normal_sb := StyleBoxFlat.new()
@@ -89,7 +90,7 @@ func _add_rate_selector(vp: Vector2) -> void:
 	lbl.add_theme_color_override("font_color", Color(0.28, 0.42, 0.60, 0.80))
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.custom_minimum_size = Vector2(vp.x, 28.0)
-	lbl.position = Vector2(0.0, vp.y * 0.70)
+	lbl.position = Vector2(0.0, vp.y * 0.63)
 	add_child(lbl)
 
 	var btn_w: float = 72.0
@@ -97,7 +98,7 @@ func _add_rate_selector(vp: Vector2) -> void:
 	var gap: float = 8.0
 	var total_w: float = rates.size() * btn_w + (rates.size() - 1) * gap
 	var start_x: float = vp.x * 0.5 - total_w * 0.5
-	var row_y: float = vp.y * 0.70 + 32.0
+	var row_y: float = vp.y * 0.63 + 32.0
 
 	for i in rates.size():
 		var r: float = rates[i]
@@ -147,13 +148,13 @@ func _add_mode_toggle(vp: Vector2) -> void:
 	label.add_theme_color_override("font_color", Color(0.28, 0.42, 0.60, 0.80))
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.custom_minimum_size = Vector2(vp.x, 28.0)
-	label.position = Vector2(0.0, vp.y * 0.80)
+	label.position = Vector2(0.0, vp.y * 0.74)
 	label.text = "Difficulty mode:"
 	add_child(label)
 
 	var btn := Button.new()
 	btn.custom_minimum_size = Vector2(200.0, 40.0)
-	btn.position = Vector2(vp.x * 0.5 - 100.0, vp.y * 0.80 + 32.0)
+	btn.position = Vector2(vp.x * 0.5 - 100.0, vp.y * 0.74 + 32.0)
 	btn.add_theme_font_size_override("font_size", 18)
 	_update_mode_btn(btn)
 	btn.pressed.connect(func():
@@ -170,6 +171,85 @@ func _update_mode_btn(btn: Button) -> void:
 		btn.text = "Lifetime"
 	else:
 		btn.text = "Workspace"
+
+func _add_pid_row(vp: Vector2) -> void:
+	var header := Label.new()
+	header.text = "PID gains:"
+	header.add_theme_font_size_override("font_size", 16)
+	header.add_theme_color_override("font_color", Color(0.28, 0.42, 0.60, 0.80))
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.custom_minimum_size = Vector2(vp.x, 24.0)
+	header.position = Vector2(0.0, vp.y * 0.85)
+	add_child(header)
+
+	var configs: Array = [
+		{"name": "Kp", "prop": "gain_p", "step": 0.05, "min": 0.0, "max": 2.0},
+		{"name": "Ki", "prop": "gain_i", "step": 0.01, "min": 0.0, "max": 0.5},
+		{"name": "Kd", "prop": "gain_d", "step": 0.01, "min": 0.0, "max": 0.5},
+	]
+
+	var group_w: float = 156.0
+	var gap: float = 16.0
+	var total_w: float = configs.size() * group_w + (configs.size() - 1) * gap
+	var start_x: float = vp.x * 0.5 - total_w * 0.5
+	var row_y: float = vp.y * 0.85 + 28.0
+	var btn_h: float = 32.0
+
+	for i in configs.size():
+		var cfg: Dictionary = configs[i]
+		var gx: float = start_x + i * (group_w + gap)
+
+		var name_lbl := Label.new()
+		name_lbl.text = cfg["name"] + ":"
+		name_lbl.add_theme_font_size_override("font_size", 15)
+		name_lbl.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
+		name_lbl.custom_minimum_size = Vector2(32.0, btn_h)
+		name_lbl.position = Vector2(gx, row_y)
+		name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		add_child(name_lbl)
+
+		var dec_btn := Button.new()
+		dec_btn.text = "−"
+		dec_btn.custom_minimum_size = Vector2(30.0, btn_h)
+		dec_btn.size = Vector2(30.0, btn_h)
+		dec_btn.position = Vector2(gx + 36.0, row_y)
+		add_child(dec_btn)
+
+		var val_lbl := Label.new()
+		val_lbl.text = "%.2f" % AdaptiveManager.get(cfg["prop"])
+		val_lbl.add_theme_font_size_override("font_size", 15)
+		val_lbl.add_theme_color_override("font_color", Color(0.10, 0.25, 0.50))
+		val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		val_lbl.custom_minimum_size = Vector2(52.0, btn_h)
+		val_lbl.position = Vector2(gx + 70.0, row_y)
+		val_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		add_child(val_lbl)
+
+		var inc_btn := Button.new()
+		inc_btn.text = "+"
+		inc_btn.custom_minimum_size = Vector2(30.0, btn_h)
+		inc_btn.size = Vector2(30.0, btn_h)
+		inc_btn.position = Vector2(gx + 126.0, row_y)
+		add_child(inc_btn)
+
+		var captured_prop: String = cfg["prop"]
+		var captured_step: float = cfg["step"]
+		var captured_min: float = cfg["min"]
+		var captured_max: float = cfg["max"]
+		var captured_val_lbl: Label = val_lbl
+
+		dec_btn.pressed.connect(func():
+			var cur: float = AdaptiveManager.get(captured_prop)
+			var nv: float = clamp(cur - captured_step, captured_min, captured_max)
+			AdaptiveManager.set(captured_prop, nv)
+			captured_val_lbl.text = "%.2f" % nv
+		)
+		inc_btn.pressed.connect(func():
+			var cur: float = AdaptiveManager.get(captured_prop)
+			var nv: float = clamp(cur + captured_step, captured_min, captured_max)
+			AdaptiveManager.set(captured_prop, nv)
+			captured_val_lbl.text = "%.2f" % nv
+		)
 
 func _start_game(scene_path: String) -> void:
 	if not AdaptiveManager.is_running:

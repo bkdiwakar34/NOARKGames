@@ -37,9 +37,12 @@ var trial_log: Array = []     # [{trial, rate}] — one entry per completed tria
 var _trial_timer: Timer
 var _between_timer: Timer
 
+var gain_p: float = 0.35
+var gain_i: float = 0.05
+var gain_d: float = 0.0
+var _prev_error: float = 0.0
+
 const DEAD_BAND: float = 0.05
-const GAIN_P: float = 0.35
-const GAIN_I: float = 0.05
 const WINDOW_WIDTH: float = 2.4      # seconds — lifetime sampling window width
 const WS_WINDOW_FRAC: float = 0.30   # fraction of ws_radius — workspace sampling window width
 const TRIAL_DURATION: float = 60.0
@@ -69,6 +72,7 @@ func start_session(rate: float) -> void:
 	trial_number = 0
 	rolling_rate = 0.0
 	_integral = 0.0
+	_prev_error = 0.0
 	outcome_log.clear()
 	trial_log.clear()
 	ws_calibrated = false
@@ -112,6 +116,7 @@ func _calibrate_from_trial1() -> void:
 
 	if difficulty_mode == DifficultyMode.WORKSPACE:
 		_calibrate_workspace(data)
+		_prev_error = rolling_rate - assigned_rate
 		return
 
 	# Lifetime mode: find lifetime threshold between caught and missed
@@ -137,6 +142,7 @@ func _calibrate_from_trial1() -> void:
 	threshold = target_lt
 	offset = (assigned_rate - 0.5) * WINDOW_WIDTH
 	rolling_rate = float(n_caught) / float(data.size())
+	_prev_error = rolling_rate - assigned_rate
 	trial_log.append({
 		"trial": trial_number, "rate": rolling_rate,
 		"apple_start": _trial_apple_start,
@@ -187,10 +193,12 @@ func _update_difficulty() -> void:
 		return
 	rolling_rate = float(_trial_caught) / float(_trial_spawned)
 	var error := rolling_rate - assigned_rate
+	var derivative := error - _prev_error
+	_prev_error = error
 	_integral += error
-	var correction: float = GAIN_I * _integral
+	var correction: float = gain_i * _integral + gain_d * derivative
 	if abs(error) > DEAD_BAND:
-		correction += GAIN_P * error
+		correction += gain_p * error
 	if difficulty_mode == DifficultyMode.WORKSPACE:
 		var half_w: float = WS_WINDOW_FRAC * 0.5
 		var min_ws_offset: float = -ws_threshold + half_w
