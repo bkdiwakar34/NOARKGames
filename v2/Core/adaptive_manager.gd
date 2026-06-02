@@ -41,6 +41,7 @@ var gain_p: float = 0.35
 var gain_i: float = 0.05
 var gain_d: float = 0.0
 var _prev_error: float = 0.0
+var catch_hold_time: float = 1.0   # revert to 0.8 for real patients
 
 const DEAD_BAND: float = 0.05
 var window_width: float = 2.4        # seconds — lifetime sampling window width
@@ -189,9 +190,10 @@ func _calibrate_workspace(data: Array) -> void:
 	trial_log.append({"trial": trial_number, "rate": rolling_rate, "apple_start": _trial_apple_start})
 
 func _update_difficulty() -> void:
-	if _trial_spawned == 0:
+	var resolved: int = outcome_log.size() - _trial_apple_start
+	if resolved == 0:
 		return
-	rolling_rate = float(_trial_caught) / float(_trial_spawned)
+	rolling_rate = float(_trial_caught) / float(resolved)
 	var error := rolling_rate - assigned_rate
 	var derivative := error - _prev_error
 	_prev_error = error

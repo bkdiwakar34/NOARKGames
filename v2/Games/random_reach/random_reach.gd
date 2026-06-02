@@ -5,7 +5,7 @@ const BETWEEN_TRIAL_SCENE := preload("res://v2/Scenes/between_trial.tscn")
 const GRAPH_OVERLAY_SCRIPT := preload("res://v2/Games/random_reach/graph_overlay.gd")
 
 const CATCH_RADIUS := 60.0
-const CATCH_HOLD_TIME := 1.0  # revert to 0.8 after testing
+var _catch_hold_time: float = 1.0
 const LOG_INTERVAL := 0.02
 
 var SCREEN_MIN: Vector2
@@ -30,6 +30,7 @@ func _ready() -> void:
 	SCREEN_MIN = Vector2(vp.x * 0.04, vp.y * 0.05)
 	SCREEN_MAX = Vector2(vp.x * 0.95, vp.y * 0.93)
 	_player_pos = vp * 0.5
+	_catch_hold_time = AdaptiveManager.catch_hold_time
 	AdaptiveManager.set_viewport_size(vp)
 	_build_ui()
 	_connect_signals()
@@ -183,8 +184,8 @@ func _check_catch(delta: float) -> void:
 		return
 	if _player_pos.distance_to(_current_apple.position) < CATCH_RADIUS:
 		_catch_timer += delta
-		_current_apple.set_catch_progress(clamp(_catch_timer / CATCH_HOLD_TIME, 0.0, 1.0))
-		if _catch_timer >= CATCH_HOLD_TIME:
+		_current_apple.set_catch_progress(clamp(_catch_timer / _catch_hold_time, 0.0, 1.0))
+		if _catch_timer >= _catch_hold_time:
 			_current_apple.eat()
 	elif _catch_timer > 0.0:
 		_catch_timer = 0.0

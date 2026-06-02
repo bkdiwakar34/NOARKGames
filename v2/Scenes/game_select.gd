@@ -3,6 +3,12 @@ extends Control
 var _override_rate: float = 0.8
 var _rate_buttons: Array = []
 
+var _kp_edit:    LineEdit
+var _ki_edit:    LineEdit
+var _kd_edit:    LineEdit
+var _width_edit: LineEdit
+var _hold_edit:  LineEdit
+
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var patient := PatientDB.get_patient(PatientDB.current_patient_id)
@@ -173,6 +179,31 @@ func _update_mode_btn(btn: Button) -> void:
 	else:
 		btn.text = "Workspace"
 
+func _make_line_edit(value: float, decimals: int, w: float, h: float) -> LineEdit:
+	var e := LineEdit.new()
+	e.text = "%.*f" % [decimals, value]
+	e.custom_minimum_size = Vector2(w, h)
+	e.size = Vector2(w, h)
+	e.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.15, 0.28)
+	sb.border_width_left = 1
+	sb.border_width_right = 1
+	sb.border_width_top = 1
+	sb.border_width_bottom = 1
+	sb.border_color = Color(0.25, 0.45, 0.70)
+	sb.corner_radius_top_left = 4
+	sb.corner_radius_top_right = 4
+	sb.corner_radius_bottom_left = 4
+	sb.corner_radius_bottom_right = 4
+	sb.content_margin_left = 4.0
+	sb.content_margin_right = 4.0
+	e.add_theme_stylebox_override("normal", sb)
+	e.add_theme_stylebox_override("focus", sb)
+	e.add_theme_color_override("font_color", Color(0.88, 0.92, 1.0))
+	e.add_theme_font_size_override("font_size", 15)
+	return e
+
 func _add_pid_row(vp: Vector2) -> void:
 	var header := Label.new()
 	header.text = "PID gains:"
@@ -183,74 +214,39 @@ func _add_pid_row(vp: Vector2) -> void:
 	header.position = Vector2(0.0, vp.y * 0.76)
 	add_child(header)
 
-	var configs: Array = [
-		{"name": "Kp", "prop": "gain_p", "step": 0.05, "min": 0.0, "max": 2.0},
-		{"name": "Ki", "prop": "gain_i", "step": 0.01, "min": 0.0, "max": 0.5},
-		{"name": "Kd", "prop": "gain_d", "step": 0.01, "min": 0.0, "max": 0.5},
-	]
-
-	var group_w: float = 156.0
-	var gap: float = 16.0
-	var total_w: float = configs.size() * group_w + (configs.size() - 1) * gap
+	var row_h: float = 32.0
+	var lbl_w: float = 30.0
+	var edit_w: float = 70.0
+	var group_w: float = lbl_w + 6.0 + edit_w   # 106
+	var gap: float = 40.0
+	var total_w: float = 3.0 * group_w + 2.0 * gap
 	var start_x: float = vp.x * 0.5 - total_w * 0.5
 	var row_y: float = vp.y * 0.76 + 28.0
-	var btn_h: float = 32.0
 
-	for i in configs.size():
-		var cfg: Dictionary = configs[i]
+	var gains := [
+		{"label": "Kp:", "val": AdaptiveManager.gain_p},
+		{"label": "Ki:", "val": AdaptiveManager.gain_i},
+		{"label": "Kd:", "val": AdaptiveManager.gain_d},
+	]
+
+	for i in gains.size():
 		var gx: float = start_x + i * (group_w + gap)
+		var lbl := Label.new()
+		lbl.text = gains[i]["label"]
+		lbl.add_theme_font_size_override("font_size", 15)
+		lbl.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
+		lbl.custom_minimum_size = Vector2(lbl_w, row_h)
+		lbl.position = Vector2(gx, row_y)
+		lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		add_child(lbl)
 
-		var name_lbl := Label.new()
-		name_lbl.text = cfg["name"] + ":"
-		name_lbl.add_theme_font_size_override("font_size", 15)
-		name_lbl.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
-		name_lbl.custom_minimum_size = Vector2(32.0, btn_h)
-		name_lbl.position = Vector2(gx, row_y)
-		name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		add_child(name_lbl)
+		var edit := _make_line_edit(gains[i]["val"], 2, edit_w, row_h)
+		edit.position = Vector2(gx + lbl_w + 6.0, row_y)
+		add_child(edit)
 
-		var dec_btn := Button.new()
-		dec_btn.text = "−"
-		dec_btn.custom_minimum_size = Vector2(30.0, btn_h)
-		dec_btn.size = Vector2(30.0, btn_h)
-		dec_btn.position = Vector2(gx + 36.0, row_y)
-		add_child(dec_btn)
-
-		var val_lbl := Label.new()
-		val_lbl.text = "%.2f" % AdaptiveManager.get(cfg["prop"])
-		val_lbl.add_theme_font_size_override("font_size", 15)
-		val_lbl.add_theme_color_override("font_color", Color(0.10, 0.25, 0.50))
-		val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		val_lbl.custom_minimum_size = Vector2(52.0, btn_h)
-		val_lbl.position = Vector2(gx + 70.0, row_y)
-		val_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		add_child(val_lbl)
-
-		var inc_btn := Button.new()
-		inc_btn.text = "+"
-		inc_btn.custom_minimum_size = Vector2(30.0, btn_h)
-		inc_btn.size = Vector2(30.0, btn_h)
-		inc_btn.position = Vector2(gx + 126.0, row_y)
-		add_child(inc_btn)
-
-		var captured_prop: String = cfg["prop"]
-		var captured_step: float = cfg["step"]
-		var captured_min: float = cfg["min"]
-		var captured_max: float = cfg["max"]
-		var captured_val_lbl: Label = val_lbl
-
-		dec_btn.pressed.connect(func():
-			var cur: float = AdaptiveManager.get(captured_prop)
-			var nv: float = clamp(cur - captured_step, captured_min, captured_max)
-			AdaptiveManager.set(captured_prop, nv)
-			captured_val_lbl.text = "%.2f" % nv
-		)
-		inc_btn.pressed.connect(func():
-			var cur: float = AdaptiveManager.get(captured_prop)
-			var nv: float = clamp(cur + captured_step, captured_min, captured_max)
-			AdaptiveManager.set(captured_prop, nv)
-			captured_val_lbl.text = "%.2f" % nv
-		)
+		if i == 0: _kp_edit = edit
+		elif i == 1: _ki_edit = edit
+		else: _kd_edit = edit
 
 func _add_testing_row(vp: Vector2) -> void:
 	var header := Label.new()
@@ -264,33 +260,41 @@ func _add_testing_row(vp: Vector2) -> void:
 
 	var row_y: float = vp.y * 0.87 + 28.0
 	var btn_h: float = 32.0
+	var lbl_w: float = 50.0
+	var edit_w: float = 66.0
+	var section_gap: float = 28.0
 
-	# Trial duration buttons
+	# Trial duration section
 	var durations: Array = [10.0, 20.0, 30.0, 60.0]
 	var dur_buttons: Array = []
+	var dur_btn_w: float = 50.0
+	var dur_gap: float = 6.0
+	var dur_section_w: float = lbl_w + durations.size() * dur_btn_w + (durations.size() - 1) * dur_gap
+	# Width section: label + edit
+	var width_section_w: float = lbl_w + edit_w
+	# Hold section: label + edit
+	var hold_section_w: float = lbl_w + edit_w
+	var total_w: float = dur_section_w + section_gap + width_section_w + section_gap + hold_section_w
+	var start_x: float = vp.x * 0.5 - total_w * 0.5
 
+	# --- Trial duration ---
 	var dur_lbl := Label.new()
 	dur_lbl.text = "Trial:"
 	dur_lbl.add_theme_font_size_override("font_size", 15)
 	dur_lbl.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
-	dur_lbl.custom_minimum_size = Vector2(40.0, btn_h)
-	dur_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	var dur_total_w: float = 40.0 + durations.size() * 50.0 + (durations.size() - 1) * 6.0
-	var ww_group_w: float = 156.0
-	var section_gap: float = 30.0
-	var total_w: float = dur_total_w + section_gap + ww_group_w
-	var start_x: float = vp.x * 0.5 - total_w * 0.5
+	dur_lbl.custom_minimum_size = Vector2(lbl_w, btn_h)
 	dur_lbl.position = Vector2(start_x, row_y)
+	dur_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(dur_lbl)
 
-	var dur_x: float = start_x + 44.0
+	var dur_x: float = start_x + lbl_w
 	for i in durations.size():
 		var d: float = durations[i]
 		var b := Button.new()
 		b.text = "%ds" % int(d)
-		b.custom_minimum_size = Vector2(50.0, btn_h)
-		b.size = Vector2(50.0, btn_h)
-		b.position = Vector2(dur_x + i * 56.0, row_y)
+		b.custom_minimum_size = Vector2(dur_btn_w, btn_h)
+		b.size = Vector2(dur_btn_w, btn_h)
+		b.position = Vector2(dur_x + i * (dur_btn_w + dur_gap), row_y)
 		b.add_theme_font_size_override("font_size", 14)
 		_style_rate_btn(b, d == AdaptiveManager.trial_duration)
 		var captured_d: float = d
@@ -304,54 +308,45 @@ func _add_testing_row(vp: Vector2) -> void:
 		dur_buttons.append(b)
 		add_child(b)
 
-	# Window width +/- control
-	var ww_x: float = start_x + dur_total_w + section_gap
-
+	# --- Window width ---
+	var ww_x: float = start_x + dur_section_w + section_gap
 	var ww_lbl := Label.new()
-	ww_lbl.text = "Width:"
-	ww_lbl.add_theme_font_size_override("font_size", 15)
+	ww_lbl.text = "Width (s):"
+	ww_lbl.add_theme_font_size_override("font_size", 14)
 	ww_lbl.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
-	ww_lbl.custom_minimum_size = Vector2(46.0, btn_h)
+	ww_lbl.custom_minimum_size = Vector2(lbl_w, btn_h)
 	ww_lbl.position = Vector2(ww_x, row_y)
 	ww_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(ww_lbl)
+	_width_edit = _make_line_edit(AdaptiveManager.window_width, 1, edit_w, btn_h)
+	_width_edit.position = Vector2(ww_x + lbl_w, row_y)
+	add_child(_width_edit)
 
-	var ww_dec := Button.new()
-	ww_dec.text = "−"
-	ww_dec.custom_minimum_size = Vector2(30.0, btn_h)
-	ww_dec.size = Vector2(30.0, btn_h)
-	ww_dec.position = Vector2(ww_x + 50.0, row_y)
-	add_child(ww_dec)
+	# --- Catch hold time ---
+	var hold_x: float = ww_x + width_section_w + section_gap
+	var hold_lbl := Label.new()
+	hold_lbl.text = "Hold (s):"
+	hold_lbl.add_theme_font_size_override("font_size", 14)
+	hold_lbl.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
+	hold_lbl.custom_minimum_size = Vector2(lbl_w, btn_h)
+	hold_lbl.position = Vector2(hold_x, row_y)
+	hold_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	add_child(hold_lbl)
+	_hold_edit = _make_line_edit(AdaptiveManager.catch_hold_time, 1, edit_w, btn_h)
+	_hold_edit.position = Vector2(hold_x + lbl_w, row_y)
+	add_child(_hold_edit)
 
-	var ww_val := Label.new()
-	ww_val.text = "%.1f" % AdaptiveManager.window_width
-	ww_val.add_theme_font_size_override("font_size", 15)
-	ww_val.add_theme_color_override("font_color", Color(0.10, 0.25, 0.50))
-	ww_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ww_val.custom_minimum_size = Vector2(46.0, btn_h)
-	ww_val.position = Vector2(ww_x + 84.0, row_y)
-	ww_val.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	add_child(ww_val)
-
-	var ww_inc := Button.new()
-	ww_inc.text = "+"
-	ww_inc.custom_minimum_size = Vector2(30.0, btn_h)
-	ww_inc.size = Vector2(30.0, btn_h)
-	ww_inc.position = Vector2(ww_x + 134.0, row_y)
-	add_child(ww_inc)
-
-	ww_dec.pressed.connect(func():
-		var nv: float = clamp(AdaptiveManager.window_width - 0.2, 0.4, 6.0)
-		AdaptiveManager.window_width = nv
-		ww_val.text = "%.1f" % nv
-	)
-	ww_inc.pressed.connect(func():
-		var nv: float = clamp(AdaptiveManager.window_width + 0.2, 0.4, 6.0)
-		AdaptiveManager.window_width = nv
-		ww_val.text = "%.1f" % nv
-	)
+func _safe_float(text: String, fallback: float) -> float:
+	if text.is_valid_float():
+		return text.to_float()
+	return fallback
 
 func _start_game(scene_path: String) -> void:
+	AdaptiveManager.gain_p        = _safe_float(_kp_edit.text,    AdaptiveManager.gain_p)
+	AdaptiveManager.gain_i        = _safe_float(_ki_edit.text,    AdaptiveManager.gain_i)
+	AdaptiveManager.gain_d        = _safe_float(_kd_edit.text,    AdaptiveManager.gain_d)
+	AdaptiveManager.window_width  = _safe_float(_width_edit.text, AdaptiveManager.window_width)
+	AdaptiveManager.catch_hold_time = _safe_float(_hold_edit.text, AdaptiveManager.catch_hold_time)
 	if not AdaptiveManager.is_running:
 		AdaptiveManager.start_session(_override_rate)
 	get_tree().change_scene_to_file(scene_path)
