@@ -3,11 +3,14 @@ extends Control
 var _override_rate: float = 0.8
 var _rate_buttons: Array = []
 
-var _kp_edit:    LineEdit
-var _ki_edit:    LineEdit
-var _kd_edit:    LineEdit
-var _width_edit: LineEdit
-var _hold_edit:  LineEdit
+var _kp_edit:       LineEdit
+var _ki_edit:       LineEdit
+var _kd_edit:       LineEdit
+var _width_edit:    LineEdit
+var _hold_edit:     LineEdit
+var _sc_coarse_edit: LineEdit
+var _sc_fine_edit:   LineEdit
+var _sc_rev_edit:    LineEdit
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -274,7 +277,12 @@ func _add_testing_row(vp: Vector2) -> void:
 	var width_section_w: float = lbl_w + edit_w
 	# Hold section: label + edit
 	var hold_section_w: float = lbl_w + edit_w
-	var total_w: float = dur_section_w + section_gap + width_section_w + section_gap + hold_section_w
+	# Staircase section: Coarse | Fine | Rev
+	var sc_lbl_w: float = 50.0
+	var sc_edit_w: float = 48.0
+	var sc_inner_gap: float = 12.0
+	var sc_section_w: float = sc_lbl_w + sc_edit_w + sc_inner_gap + sc_lbl_w + sc_edit_w + sc_inner_gap + 36.0 + 40.0
+	var total_w: float = dur_section_w + section_gap + width_section_w + section_gap + hold_section_w + section_gap + sc_section_w
 	var start_x: float = vp.x * 0.5 - total_w * 0.5
 
 	# --- Trial duration ---
@@ -336,17 +344,42 @@ func _add_testing_row(vp: Vector2) -> void:
 	_hold_edit.position = Vector2(hold_x + lbl_w, row_y)
 	add_child(_hold_edit)
 
+	# --- Staircase calibration ---
+	var sc_x: float = hold_x + hold_section_w + section_gap
+	for item in [
+		{"label": "Coarse:", "x": sc_x, "val": AdaptiveManager.sc_step_coarse, "dec": 1, "w": sc_edit_w},
+		{"label": "Fine:", "x": sc_x + sc_lbl_w + sc_edit_w + sc_inner_gap, "val": AdaptiveManager.sc_step_fine, "dec": 1, "w": sc_edit_w},
+		{"label": "Rev#:", "x": sc_x + 2.0 * (sc_lbl_w + sc_edit_w + sc_inner_gap), "val": float(AdaptiveManager.sc_n_reversals), "dec": 0, "w": 40.0},
+	]:
+		var slbl := Label.new()
+		slbl.text = item["label"]
+		slbl.add_theme_font_size_override("font_size", 14)
+		slbl.add_theme_color_override("font_color", Color(0.20, 0.35, 0.55))
+		slbl.custom_minimum_size = Vector2(sc_lbl_w, btn_h)
+		slbl.position = Vector2(item["x"], row_y)
+		slbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		add_child(slbl)
+		var sedit := _make_line_edit(item["val"], item["dec"], item["w"], btn_h)
+		sedit.position = Vector2(item["x"] + sc_lbl_w, row_y)
+		add_child(sedit)
+		if item["label"] == "Coarse:": _sc_coarse_edit = sedit
+		elif item["label"] == "Fine:": _sc_fine_edit = sedit
+		else: _sc_rev_edit = sedit
+
 func _safe_float(text: String, fallback: float) -> float:
 	if text.is_valid_float():
 		return text.to_float()
 	return fallback
 
 func _start_game(scene_path: String) -> void:
-	AdaptiveManager.gain_p        = _safe_float(_kp_edit.text,    AdaptiveManager.gain_p)
-	AdaptiveManager.gain_i        = _safe_float(_ki_edit.text,    AdaptiveManager.gain_i)
-	AdaptiveManager.gain_d        = _safe_float(_kd_edit.text,    AdaptiveManager.gain_d)
-	AdaptiveManager.window_width  = _safe_float(_width_edit.text, AdaptiveManager.window_width)
-	AdaptiveManager.catch_hold_time = _safe_float(_hold_edit.text, AdaptiveManager.catch_hold_time)
+	AdaptiveManager.gain_p          = _safe_float(_kp_edit.text,        AdaptiveManager.gain_p)
+	AdaptiveManager.gain_i          = _safe_float(_ki_edit.text,        AdaptiveManager.gain_i)
+	AdaptiveManager.gain_d          = _safe_float(_kd_edit.text,        AdaptiveManager.gain_d)
+	AdaptiveManager.window_width    = _safe_float(_width_edit.text,     AdaptiveManager.window_width)
+	AdaptiveManager.catch_hold_time = _safe_float(_hold_edit.text,      AdaptiveManager.catch_hold_time)
+	AdaptiveManager.sc_step_coarse  = _safe_float(_sc_coarse_edit.text, AdaptiveManager.sc_step_coarse)
+	AdaptiveManager.sc_step_fine    = _safe_float(_sc_fine_edit.text,   AdaptiveManager.sc_step_fine)
+	AdaptiveManager.sc_n_reversals  = int(_safe_float(_sc_rev_edit.text, float(AdaptiveManager.sc_n_reversals)))
 	if not AdaptiveManager.is_running:
 		AdaptiveManager.start_session(_override_rate)
 	get_tree().change_scene_to_file(scene_path)

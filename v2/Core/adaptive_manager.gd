@@ -45,6 +45,15 @@ var catch_hold_time: float = 1.0   # revert to 0.8 for real patients
 
 const DEAD_BAND: float = 0.05
 var window_width: float = 2.4        # seconds — lifetime sampling window width
+
+# Staircase calibration
+var sc_step_coarse: float = 1.5   # step size (seconds) for first 2 reversals
+var sc_step_fine:   float = 0.5   # step size after 2 reversals
+var sc_n_reversals: int   = 6
+var _sc_level: float = 0.0
+var _sc_direction: int = 0          # +1 easier, -1 harder, 0 not started
+var _sc_reversals: Array = []
+var _sc_done: bool = false
 const WS_WINDOW_FRAC: float = 0.30   # fraction of ws_radius — workspace sampling window width
 var trial_duration: float = 60.0     # revert to 60.0 for real patients
 const BETWEEN_DURATION: float = 3.0
@@ -78,6 +87,10 @@ func start_session(rate: float) -> void:
 	trial_log.clear()
 	ws_calibrated = false
 	_ws_any_recorded = false
+	_sc_level = LIFETIME_MIN
+	_sc_direction = 0
+	_sc_reversals.clear()
+	_sc_done = false
 	is_running = true
 	_start_trial()
 
@@ -95,20 +108,41 @@ func record_spawn() -> void:
 func record_catch(lt: float) -> void:
 	outcome_log.append({"lt": lt, "hit": 1, "pos": _last_spawn_pos})
 	_trial_caught += 1
+	if trial_number == 1 and not _sc_done and difficulty_mode == DifficultyMode.LIFETIME:
+		_update_staircase(true)
 
 func record_miss(lt: float) -> void:
 	outcome_log.append({"lt": lt, "hit": 0, "pos": _last_spawn_pos})
+	if trial_number == 1 and not _sc_done and difficulty_mode == DifficultyMode.LIFETIME:
+		_update_staircase(false)
 
 func get_apple_lifetime() -> float:
 	if difficulty_mode == DifficultyMode.WORKSPACE:
 		return LIFETIME_MAX
 	if trial_number == 1:
-		return randf_range(LIFETIME_MIN, LIFETIME_MAX)
+		return _sc_level
 	var center: float = threshold + offset
 	var half_w: float = window_width * 0.5
 	var lt_min: float = clamp(center - half_w, LIFETIME_MIN, LIFETIME_MAX)
 	var lt_max: float = clamp(center + half_w, LIFETIME_MIN, LIFETIME_MAX)
 	return randf_range(lt_min, max(lt_min + 0.01, lt_max))
+
+func _update_staircase(hit: bool) -> void:
+	var step: float = sc_step_fine if _sc_reversals.size() >= 2 else sc_step_coarse
+	var new_dir: int = -1 if hit else 1   # catch → harder, miss → easier
+	if _sc_direction != 0 and new_dir != _sc_direction:
+		_sc_reversals.append(_sc_level)
+		if _sc_reversals.size() >= sc_n_reversals:
+			_sc_done = true
+			var sum: float = 0.0
+			for r in _sc_reversals:
+				sum += r
+			_sc_level = sum / _sc_reversals.size()
+			_trial_timer.stop()
+			call_deferred("_on_trial_timer_ended")
+			return
+	_sc_direction = new_dir
+	_sc_level = clamp(_sc_level + new_dir * step, LIFETIME_MIN, LIFETIME_MAX)
 
 func _calibrate_from_trial1() -> void:
 	var data: Array = outcome_log.duplicate()
@@ -120,27 +154,30 @@ func _calibrate_from_trial1() -> void:
 		_prev_error = rolling_rate - assigned_rate
 		return
 
-	# Lifetime mode: find lifetime threshold between caught and missed
-	var min_caught_lt: float = LIFETIME_MAX
-	var max_missed_lt: float = LIFETIME_MIN
 	var n_caught: int = 0
-	var n_missed: int = 0
 	for e in data:
-		var lt := float(e["lt"])
 		if e["hit"] == 1:
-			min_caught_lt = min(min_caught_lt, lt)
 			n_caught += 1
-		else:
-			max_missed_lt = max(max_missed_lt, lt)
-			n_missed += 1
-	var target_lt: float
-	if n_caught == 0:
-		target_lt = LIFETIME_MAX
-	elif n_missed == 0:
-		target_lt = LIFETIME_MIN
+
+	if _sc_done:
+		threshold = _sc_level
 	else:
-		target_lt = (min_caught_lt + max_missed_lt) * 0.5
-	threshold = target_lt
+		# fallback: timer expired before staircase completed
+		var min_caught_lt: float = LIFETIME_MAX
+		var max_missed_lt: float = LIFETIME_MIN
+		for e in data:
+			var lt := float(e["lt"])
+			if e["hit"] == 1:
+				min_caught_lt = min(min_caught_lt, lt)
+			else:
+				max_missed_lt = max(max_missed_lt, lt)
+		if n_caught == 0:
+			threshold = LIFETIME_MAX
+		elif n_caught == data.size():
+			threshold = LIFETIME_MIN
+		else:
+			threshold = (min_caught_lt + max_missed_lt) * 0.5
+
 	offset = (assigned_rate - 0.5) * window_width
 	rolling_rate = float(n_caught) / float(data.size())
 	_prev_error = rolling_rate - assigned_rate

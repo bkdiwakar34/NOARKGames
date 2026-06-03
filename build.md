@@ -1,5 +1,5 @@
 # NOARKGames — Build Progress
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 All new code lives in `v2/`. Old code in `Main_screen/` and `Games/` is untouched.
 
@@ -14,17 +14,19 @@ v2/
     global_signals.gd   — current_patient_id, data_path, game_mode
     udp_receiver.gd     — UDP:12345, stores raw_x/y/z + screen_pos
     session_manager.gd  — session/trial IDs, CSV log file creation
-    adaptive_manager.gd — trial timer (60s), workspace calibration, PI difficulty controller
+    adaptive_manager.gd — trial timer, workspace calibration, PID difficulty controller
   Scenes/
     main.tscn / main.gd           — entry: routes to registration or game_select
     registration.tscn / .gd       — therapist registers patient on Day 1
-    game_select.tscn / .gd        — game selection + difficulty mode toggle (Lifetime/Workspace)
+    game_select.tscn / .gd        — game selection + all session parameter controls
     between_trial.tscn / .gd      — 3-sec pause overlay (warm amber card)
   Games/
     random_reach/
       random_reach.tscn / .gd     — Apple Catch game, wired to AdaptiveManager
       apple.tscn / .gd            — apple target: code-drawn (red circle, stem, leaf, pulsing ring)
       graph_overlay.gd            — stop-session graph screen (no .tscn — programmatic)
+pyscripts/
+  simulate.py           — interactive PID simulator (run on Windows, not Pi)
 ```
 
 ---
@@ -49,6 +51,9 @@ v2/
 | 6h | Graph: threshold line + sampling band per trial | Done |
 | 6i | Device integration: heartbeat fix + Z-axis mapping | Done |
 | 6j | Target rate selector on game_select (session override) | Done |
+| 6k | PID controller + tuning UI on game_select | Done |
+| 6l | Fix success rate bug (spawned vs resolved apple count) | Done |
+| 6m | Interactive PID simulator (pyscripts/simulate.py) | Done |
 | 7 | Godot auto-start on Pi boot | Not started |
 | 8 | Python tracker accuracy fixes | Not started |
 | 9 | Data sync to researcher server | Not started |
@@ -60,7 +65,7 @@ v2/
 
 - Project runs cleanly with 5 autoloads
 - Registration screen: therapist fills patient details + assigns 70/80/90% group
-- Game select screen: sky gradient background, "Apple Catch" card button, difficulty mode toggle
+- Game select screen: sky gradient background, "Apple Catch" card button, all session controls
 - Apple Catch game:
   - Player: jet.png sheep sprite at scale 0.15
   - Apple: code-drawn (red circle 28px, stem, leaf, shine, pulsing yellow ring)
@@ -74,10 +79,22 @@ v2/
   - Graph 1: apple lifetime (Y) vs apple number (X) — green=caught, red=missed, dashed orange threshold line, blue band per trial showing sampling window
   - Graph 2: per-trial success rate (Y) vs trial number (X) — orange line, dashed target line
   - "Back to menu" button
-- AdaptiveManager: calibration trial → window-around-threshold sampling → PI controller
+- AdaptiveManager: calibration trial → window-around-threshold sampling → PID controller
 - UDPReceiver: proactive 100ms heartbeat so tracker.py learns reply address on startup
 - Device confirmed working: arm tracker drives sheep, workspace calibration runs correctly
-- Game select: "Target rate:" row with buttons 40/50/70/80/90/100% — session-only override, defaults to patient's registered rate, nothing written to patients.json
+
+---
+
+## Game select screen — controls (bottom half)
+
+All values are applied to AdaptiveManager when the player taps "Apple Catch".
+
+| Row | Controls |
+|-----|----------|
+| Target rate | Buttons: 40 / 50 / 70 / 80 / 90 / 100% — session-only override, not saved to patients.json |
+| Difficulty mode | Toggle button: Lifetime / Workspace |
+| PID gains | Text inputs: `Kp [0.35]  Ki [0.05]  Kd [0.00]` |
+| Testing | Trial duration buttons: 10s / 20s / 30s / 60s — `Width (s) [2.4]` — `Hold (s) [1.0]` |
 
 ---
 
@@ -88,7 +105,7 @@ v2/
 - Pulsing yellow ring: CATCH_ARC_RADIUS=46
 - Lifetime bar: green→yellow→red (`var lifetime: float` — set dynamically by AdaptiveManager)
 - **Lifetime countdown PAUSES while player is in catch radius** (`_catch_progress > 0`) — prevents apple expiring mid-catch
-- White catch arc: fills clockwise as player holds (CATCH_HOLD_TIME in random_reach.gd)
+- White catch arc: fills clockwise as player holds (`AdaptiveManager.catch_hold_time`)
 
 **Do NOT go back to sprite-based apple — caused multi-apple bug, never fully diagnosed.**
 
@@ -109,14 +126,16 @@ Trial 1 — calibration:
 Trial 2+ — window sampling:
   Sample from a window centered at (threshold + offset) [lifetime]
                               or (threshold - offset) [workspace]
-  Window width: WINDOW_WIDTH seconds [lifetime] or WS_WINDOW_FRAC of edge dist [workspace]
+  Window width: window_width seconds [lifetime] or WS_WINDOW_FRAC of edge dist [workspace]
 
-  At trial end — PI update:
-    rolling_rate = trial_caught / trial_spawned
+  At trial end — PID update:
+    rolling_rate = trial_caught / resolved_apples   ← resolved, not spawned (bug fix 2026-06-02)
     error = rolling_rate - assigned_rate
+    derivative = error - prev_error
+    prev_error = error
     _integral += error
-    correction = GAIN_I * _integral
-    if |error| > DEAD_BAND: correction += GAIN_P * error
+    correction = gain_i * _integral + gain_d * derivative
+    if |error| > DEAD_BAND: correction += gain_p * error
     offset = clamp(offset - correction, ...)   # positive offset = easier in both modes
 ```
 
@@ -125,7 +144,7 @@ Trial 2+ — window sampling:
 - Mechanism: apple lifetime controls difficulty
 - threshold (seconds): lifetime where P(catch) ≈ 0.5 — calibrated from trial 1
 - offset (seconds, positive = easier): window shifts toward longer lifetimes
-- Window width: WINDOW_WIDTH = 2.4s — apples cluster near threshold, not at extremes
+- Window width: `window_width` (default 2.4s) — settable from game_select
 - Apple experience: all apples feel challenging but achievable (no bimodal extremes)
 
 ### Workspace mode
@@ -145,17 +164,23 @@ Trial 2+ — window sampling:
 - Prevents consecutive apples appearing in same location (which would bypass difficulty)
 - If random spawn is too close, push outward along same direction
 
-**Constants:**
+**Runtime-adjustable vars (set from game_select before starting session):**
 ```
-GAIN_P         = 0.35   # tuned for arm-based play (was 0.15 for mouse)
-GAIN_I         = 0.05   # tuned for arm-based play (was 0.02 for mouse)
-DEAD_BAND      = 0.05
-WINDOW_WIDTH   = 2.4     # seconds (lifetime mode)
-WS_WINDOW_FRAC = 0.30    # fraction of rect edge distance (workspace mode)
-TRIAL_DURATION  = 60.0
+gain_p          = 0.35   # tuned for arm-based play
+gain_i          = 0.05
+gain_d          = 0.00   # derivative term; 0 = pure PI behaviour
+window_width    = 2.4    # seconds (lifetime mode sampling window)
+trial_duration  = 60.0   # revert to 60.0 for real patients
+catch_hold_time = 1.0    # revert to 0.8 for real patients
+```
+
+**Fixed constants:**
+```
+DEAD_BAND        = 0.05
+WS_WINDOW_FRAC   = 0.30
 BETWEEN_DURATION = 3.0
-LIFETIME_MAX = 8.0    # revert to 15.0 for real patients
-LIFETIME_MIN = 0.1    # revert to 3.0 for real patients
+LIFETIME_MAX     = 8.0   # revert to 15.0 for real patients
+LIFETIME_MIN     = 0.1   # revert to 3.0 for real patients
 ```
 
 **Outcome log:**
@@ -170,11 +195,30 @@ If needed in future: persist in patients.json between sessions.
 
 ## Testing constants — MUST REVERT before real patient use
 
-| File | Constant | Current (testing) | Revert to (patients) |
+| File | Variable | Current (testing) | Revert to (patients) |
 |------|----------|-------------------|----------------------|
-| `random_reach.gd` | `CATCH_HOLD_TIME` | `1.0` | `0.8` |
+| `adaptive_manager.gd` | `catch_hold_time` | `1.0` | `0.8` |
 | `adaptive_manager.gd` | `LIFETIME_MAX` | `8.0` | `15.0` |
 | `adaptive_manager.gd` | `LIFETIME_MIN` | `0.1` | `3.0` |
+| `adaptive_manager.gd` | `trial_duration` | set via UI | `60.0` |
+
+All of these are now settable from the game_select Testing row — no code change needed.
+
+---
+
+## PID simulator (pyscripts/simulate.py)
+
+Run on Windows laptop to understand controller behaviour before testing on Pi.
+
+```bash
+pip install matplotlib numpy
+python pyscripts/simulate.py
+```
+
+- Enter per-trial success rates manually (e.g. `1.0, 0.1, 0.1, 0.9, 0.9, 0.9`)
+- Set Kp, Ki, Kd, window width in text inputs
+- Hit Run — see lifetime window and success rate graphs update
+- Uses the same PID logic as adaptive_manager.gd
 
 ---
 
@@ -212,6 +256,7 @@ Active from trial 2 onward (after `ws_calibrated = true`):
 - Viewport size passed via set_viewport_size() in random_reach._ready()
 - 2D background = programmatic gradient. SheepBG-min-2.png = 3D mode only
 - Apple MUST be code-drawn — sprite approach caused multi-apple bug
+- Success rate uses resolved apple count (outcome_log), not spawned count — avoids undercounting when timer fires mid-apple
 
 ---
 
@@ -220,12 +265,12 @@ Active from trial 2 onward (after `ws_calibrated = true`):
 - **Heartbeat fix**: `udp_receiver.gd` `_network_loop` now sends "CONNECTED" at 100ms intervals when no packet is available. Required because tracker.py only sends data after learning Godot's reply address from an incoming message.
 - **Z-axis mapping**: `screen_pos.y = (raw_z - 0.2) * 1400.0 + 40.0` — maps Z range 0.2–0.6m to screen Y 40–600px. Hardcoded for current tabletop setup. See SETUP_NOTES.md for context.
 - **EMA alpha**: Changed from 0.4 → 0.7 in `pyscripts/tracker.py` (Pi only, not in repo) — reduces curved tracking paths.
-- **PI gains tuned**: arm-based play catches more apples than mouse (natural deceleration near targets). Higher gains needed to push lifetime down fast enough.
+- **PID gains tuned**: arm-based play catches more apples than mouse (natural deceleration near targets). Default Kp=0.35, Ki=0.05, Kd=0.00 — adjustable from game_select without code changes.
 
 ---
 
-## Next session — Task 7: Godot auto-start on Pi boot
+## Next steps
 
-Next steps:
-1. Configure Raspberry Pi to auto-launch Godot on boot (Task 7)
-2. Test workspace mode with real arm tracker on Pi
+1. Tune PID gains systematically using the test protocol (see simulate.py)
+2. Task 7: Configure Raspberry Pi to auto-launch Godot on boot
+3. Task 8: Python tracker accuracy fixes
