@@ -99,7 +99,8 @@ func _start_trial() -> void:
 	_trial_caught = 0
 	_trial_spawned = 0
 	_trial_apple_start = outcome_log.size()
-	_trial_timer.start(trial_duration)
+	if trial_number > 1:
+		_trial_timer.start(trial_duration)
 	trial_started.emit(trial_number)
 
 func record_spawn() -> void:

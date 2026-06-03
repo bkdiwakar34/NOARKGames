@@ -61,22 +61,10 @@ func _draw() -> void:
 
 	draw_rect(Rect2(gx, gy, gw, gh), Color(0.07, 0.09, 0.16, 1.0))
 	draw_rect(Rect2(gx, gy, gw, gh), Color(0.28, 0.32, 0.52, 0.85), false, 1.5)
-
-	for yi in range(6):
-		var t := float(yi) / 5.0
-		var lt_val: float = lmin + t * (lmax - lmin)
-		var py := gy + gh - t * gh
-		var grid_alpha := 0.45 if yi > 0 else 0.85
-		draw_line(Vector2(gx, py), Vector2(gx + gw, py),
-			Color(0.25, 0.28, 0.44, grid_alpha), 1.0)
-		draw_string(font, Vector2(4.0, py + 5.0), "%.1fs" % lt_val,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.60, 0.68, 0.85))
-
-	draw_string(font, Vector2(4.0, gy - 10.0), "lifetime",
+	draw_string(font, Vector2(4.0, gy - 10.0), "lifetime (s)",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.50, 0.56, 0.72))
 	draw_string(font, Vector2(gx + gw * 0.5 - 24, gy + gh + 16),
 		"apple #", HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.50, 0.56, 0.72))
-
 	draw_line(Vector2(gx, gy + gh), Vector2(gx + gw, gy + gh), Color(0.38, 0.42, 0.62), 1.5)
 	draw_line(Vector2(gx, gy), Vector2(gx, gy + gh), Color(0.38, 0.42, 0.62), 1.5)
 
@@ -84,34 +72,56 @@ func _draw() -> void:
 		draw_string(font, Vector2(gx + gw * 0.5 - 50, gy + gh * 0.5),
 			"No data yet", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.45, 0.50, 0.65))
 	else:
-		var start_lt: float = lerp(lmax, lmin, 0.5)
-		var ref_py: float = gy + gh - ((start_lt - lmin) / (lmax - lmin)) * gh
-		draw_dashed_line(Vector2(gx, ref_py), Vector2(gx + gw, ref_py),
-			Color(1.0, 0.82, 0.28, 0.50), 1.5, 10.0)
-		draw_string(font, Vector2(gx + gw - 38, ref_py - 14), "start",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, Color(1.0, 0.82, 0.28, 0.75))
-
 		var n: int = log.size()
 
-		# threshold line (dashed orange, starts where trial 2 begins)
+		# Extract threshold first so it can be included in the Y range
 		var lt_thr: float = -1.0
 		for te1 in trial_log:
 			if te1.has("lt_threshold"):
 				lt_thr = float(te1.get("lt_threshold"))
 				break
+
+		# Data-adaptive Y range
+		var y_lo: float = lmax
+		var y_hi: float = lmin
+		for e in log:
+			var lt: float = float(e["lt"])
+			y_lo = min(y_lo, lt)
+			y_hi = max(y_hi, lt)
+		if lt_thr > lmin:
+			y_lo = min(y_lo, lt_thr)
+			y_hi = max(y_hi, lt_thr)
+		var y_span: float = max(y_hi - y_lo, 0.5)
+		var pad: float = y_span * 0.15
+		y_lo = max(lmin, y_lo - pad)
+		y_hi = min(lmax, y_hi + pad)
+
+		# Grid lines at nice tick intervals
+		var tick_step: float = _nice_step(y_hi - y_lo)
+		var tick_v: float = ceil(y_lo / tick_step) * tick_step
+		while tick_v <= y_hi + tick_step * 0.01:
+			var t_frac: float = (tick_v - y_lo) / (y_hi - y_lo)
+			var py: float = gy + gh - t_frac * gh
+			draw_line(Vector2(gx, py), Vector2(gx + gw, py),
+				Color(0.25, 0.28, 0.44, 0.35), 1.0)
+			draw_string(font, Vector2(4.0, py + 5.0), "%.1f" % tick_v,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0.60, 0.68, 0.85))
+			tick_v += tick_step
+
+		# Threshold line
 		if lt_thr > lmin:
 			var thr_x: float = gx
 			for ti1 in range(trial_log.size()):
 				if int(trial_log[ti1].get("trial", 1)) >= 2:
 					thr_x = gx + float(int(trial_log[ti1].get("apple_start", 0))) / float(max(n - 1, 1)) * gw
 					break
-			var thr_py: float = clamp(gy + gh - ((lt_thr - lmin) / (lmax - lmin)) * gh, gy, gy + gh)
+			var thr_py: float = clamp(gy + gh - ((lt_thr - y_lo) / (y_hi - y_lo)) * gh, gy, gy + gh)
 			draw_dashed_line(Vector2(thr_x, thr_py), Vector2(gx + gw, thr_py),
-				Color(1.0, 0.55, 0.15, 0.80), 1.5, 8.0)
+				Color(1.0, 0.60, 0.18, 0.65), 1.5, 8.0)
 			draw_string(font, Vector2(gx + gw - 72, thr_py - 12), "threshold",
-				HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, Color(1.0, 0.55, 0.15, 0.95))
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 2, Color(1.0, 0.60, 0.18, 0.80))
 
-		# trial bands (blue rect per trial, skip calibration trial = full range)
+		# Trial sampling bands
 		for ti2 in range(trial_log.size()):
 			var te2: Dictionary = trial_log[ti2]
 			if not te2.has("lt_lo") or not te2.has("lt_hi"):
@@ -126,24 +136,25 @@ func _draw() -> void:
 				continue
 			var bx1: float = gx + float(a_start) / float(max(n - 1, 1)) * gw
 			var bx2: float = gx + float(max(a_end - 1, a_start)) / float(max(n - 1, 1)) * gw
-			var by_top: float = clamp(gy + gh - (band_hi - lmin) / (lmax - lmin) * gh, gy, gy + gh)
-			var by_bot: float = clamp(gy + gh - (band_lo - lmin) / (lmax - lmin) * gh, gy, gy + gh)
-			draw_rect(Rect2(bx1, by_top, bx2 - bx1, by_bot - by_top), Color(0.38, 0.72, 1.0, 0.13))
-			draw_rect(Rect2(bx1, by_top, bx2 - bx1, by_bot - by_top), Color(0.38, 0.72, 1.0, 0.30), false, 1.0)
+			var by_top: float = clamp(gy + gh - (band_hi - y_lo) / (y_hi - y_lo) * gh, gy, gy + gh)
+			var by_bot: float = clamp(gy + gh - (band_lo - y_lo) / (y_hi - y_lo) * gh, gy, gy + gh)
+			draw_rect(Rect2(bx1, by_top, bx2 - bx1, by_bot - by_top), Color(0.38, 0.72, 1.0, 0.08))
+			draw_rect(Rect2(bx1, by_top, bx2 - bx1, by_bot - by_top), Color(0.38, 0.72, 1.0, 0.22), false, 1.0)
 
+		# Connecting line + dots
 		var prev_p: Vector2 = Vector2.ZERO
 		for i in range(n):
 			var entry: Dictionary = log[i]
 			var lt: float = float(entry["lt"])
 			var px: float = gx + (float(i) / max(float(n - 1), 1.0)) * gw
-			var py: float = gy + gh - ((lt - lmin) / (lmax - lmin)) * gh
+			var py: float = gy + gh - ((lt - y_lo) / (y_hi - y_lo)) * gh
 			px = clamp(px, gx, gx + gw)
 			py = clamp(py, gy, gy + gh)
 			var p: Vector2 = Vector2(px, py)
 			if i > 0:
-				draw_line(prev_p, p, Color(0.52, 0.62, 0.95, 0.65), 2.0)
-			var dot_col: Color = Color(0.18, 0.88, 0.32) if entry["hit"] == 1 else Color(0.95, 0.20, 0.16)
-			draw_circle(p, 5.5, dot_col)
+				draw_line(prev_p, p, Color(0.52, 0.58, 0.82, 0.28), 1.5)
+			var dot_col: Color = Color(0.38, 0.75, 0.48) if entry["hit"] == 1 else Color(0.88, 0.40, 0.32)
+			draw_circle(p, 3.0, dot_col)
 			prev_p = p
 
 	# --- Graph 2: Per-trial success rate ---
@@ -191,5 +202,16 @@ func _draw() -> void:
 			var tp: Vector2 = Vector2(tpx, tpy)
 			if i > 0:
 				draw_line(prev_tp, tp, Color(0.95, 0.75, 0.30, 0.80), 2.0)
-			draw_circle(tp, 5.5, Color(1.0, 0.85, 0.30))
+			draw_circle(tp, 4.0, Color(0.92, 0.78, 0.30))
 			prev_tp = tp
+
+func _nice_step(range_val: float) -> float:
+	if range_val <= 0.0:
+		return 0.5
+	var raw: float = range_val / 6.0
+	var mag: float = pow(10.0, floor(log(raw) / log(10.0)))
+	var norm: float = raw / mag
+	if norm <= 1.5:   return 1.0 * mag
+	elif norm <= 3.0: return 2.0 * mag
+	elif norm <= 7.0: return 5.0 * mag
+	return 10.0 * mag

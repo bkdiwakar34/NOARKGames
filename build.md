@@ -1,5 +1,5 @@
 # NOARKGames — Build Progress
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-03_
 
 All new code lives in `v2/`. Old code in `Main_screen/` and `Games/` is untouched.
 
@@ -54,6 +54,9 @@ pyscripts/
 | 6k | PID controller + tuning UI on game_select | Done |
 | 6l | Fix success rate bug (spawned vs resolved apple count) | Done |
 | 6m | Interactive PID simulator (pyscripts/simulate.py) | Done |
+| 6n | Staircase calibration for threshold estimation (trial 1) | Done |
+| 6o | game_select redesign — clean main screen + settings popup | Done |
+| 6p | Graph 1 improvements — adaptive Y axis, muted colours, smaller dots | Done |
 | 7 | Godot auto-start on Pi boot | Not started |
 | 8 | Python tracker accuracy fixes | Not started |
 | 9 | Data sync to researcher server | Not started |
@@ -85,16 +88,19 @@ pyscripts/
 
 ---
 
-## Game select screen — controls (bottom half)
+## Game select screen
 
-All values are applied to AdaptiveManager when the player taps "Apple Catch".
+Main screen shows: greeting, Apple Catch card, target rate buttons, "⚙ Settings" button.
 
-| Row | Controls |
-|-----|----------|
-| Target rate | Buttons: 40 / 50 / 70 / 80 / 90 / 100% — session-only override, not saved to patients.json |
-| Difficulty mode | Toggle button: Lifetime / Workspace |
-| PID gains | Text inputs: `Kp [0.35]  Ki [0.05]  Kd [0.00]` |
-| Testing | Trial duration buttons: 10s / 20s / 30s / 60s — `Width (s) [2.4]` — `Hold (s) [1.0]` |
+Tapping "⚙ Settings" opens a centered popup card with three sections:
+
+| Section | Controls |
+|---------|----------|
+| Difficulty mode | Toggle: Lifetime / Workspace |
+| PID gains | `Kp [0.35]  Ki [0.05]  Kd [0.00]` |
+| Testing | Trial: 10s/20s/30s/60s — `Width(s) [2.4]` — `Hold(s) [1.0]` — `Coarse [1.5]` — `Fine [0.5]` — `Rev# [6]` |
+
+All values written to AdaptiveManager when "Apple Catch" is tapped. Target rate is session-only, not saved to patients.json.
 
 ---
 
@@ -118,10 +124,16 @@ Two modes selectable from game_select screen: **LIFETIME** and **WORKSPACE**.
 ### Shared logic (both modes)
 
 ```
-Trial 1 — calibration:
-  Record spawn positions + outcomes
-  At trial end: find threshold (lifetime or distance) from caught/missed boundary
-  Set initial offset toward assigned_rate
+Trial 1 — calibration (lifetime mode only):
+  Staircase procedure (1-up 1-down):
+    Start at LIFETIME_MIN (hard end)
+    catch → decrease lifetime by step (harder)
+    miss  → increase lifetime by step (easier)
+    Coarse step (sc_step_coarse) for first 2 reversals; fine step (sc_step_fine) after
+    Stop after sc_n_reversals reversals → threshold = mean of reversal lifetimes
+  Trial 1 timer is NOT started — calibration ends only when staircase completes
+  Fallback: if timer fires before staircase done, use caught/missed midpoint (old method)
+  Set initial offset = (assigned_rate - 0.5) × window_width
 
 Trial 2+ — window sampling:
   Sample from a window centered at (threshold + offset) [lifetime]
@@ -164,7 +176,7 @@ Trial 2+ — window sampling:
 - Prevents consecutive apples appearing in same location (which would bypass difficulty)
 - If random spawn is too close, push outward along same direction
 
-**Runtime-adjustable vars (set from game_select before starting session):**
+**Runtime-adjustable vars (set from game_select settings panel before starting session):**
 ```
 gain_p          = 0.35   # tuned for arm-based play
 gain_i          = 0.05
@@ -172,6 +184,9 @@ gain_d          = 0.00   # derivative term; 0 = pure PI behaviour
 window_width    = 2.4    # seconds (lifetime mode sampling window)
 trial_duration  = 60.0   # revert to 60.0 for real patients
 catch_hold_time = 1.0    # revert to 0.8 for real patients
+sc_step_coarse  = 1.5    # staircase coarse step (first 2 reversals)
+sc_step_fine    = 0.5    # staircase fine step (after 2 reversals)
+sc_n_reversals  = 6      # staircase stops after this many reversals
 ```
 
 **Fixed constants:**
