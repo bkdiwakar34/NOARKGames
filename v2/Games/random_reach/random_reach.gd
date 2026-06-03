@@ -165,16 +165,17 @@ func _update_player_pos() -> void:
 func _spawn_apple() -> void:
 	if is_instance_valid(_current_apple):
 		_current_apple.queue_free()
-	var spawn_pos := AdaptiveManager.get_spawn_position(_player_pos)
+	var apple_lt: float = AdaptiveManager.get_apple_lifetime()
+	var spawn_pos := AdaptiveManager.get_spawn_position(_player_pos, apple_lt)
 	spawn_pos.x = clamp(spawn_pos.x, SCREEN_MIN.x, SCREEN_MAX.x)
 	spawn_pos.y = clamp(spawn_pos.y, SCREEN_MIN.y, SCREEN_MAX.y)
 	_current_apple = APPLE_SCENE.instantiate()
 	_current_apple.position = spawn_pos
-	_current_apple.lifetime = AdaptiveManager.get_apple_lifetime()
+	_current_apple.lifetime = apple_lt
 	_current_apple.apple_eaten.connect(_on_apple_eaten)
 	_current_apple.apple_missed.connect(_on_apple_missed)
 	add_child(_current_apple)
-	AdaptiveManager.record_spawn()
+	AdaptiveManager.record_spawn(_player_pos)
 	_catch_timer = 0.0
 
 func _check_catch(delta: float) -> void:

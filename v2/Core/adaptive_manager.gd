@@ -26,6 +26,8 @@ var ws_calibrated: bool = false
 var _ws_any_recorded: bool = false
 var _viewport_size: Vector2 = Vector2(960.0, 540.0)
 var _last_spawn_pos: Vector2 = Vector2.ZERO
+var _last_player_pos_at_spawn: Vector2 = Vector2.ZERO
+var _speed_estimate: float = 0.0   # max(distance/lt) across catches; 0 = no data yet
 
 var _trial_caught: int = 0
 var _trial_spawned: int = 0
@@ -85,6 +87,7 @@ func start_session(rate: float) -> void:
 	_prev_error = 0.0
 	outcome_log.clear()
 	trial_log.clear()
+	_speed_estimate = 0.0
 	ws_calibrated = false
 	_ws_any_recorded = false
 	_sc_level = LIFETIME_MIN
@@ -103,17 +106,21 @@ func _start_trial() -> void:
 		_trial_timer.start(trial_duration)
 	trial_started.emit(trial_number)
 
-func record_spawn() -> void:
+func record_spawn(player_pos: Vector2) -> void:
 	_trial_spawned += 1
+	_last_player_pos_at_spawn = player_pos
 
 func record_catch(lt: float) -> void:
-	outcome_log.append({"lt": lt, "hit": 1, "pos": _last_spawn_pos})
+	var dist: float = _last_spawn_pos.distance_to(_last_player_pos_at_spawn)
+	if lt > 0.0:
+		_speed_estimate = max(_speed_estimate, dist / lt)
+	outcome_log.append({"lt": lt, "hit": 1, "pos": _last_spawn_pos, "sheep_pos": _last_player_pos_at_spawn})
 	_trial_caught += 1
 	if trial_number == 1 and not _sc_done and difficulty_mode == DifficultyMode.LIFETIME:
 		_update_staircase(true)
 
 func record_miss(lt: float) -> void:
-	outcome_log.append({"lt": lt, "hit": 0, "pos": _last_spawn_pos})
+	outcome_log.append({"lt": lt, "hit": 0, "pos": _last_spawn_pos, "sheep_pos": _last_player_pos_at_spawn})
 	if trial_number == 1 and not _sc_done and difficulty_mode == DifficultyMode.LIFETIME:
 		_update_staircase(false)
 
@@ -273,7 +280,7 @@ func update_workspace(screen_pos: Vector2) -> void:
 func set_viewport_size(s: Vector2) -> void:
 	_viewport_size = s
 
-func get_spawn_position(player_pos: Vector2) -> Vector2:
+func get_spawn_position(player_pos: Vector2, apple_lt: float) -> Vector2:
 	if not ws_calibrated:
 		var s := _viewport_size
 		_last_spawn_pos = Vector2(
@@ -317,6 +324,14 @@ func get_spawn_position(player_pos: Vector2) -> Vector2:
 		else:
 			spawn.x = clamp(spawn.x, ws_min.x, ws_max.x)
 			spawn.y = clamp(spawn.y, ws_min.y, ws_max.y)
+
+	# Constrain to reachable radius: if we have a speed estimate, pull spawn
+	# back so distance ≤ apple_lt × speed_estimate (no physically impossible apples).
+	if _speed_estimate > 0.0 and difficulty_mode == DifficultyMode.LIFETIME:
+		var max_dist: float = apple_lt * _speed_estimate
+		var to_spawn: Vector2 = spawn - player_pos
+		if to_spawn.length() > max_dist:
+			spawn = player_pos + to_spawn.normalized() * max_dist
 
 	_last_spawn_pos = spawn
 	return spawn
