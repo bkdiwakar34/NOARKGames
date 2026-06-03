@@ -175,7 +175,7 @@ func _spawn_apple() -> void:
 	_current_apple.apple_eaten.connect(_on_apple_eaten)
 	_current_apple.apple_missed.connect(_on_apple_missed)
 	add_child(_current_apple)
-	AdaptiveManager.record_spawn(_player_pos)
+	AdaptiveManager.record_spawn()
 	_catch_timer = 0.0
 
 func _check_catch(delta: float) -> void:
