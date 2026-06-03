@@ -3,6 +3,7 @@ extends Control
 var _override_rate: float = 0.8
 var _rate_buttons: Array = []
 var _settings_overlay: Control
+var _mode_btns: Array = []
 
 var _kp_edit:        LineEdit
 var _ki_edit:        LineEdit
@@ -49,7 +50,7 @@ func _build_ui(patient_name: String) -> void:
 	_add_settings_button(vp)
 	_build_settings_overlay(vp)
 
-# ── Game card ────────────────────────────────────────────────────────────────
+# ── Game card ─────────────────────────────────────────────────────────────────
 
 func _add_game_card(pos: Vector2, display_name: String, scene_path: String) -> void:
 	var normal_sb := StyleBoxFlat.new()
@@ -176,7 +177,7 @@ func _add_settings_button(vp: Vector2) -> void:
 	btn.pressed.connect(func(): _settings_overlay.visible = not _settings_overlay.visible)
 	add_child(btn)
 
-# ── Settings overlay (popup card) ─────────────────────────────────────────────
+# ── Settings overlay ──────────────────────────────────────────────────────────
 
 func _build_settings_overlay(vp: Vector2) -> void:
 	_settings_overlay = Control.new()
@@ -185,195 +186,232 @@ func _build_settings_overlay(vp: Vector2) -> void:
 	add_child(_settings_overlay)
 
 	var dim := ColorRect.new()
-	dim.color = Color(0.0, 0.0, 0.0, 0.55)
+	dim.color = Color(0.04, 0.06, 0.14, 0.55)
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_settings_overlay.add_child(dim)
 
-	var cw: float = 860.0
-	var ch: float = 300.0
+	var cw: float = 800.0
+	var ch: float = 370.0
 	var cx: float = (vp.x - cw) * 0.5
 	var cy: float = (vp.y - ch) * 0.5
 
+	# White card with subtle border + shadow
 	var card_panel := Panel.new()
 	card_panel.size = Vector2(cw, ch)
 	card_panel.position = Vector2(cx, cy)
 	var card_style := StyleBoxFlat.new()
-	card_style.bg_color = Color(0.07, 0.14, 0.30)
-	card_style.corner_radius_top_left = 16; card_style.corner_radius_top_right = 16
-	card_style.corner_radius_bottom_left = 16; card_style.corner_radius_bottom_right = 16
-	card_style.border_width_left = 1; card_style.border_width_right = 1
-	card_style.border_width_top = 1; card_style.border_width_bottom = 1
-	card_style.border_color = Color(0.25, 0.45, 0.70, 0.50)
+	card_style.bg_color                   = Color(0.98, 0.98, 1.00)
+	card_style.corner_radius_top_left     = 18
+	card_style.corner_radius_top_right    = 18
+	card_style.corner_radius_bottom_left  = 18
+	card_style.corner_radius_bottom_right = 18
+	card_style.border_width_left   = 1; card_style.border_width_right  = 1
+	card_style.border_width_top    = 1; card_style.border_width_bottom = 1
+	card_style.border_color        = Color(0.80, 0.82, 0.92)
+	card_style.shadow_color        = Color(0.05, 0.05, 0.18, 0.30)
+	card_style.shadow_size         = 16
+	card_style.shadow_offset       = Vector2(0.0, 6.0)
 	card_panel.add_theme_stylebox_override("panel", card_style)
 	_settings_overlay.add_child(card_panel)
 
+	# Content container — all children positioned relative to card top-left
 	var card := Control.new()
-	card.position = Vector2(cx, cy)
+	card.position         = Vector2(cx, cy)
 	card.custom_minimum_size = Vector2(cw, ch)
 	_settings_overlay.add_child(card)
 
 	# Title
 	var title := Label.new()
 	title.text = "Settings"
-	title.add_theme_font_size_override("font_size", 18)
-	title.add_theme_color_override("font_color", Color(0.75, 0.88, 1.0))
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", Color(0.10, 0.13, 0.30))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.custom_minimum_size = Vector2(cw, 30.0)
-	title.position = Vector2(0.0, 10.0)
+	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title.custom_minimum_size  = Vector2(cw, 50.0)
+	title.position = Vector2(0.0, 0.0)
 	card.add_child(title)
 
-	# Close button
+	# Close button — top-right
 	var close_btn := Button.new()
 	close_btn.text = "✕"
-	close_btn.custom_minimum_size = Vector2(32.0, 28.0)
-	close_btn.position = Vector2(cw - 42.0, 8.0)
-	close_btn.add_theme_font_size_override("font_size", 14)
+	close_btn.custom_minimum_size = Vector2(30.0, 30.0)
+	close_btn.position            = Vector2(cw - 42.0, 10.0)
+	close_btn.add_theme_font_size_override("font_size", 13)
 	var csb := StyleBoxFlat.new()
-	csb.bg_color = Color(0.30, 0.20, 0.20, 0.70)
-	csb.corner_radius_top_left = 6; csb.corner_radius_top_right = 6
-	csb.corner_radius_bottom_left = 6; csb.corner_radius_bottom_right = 6
+	csb.bg_color = Color(0.88, 0.88, 0.94)
+	csb.corner_radius_top_left    = 8; csb.corner_radius_top_right    = 8
+	csb.corner_radius_bottom_left = 8; csb.corner_radius_bottom_right = 8
 	close_btn.add_theme_stylebox_override("normal", csb)
-	var csb_h := csb.duplicate(); csb_h.bg_color = Color(0.60, 0.20, 0.20, 0.90)
+	var csb_h := csb.duplicate()
+	csb_h.bg_color = Color(0.82, 0.20, 0.20)
 	close_btn.add_theme_stylebox_override("hover", csb_h)
-	close_btn.add_theme_color_override("font_color", Color(1.0, 0.75, 0.75))
+	close_btn.add_theme_color_override("font_color", Color(0.35, 0.38, 0.52))
 	close_btn.pressed.connect(func(): _settings_overlay.visible = false)
 	card.add_child(close_btn)
 
-	_add_separator(card, cw, 44.0)
-	_add_mode_section(card, cw, 52.0)
-	_add_separator(card, cw, 122.0)
-	_add_pid_section(card, cw, 132.0)
-	_add_separator(card, cw, 200.0)
-	_add_testing_section(card, cw, 210.0)
+	_add_sep(card, cw, 50.0)
 
-func _add_separator(parent: Control, w: float, y: float) -> void:
+	var y: float = 62.0
+
+	_add_section_label(card, "DIFFICULTY MODE", cw, y);  y += 22.0
+	_add_mode_section(card, cw, y);                       y += 48.0
+	_add_sep(card, cw, y);                                y += 14.0
+
+	_add_section_label(card, "PID GAINS", cw, y);         y += 22.0
+	_add_pid_section(card, cw, y);                        y += 46.0
+	_add_sep(card, cw, y);                                y += 14.0
+
+	_add_section_label(card, "TESTING", cw, y);           y += 22.0
+	_add_testing_section(card, cw, y)
+
+# ── Separator + section label ─────────────────────────────────────────────────
+
+func _add_sep(parent: Control, w: float, y: float) -> void:
 	var sep := ColorRect.new()
-	sep.color = Color(0.25, 0.45, 0.70, 0.30)
-	sep.size = Vector2(w - 40.0, 1.0)
-	sep.position = Vector2(20.0, y)
+	sep.color    = Color(0.80, 0.82, 0.93, 0.90)
+	sep.size     = Vector2(w, 1.0)
+	sep.position = Vector2(0.0, y)
 	parent.add_child(sep)
 
-# ── Settings sections (positions relative to card) ───────────────────────────
+func _add_section_label(parent: Control, text: String, cw: float, y: float) -> void:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_font_size_override("font_size", 11)
+	lbl.add_theme_color_override("font_color", Color(0.40, 0.50, 0.74))
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.custom_minimum_size  = Vector2(cw, 20.0)
+	lbl.position             = Vector2(0.0, y)
+	parent.add_child(lbl)
+
+# ── Mode section — segmented control ─────────────────────────────────────────
 
 func _add_mode_section(card: Control, cw: float, y: float) -> void:
-	var lbl := Label.new()
-	lbl.text = "Difficulty mode:"
-	lbl.add_theme_font_size_override("font_size", 14)
-	lbl.add_theme_color_override("font_color", Color(0.55, 0.72, 0.90, 0.85))
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.custom_minimum_size = Vector2(cw, 22.0)
-	lbl.position = Vector2(0.0, y)
-	card.add_child(lbl)
+	var btn_w: float = 170.0
+	var btn_h: float = 38.0
+	var sx: float    = cw * 0.5 - btn_w  # two buttons total = btn_w * 2, center them
 
-	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(200.0, 36.0)
-	btn.position = Vector2(cw * 0.5 - 100.0, y + 26.0)
-	btn.add_theme_font_size_override("font_size", 16)
-	_update_mode_btn(btn)
-	btn.pressed.connect(func():
-		if AdaptiveManager.difficulty_mode == AdaptiveManager.DifficultyMode.LIFETIME:
-			AdaptiveManager.difficulty_mode = AdaptiveManager.DifficultyMode.WORKSPACE
-		else:
-			AdaptiveManager.difficulty_mode = AdaptiveManager.DifficultyMode.LIFETIME
-		_update_mode_btn(btn)
+	var lt_btn := Button.new()
+	lt_btn.text = "Lifetime"
+	lt_btn.custom_minimum_size = Vector2(btn_w, btn_h)
+	lt_btn.size = Vector2(btn_w, btn_h)
+	lt_btn.position = Vector2(sx, y)
+	lt_btn.add_theme_font_size_override("font_size", 15)
+	card.add_child(lt_btn)
+
+	var ws_btn := Button.new()
+	ws_btn.text = "Workspace"
+	ws_btn.custom_minimum_size = Vector2(btn_w, btn_h)
+	ws_btn.size = Vector2(btn_w, btn_h)
+	ws_btn.position = Vector2(sx + btn_w, y)
+	ws_btn.add_theme_font_size_override("font_size", 15)
+	card.add_child(ws_btn)
+
+	_mode_btns = [lt_btn, ws_btn]
+	_refresh_mode_btns(AdaptiveManager.difficulty_mode == AdaptiveManager.DifficultyMode.LIFETIME)
+
+	lt_btn.pressed.connect(func():
+		AdaptiveManager.difficulty_mode = AdaptiveManager.DifficultyMode.LIFETIME
+		_refresh_mode_btns(true)
 	)
-	card.add_child(btn)
+	ws_btn.pressed.connect(func():
+		AdaptiveManager.difficulty_mode = AdaptiveManager.DifficultyMode.WORKSPACE
+		_refresh_mode_btns(false)
+	)
 
-func _update_mode_btn(btn: Button) -> void:
-	if AdaptiveManager.difficulty_mode == AdaptiveManager.DifficultyMode.LIFETIME:
-		btn.text = "Lifetime"
-	else:
-		btn.text = "Workspace"
+func _refresh_mode_btns(lifetime_active: bool) -> void:
+	if _mode_btns.size() < 2:
+		return
+	var states := [lifetime_active, not lifetime_active]
+	for i in 2:
+		var btn: Button  = _mode_btns[i]
+		var active: bool = states[i]
+		var sb := StyleBoxFlat.new()
+		sb.bg_color     = Color(0.18, 0.46, 0.86) if active else Color(0.96, 0.96, 1.00)
+		sb.border_color = Color(0.18, 0.46, 0.86) if active else Color(0.72, 0.76, 0.90)
+		sb.border_width_left   = 1; sb.border_width_right  = 1
+		sb.border_width_top    = 1; sb.border_width_bottom = 1
+		if i == 0:
+			sb.corner_radius_top_left    = 10; sb.corner_radius_bottom_left  = 10
+		else:
+			sb.corner_radius_top_right   = 10; sb.corner_radius_bottom_right = 10
+		btn.add_theme_stylebox_override("normal",  sb)
+		btn.add_theme_stylebox_override("hover",   sb)
+		btn.add_theme_stylebox_override("pressed", sb)
+		btn.add_theme_stylebox_override("focus",   sb)
+		var tc := Color(1.0, 1.0, 1.0) if active else Color(0.28, 0.36, 0.58)
+		btn.add_theme_color_override("font_color", tc)
+
+# ── PID section ───────────────────────────────────────────────────────────────
 
 func _add_pid_section(card: Control, cw: float, y: float) -> void:
-	var header := Label.new()
-	header.text = "PID gains:"
-	header.add_theme_font_size_override("font_size", 14)
-	header.add_theme_color_override("font_color", Color(0.55, 0.72, 0.90, 0.85))
-	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	header.custom_minimum_size = Vector2(cw, 22.0)
-	header.position = Vector2(0.0, y)
-	card.add_child(header)
-
-	var row_h: float = 30.0
-	var lbl_w: float = 30.0
-	var edit_w: float = 70.0
-	var group_w: float = lbl_w + 6.0 + edit_w
-	var gap: float = 40.0
-	var total_w: float = 3.0 * group_w + 2.0 * gap
-	var start_x: float = cw * 0.5 - total_w * 0.5
-	var row_y: float = y + 26.0
+	var lbl_w:   float = 36.0
+	var edit_w:  float = 84.0
+	var gap:     float = 8.0
+	var col_gap: float = 60.0
+	var group_w: float = lbl_w + gap + edit_w
+	var total_w: float = 3.0 * group_w + 2.0 * col_gap
+	var sx: float      = cw * 0.5 - total_w * 0.5
+	var row_h: float   = 34.0
 
 	var gains := [
-		{"label": "Kp:", "val": AdaptiveManager.gain_p},
-		{"label": "Ki:", "val": AdaptiveManager.gain_i},
-		{"label": "Kd:", "val": AdaptiveManager.gain_d},
+		{"label": "Kp", "val": AdaptiveManager.gain_p},
+		{"label": "Ki", "val": AdaptiveManager.gain_i},
+		{"label": "Kd", "val": AdaptiveManager.gain_d},
 	]
 	for i in gains.size():
-		var gx: float = start_x + i * (group_w + gap)
+		var gx: float = sx + i * (group_w + col_gap)
+
 		var glbl := Label.new()
 		glbl.text = gains[i]["label"]
-		glbl.add_theme_font_size_override("font_size", 14)
-		glbl.add_theme_color_override("font_color", Color(0.65, 0.80, 1.0))
+		glbl.add_theme_font_size_override("font_size", 15)
+		glbl.add_theme_color_override("font_color", Color(0.20, 0.26, 0.50))
 		glbl.custom_minimum_size = Vector2(lbl_w, row_h)
-		glbl.position = Vector2(gx, row_y)
-		glbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		glbl.position            = Vector2(gx, y)
+		glbl.vertical_alignment  = VERTICAL_ALIGNMENT_CENTER
 		card.add_child(glbl)
+
 		var edit := _make_line_edit(gains[i]["val"], 2, edit_w, row_h)
-		edit.position = Vector2(gx + lbl_w + 6.0, row_y)
+		edit.position = Vector2(gx + lbl_w + gap, y)
 		card.add_child(edit)
+
 		if i == 0: _kp_edit = edit
 		elif i == 1: _ki_edit = edit
 		else: _kd_edit = edit
 
+# ── Testing section ───────────────────────────────────────────────────────────
+
 func _add_testing_section(card: Control, cw: float, y: float) -> void:
-	var header := Label.new()
-	header.text = "Testing:"
-	header.add_theme_font_size_override("font_size", 14)
-	header.add_theme_color_override("font_color", Color(0.55, 0.72, 0.90, 0.85))
-	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	header.custom_minimum_size = Vector2(cw, 22.0)
-	header.position = Vector2(0.0, y)
-	card.add_child(header)
+	var row_h:   float = 32.0
+	var row_gap: float = 10.0
 
-	var btn_h: float = 28.0
-	var lbl_w: float = 46.0
-	var edit_w: float = 60.0
-
-	# Row 1: Trial duration | Width | Hold
-	var row1_y: float = y + 26.0
+	# Row 1 — Trial duration buttons
+	var dur_lbl_w: float = 44.0
+	var dur_btn_w: float = 52.0
+	var dur_gap:   float = 6.0
 	var durations: Array = [10.0, 20.0, 30.0, 60.0]
-	var dur_buttons: Array = []
-	var dur_btn_w: float = 46.0
-	var dur_gap: float = 5.0
-	var dur_section_w: float = lbl_w + durations.size() * dur_btn_w + (durations.size() - 1) * dur_gap
-	var width_section_w: float = lbl_w + edit_w
-	var hold_section_w: float = lbl_w + edit_w
-	var section_gap: float = 20.0
-	var row1_total: float = dur_section_w + section_gap + width_section_w + section_gap + hold_section_w
-	var row1_x: float = cw * 0.5 - row1_total * 0.5
+	var row1_w: float = dur_lbl_w + 10.0 + durations.size() * dur_btn_w + (durations.size() - 1) * dur_gap
+	var row1_x: float = cw * 0.5 - row1_w * 0.5
 
-	# Trial label + buttons
 	var dur_lbl := Label.new()
-	dur_lbl.text = "Trial:"
-	dur_lbl.add_theme_font_size_override("font_size", 13)
-	dur_lbl.add_theme_color_override("font_color", Color(0.65, 0.80, 1.0))
-	dur_lbl.custom_minimum_size = Vector2(lbl_w, btn_h)
-	dur_lbl.position = Vector2(row1_x, row1_y)
-	dur_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	dur_lbl.text = "Trial"
+	dur_lbl.add_theme_font_size_override("font_size", 14)
+	dur_lbl.add_theme_color_override("font_color", Color(0.20, 0.26, 0.50))
+	dur_lbl.custom_minimum_size = Vector2(dur_lbl_w, row_h)
+	dur_lbl.position            = Vector2(row1_x, y)
+	dur_lbl.vertical_alignment  = VERTICAL_ALIGNMENT_CENTER
 	card.add_child(dur_lbl)
 
-	var dur_x: float = row1_x + lbl_w
+	var dur_buttons: Array = []
 	for i in durations.size():
-		var d: float = durations[i]
-		var b := Button.new()
-		b.text = "%ds" % int(d)
-		b.custom_minimum_size = Vector2(dur_btn_w, btn_h)
-		b.size = Vector2(dur_btn_w, btn_h)
-		b.position = Vector2(dur_x + i * (dur_btn_w + dur_gap), row1_y)
+		var d: float  = durations[i]
+		var b         := Button.new()
+		b.text        = "%ds" % int(d)
+		b.custom_minimum_size = Vector2(dur_btn_w, row_h)
+		b.size        = Vector2(dur_btn_w, row_h)
+		b.position    = Vector2(row1_x + dur_lbl_w + 10.0 + i * (dur_btn_w + dur_gap), y)
 		b.add_theme_font_size_override("font_size", 13)
 		_style_rate_btn(b, d == AdaptiveManager.trial_duration)
-		var cap_d: float = d
+		var cap_d: float  = d
 		var cap_b: Button = b
 		b.pressed.connect(func():
 			AdaptiveManager.trial_duration = cap_d
@@ -383,63 +421,46 @@ func _add_testing_section(card: Control, cw: float, y: float) -> void:
 		dur_buttons.append(b)
 		card.add_child(b)
 
-	# Width
-	var ww_x: float = row1_x + dur_section_w + section_gap
-	var ww_lbl := Label.new()
-	ww_lbl.text = "Width(s):"
-	ww_lbl.add_theme_font_size_override("font_size", 13)
-	ww_lbl.add_theme_color_override("font_color", Color(0.65, 0.80, 1.0))
-	ww_lbl.custom_minimum_size = Vector2(lbl_w, btn_h)
-	ww_lbl.position = Vector2(ww_x, row1_y)
-	ww_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	card.add_child(ww_lbl)
-	_width_edit = _make_line_edit(AdaptiveManager.window_width, 1, edit_w, btn_h)
-	_width_edit.position = Vector2(ww_x + lbl_w, row1_y)
-	card.add_child(_width_edit)
+	y += row_h + row_gap
 
-	# Hold
-	var hold_x: float = ww_x + width_section_w + section_gap
-	var hold_lbl := Label.new()
-	hold_lbl.text = "Hold(s):"
-	hold_lbl.add_theme_font_size_override("font_size", 13)
-	hold_lbl.add_theme_color_override("font_color", Color(0.65, 0.80, 1.0))
-	hold_lbl.custom_minimum_size = Vector2(lbl_w, btn_h)
-	hold_lbl.position = Vector2(hold_x, row1_y)
-	hold_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	card.add_child(hold_lbl)
-	_hold_edit = _make_line_edit(AdaptiveManager.catch_hold_time, 1, edit_w, btn_h)
-	_hold_edit.position = Vector2(hold_x + lbl_w, row1_y)
-	card.add_child(_hold_edit)
+	# Row 2 — Window + Hold
+	var lbl_w2: float  = 84.0
+	var edit_w2: float = 70.0
+	var r2_gap: float  = 52.0
+	var row2_w: float  = lbl_w2 + edit_w2 + r2_gap + lbl_w2 + edit_w2
+	var row2_x: float  = cw * 0.5 - row2_w * 0.5
 
-	# Row 2: Staircase parameters
-	var row2_y: float = row1_y + btn_h + 8.0
-	var sc_lbl_w: float = 50.0
-	var sc_edit_w: float = 48.0
-	var sc_gap: float = 16.0
-	var rev_lbl_w: float = 36.0
-	var rev_edit_w: float = 40.0
-	var row2_total: float = sc_lbl_w + sc_edit_w + sc_gap + sc_lbl_w + sc_edit_w + sc_gap + rev_lbl_w + rev_edit_w
-	var row2_x: float = cw * 0.5 - row2_total * 0.5
+	_width_edit = _labeled_edit(card, "Window (s)", row2_x,                          y, lbl_w2, edit_w2, row_h, AdaptiveManager.window_width,    1)
+	_hold_edit  = _labeled_edit(card, "Hold (s)",   row2_x + lbl_w2 + edit_w2 + r2_gap, y, lbl_w2, edit_w2, row_h, AdaptiveManager.catch_hold_time, 1)
 
-	for item in [
-		{"label": "Coarse:", "x": row2_x,                                        "val": AdaptiveManager.sc_step_coarse, "dec": 1, "w": sc_edit_w, "lw": sc_lbl_w},
-		{"label": "Fine:",   "x": row2_x + sc_lbl_w + sc_edit_w + sc_gap,        "val": AdaptiveManager.sc_step_fine,   "dec": 1, "w": sc_edit_w, "lw": sc_lbl_w},
-		{"label": "Rev#:",   "x": row2_x + 2.0*(sc_lbl_w + sc_edit_w + sc_gap),  "val": float(AdaptiveManager.sc_n_reversals), "dec": 0, "w": rev_edit_w, "lw": rev_lbl_w},
-	]:
-		var slbl := Label.new()
-		slbl.text = item["label"]
-		slbl.add_theme_font_size_override("font_size", 13)
-		slbl.add_theme_color_override("font_color", Color(0.65, 0.80, 1.0))
-		slbl.custom_minimum_size = Vector2(item["lw"], btn_h)
-		slbl.position = Vector2(item["x"], row2_y)
-		slbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		card.add_child(slbl)
-		var sedit := _make_line_edit(item["val"], item["dec"], item["w"], btn_h)
-		sedit.position = Vector2(item["x"] + float(item["lw"]), row2_y)
-		card.add_child(sedit)
-		if item["label"] == "Coarse:": _sc_coarse_edit = sedit
-		elif item["label"] == "Fine:":  _sc_fine_edit = sedit
-		else:                           _sc_rev_edit = sedit
+	y += row_h + row_gap
+
+	# Row 3 — Staircase params
+	var lbl_w3: float  = 68.0
+	var edit_w3: float = 58.0
+	var r3_gap: float  = 36.0
+	var row3_w: float  = (lbl_w3 + edit_w3) * 3.0 + r3_gap * 2.0
+	var row3_x: float  = cw * 0.5 - row3_w * 0.5
+
+	_sc_coarse_edit = _labeled_edit(card, "Coarse", row3_x,                             y, lbl_w3, edit_w3, row_h, AdaptiveManager.sc_step_coarse,          1)
+	_sc_fine_edit   = _labeled_edit(card, "Fine",   row3_x + lbl_w3 + edit_w3 + r3_gap, y, lbl_w3, edit_w3, row_h, AdaptiveManager.sc_step_fine,            1)
+	_sc_rev_edit    = _labeled_edit(card, "Rev #",  row3_x + (lbl_w3 + edit_w3 + r3_gap) * 2.0, y, lbl_w3, edit_w3, row_h, float(AdaptiveManager.sc_n_reversals), 0)
+
+func _labeled_edit(parent: Control, lbl_text: String, x: float, y: float,
+		lbl_w: float, edit_w: float, h: float, value: float, decimals: int) -> LineEdit:
+	var lbl := Label.new()
+	lbl.text = lbl_text
+	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.add_theme_color_override("font_color", Color(0.20, 0.26, 0.50))
+	lbl.custom_minimum_size = Vector2(lbl_w, h)
+	lbl.position            = Vector2(x, y)
+	lbl.vertical_alignment  = VERTICAL_ALIGNMENT_CENTER
+	parent.add_child(lbl)
+
+	var edit := _make_line_edit(value, decimals, edit_w, h)
+	edit.position = Vector2(x + lbl_w, y)
+	parent.add_child(edit)
+	return edit
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -449,18 +470,27 @@ func _make_line_edit(value: float, decimals: int, w: float, h: float) -> LineEdi
 	e.custom_minimum_size = Vector2(w, h)
 	e.size = Vector2(w, h)
 	e.alignment = HORIZONTAL_ALIGNMENT_CENTER
+
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.08, 0.15, 0.28)
-	sb.border_width_left = 1; sb.border_width_right = 1
-	sb.border_width_top = 1; sb.border_width_bottom = 1
-	sb.border_color = Color(0.25, 0.45, 0.70)
-	sb.corner_radius_top_left = 4; sb.corner_radius_top_right = 4
-	sb.corner_radius_bottom_left = 4; sb.corner_radius_bottom_right = 4
+	sb.bg_color = Color(1.00, 1.00, 1.00)
+	sb.border_width_left = 1; sb.border_width_right  = 1
+	sb.border_width_top  = 1; sb.border_width_bottom = 1
+	sb.border_color = Color(0.70, 0.74, 0.88)
+	sb.corner_radius_top_left    = 6; sb.corner_radius_top_right    = 6
+	sb.corner_radius_bottom_left = 6; sb.corner_radius_bottom_right = 6
 	sb.content_margin_left = 4.0; sb.content_margin_right = 4.0
+
+	var sb_focus := sb.duplicate()
+	sb_focus.border_color = Color(0.20, 0.48, 0.88)
+	sb_focus.border_width_left = 2; sb_focus.border_width_right  = 2
+	sb_focus.border_width_top  = 2; sb_focus.border_width_bottom = 2
+
 	e.add_theme_stylebox_override("normal", sb)
-	e.add_theme_stylebox_override("focus", sb)
-	e.add_theme_color_override("font_color", Color(0.88, 0.92, 1.0))
-	e.add_theme_font_size_override("font_size", 14)
+	e.add_theme_stylebox_override("focus",  sb_focus)
+	e.add_theme_color_override("font_color",            Color(0.10, 0.14, 0.30))
+	e.add_theme_color_override("font_selected_color",   Color(1.00, 1.00, 1.00))
+	e.add_theme_color_override("selection_color",       Color(0.20, 0.48, 0.88, 0.50))
+	e.add_theme_font_size_override("font_size", 15)
 	return e
 
 func _safe_float(text: String, fallback: float) -> float:
