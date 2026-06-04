@@ -26,8 +26,8 @@ var ws_calibrated: bool = false
 var _ws_any_recorded: bool = false
 var _viewport_size: Vector2 = Vector2(960.0, 540.0)
 var _last_spawn_pos: Vector2 = Vector2.ZERO
-var _prev_apple_pos: Vector2 = Vector2.ZERO   # apple pos before the current one
-var _speed_estimate: float = 0.0              # max(distance/lt) across catches; 0 = no data yet
+var _player_pos_at_spawn: Vector2 = Vector2.ZERO   # sheep pos when current apple spawned
+var _speed_estimate: float = 0.0                   # max(distance/lt) across catches; 0 = no data yet
 
 var _trial_caught: int = 0
 var _trial_spawned: int = 0
@@ -106,20 +106,21 @@ func _start_trial() -> void:
 		_trial_timer.start(trial_duration)
 	trial_started.emit(trial_number)
 
-func record_spawn() -> void:
+func record_spawn(player_pos: Vector2) -> void:
 	_trial_spawned += 1
+	_player_pos_at_spawn = player_pos
 
 func record_catch(lt: float) -> void:
-	var dist: float = _last_spawn_pos.distance_to(_prev_apple_pos)
+	var dist: float = _last_spawn_pos.distance_to(_player_pos_at_spawn)
 	if lt > 0.0:
 		_speed_estimate = max(_speed_estimate, dist / lt)
-	outcome_log.append({"lt": lt, "hit": 1, "pos": _last_spawn_pos, "from_pos": _prev_apple_pos})
+	outcome_log.append({"lt": lt, "hit": 1, "pos": _last_spawn_pos, "sheep_pos": _player_pos_at_spawn})
 	_trial_caught += 1
 	if trial_number == 1 and not _sc_done and difficulty_mode == DifficultyMode.LIFETIME:
 		_update_staircase(true)
 
 func record_miss(lt: float) -> void:
-	outcome_log.append({"lt": lt, "hit": 0, "pos": _last_spawn_pos, "from_pos": _prev_apple_pos})
+	outcome_log.append({"lt": lt, "hit": 0, "pos": _last_spawn_pos, "sheep_pos": _player_pos_at_spawn})
 	if trial_number == 1 and not _sc_done and difficulty_mode == DifficultyMode.LIFETIME:
 		_update_staircase(false)
 
@@ -332,7 +333,6 @@ func get_spawn_position(player_pos: Vector2, apple_lt: float) -> Vector2:
 		if to_spawn.length() > max_dist:
 			spawn = player_pos + to_spawn.normalized() * max_dist
 
-	_prev_apple_pos = _last_spawn_pos
 	_last_spawn_pos = spawn
 	return spawn
 
