@@ -57,6 +57,11 @@ pyscripts/
 | 6n | Staircase calibration for threshold estimation (trial 1) | Done |
 | 6o | game_select redesign — clean main screen + settings popup | Done |
 | 6p | Graph 1 improvements — adaptive Y axis, muted colours, smaller dots | Done |
+| 6q | Settings popup redesign — light card, segmented mode toggle, fix label truncation | Done |
+| 6r | Reachability constraint — spawn apples within lifetime × speed_estimate radius | Done |
+| 6s | Simulator update — per-apple update frequency control (N apples per correction) | Done |
+| 6t | Simulator redesign — healthy user model, r-space controller, two-speed calibration gap | Done |
+| 6u | Simulator fixes — principled r_center init + deterministic analytic catch rate | Done |
 | 7 | Godot auto-start on Pi boot | Not started |
 | 8 | Python tracker accuracy fixes | Not started |
 | 9 | Data sync to researcher server | Not started |
@@ -199,12 +204,21 @@ LIFETIME_MIN     = 0.1   # revert to 3.0 for real patients
 ```
 
 **Outcome log:**
-- `AdaptiveManager.outcome_log` — Array of `{lt: float, hit: int, pos: Vector2}`, one entry per apple
-- `AdaptiveManager.trial_log` — Array of `{trial: int, rate: float}`, one entry per completed trial
+- `AdaptiveManager.outcome_log` — Array of `{lt, hit, pos, sheep_pos}`, one entry per apple
+- `AdaptiveManager.trial_log` — Array of `{trial, rate}`, one entry per completed trial
 - Both cleared at `start_session()`
 
-**Known gap:** threshold and offset reset on every `start_session()`. No cross-session memory.
-If needed in future: persist in patients.json between sessions.
+**Speed estimation + reachability constraint (added 2026-06-04):**
+- `_player_pos_at_spawn` — sheep position recorded when each apple spawns (via `record_spawn(player_pos)`)
+- `_speed_estimate` — running max of `distance / lifetime` across all catches; resets each session
+- `get_spawn_position` now takes `apple_lt` as parameter (lifetime fetched before spawn position)
+- In LIFETIME mode, if `_speed_estimate > 0`: spawn is constrained to `apple_lt × speed_estimate` radius from player — no physically impossible apples
+- Speed estimate is conservative (includes reaction time → underestimates true speed → smaller radius)
+
+**Known gaps:**
+- threshold and offset reset on every `start_session()`. No cross-session memory.
+- Speed estimate uses sheep position at spawn — valid for catches, less accurate for misses (arm may not have reached apple)
+- No inter-stimulus interval between apples within a trial
 
 ---
 
@@ -289,3 +303,40 @@ Active from trial 2 onward (after `ws_calibrated = true`):
 1. Tune PID gains systematically using the test protocol (see simulate.py)
 2. Task 7: Configure Raspberry Pi to auto-launch Godot on boot
 3. Task 8: Python tracker accuracy fixes
+
+---
+
+## Simulator — healthy user model (redesigned 2026-06-04)
+
+simulate.py fully redesigned. Single mode, no manual rates, no psychometric function.
+
+**Core model:**
+- `r = distance / (lifetime × estimated_speed)` — difficulty ratio
+- Controller works in r-space: adjusts a window [lo, hi] on r each trial
+- Healthy user: catch if `r < actual_speed / estimated_speed`, miss otherwise
+- `actual_speed` is hidden from the controller — PID only sees catch rate
+
+**Inputs:**
+| Section | Controls |
+|---------|----------|
+| Controller gains | Kp, Ki, Kd |
+| Difficulty | Target success rate, r window width |
+| Trial settings | N trials, Trial time (s) — trial ends when sum(lifetimes) ≥ trial time |
+| Patient | Estimated speed (px/s), Actual speed (px/s), Workspace radius (px) |
+
+**Simulation per trial:**
+1. Sample distance ~ U[0, workspace_radius]
+2. Sample r ~ U[lo, hi] (controller's window)
+3. Compute lifetime = distance / (r × estimated_speed)
+4. Outcome: catch if r < actual_speed / estimated_speed
+5. Accumulate lifetime; end trial when elapsed ≥ trial_time
+6. PID updates r_center from observed catch rate
+
+**Graphs (2, x-axis = trial number):**
+- Graph 1: r window centre + bounds + actual catch boundary (red) + controller's assumed boundary (dim)
+- Graph 2: per-trial catch rate + target line
+
+**What the two speeds enable:**
+- `estimated_speed = actual_speed` → perfect calibration, controller converges cleanly
+- `actual_speed > estimated_speed` → user is faster than calibrated; catch boundary > 1; more catches than expected; PID pushes r up to compensate
+- `actual_speed < estimated_speed` → user is slower; fewer catches; PID pushes r down
