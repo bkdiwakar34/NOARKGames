@@ -4,7 +4,7 @@ const APPLE_SCENE := preload("res://v2/Games/random_reach/apple.tscn")
 const BETWEEN_TRIAL_SCENE := preload("res://v2/Scenes/between_trial.tscn")
 const GRAPH_OVERLAY_SCRIPT := preload("res://v2/Games/random_reach/graph_overlay.gd")
 
-const CATCH_RADIUS := 60.0
+var _catch_radius:    float = 60.0  # set per-apple from AdaptiveManager
 var _catch_hold_time: float = 1.0
 const LOG_INTERVAL := 0.02
 
@@ -14,13 +14,16 @@ var SCREEN_MAX: Vector2
 var _player_pos: Vector2
 var _current_apple: Node2D = null
 var _catch_timer: float = 0.0
+var _missed_apple_pos: Vector2 = Vector2.ZERO
+var _tracking_miss: bool = false
+var _miss_track_timer: float = 0.0
+const MISS_TRACK_WINDOW: float = 6.0
 var _trial_caught: int = 0
 var _between_trial: CanvasLayer = null
 var _log_file: FileAccess = null
 var _log_timer: Timer = null
 var _score_label: Label = null
 var _debug_label: Label = null
-var _player_sprite: Sprite2D = null
 var _is_between_trial: bool = false
 var _graph_overlay: Control = null
 
@@ -43,11 +46,6 @@ func _build_ui() -> void:
 	add_child(_between_trial)
 	_between_trial.visible = false
 
-	_player_sprite = Sprite2D.new()
-	_player_sprite.texture = load("res://Games/random_reach/Sprites/jet.png")
-	_player_sprite.scale = Vector2(0.15, 0.15)
-	add_child(_player_sprite)
-
 	_score_label = Label.new()
 	_score_label.text = "0"
 	_score_label.add_theme_font_size_override("font_size", 80)
@@ -58,7 +56,7 @@ func _build_ui() -> void:
 	add_child(_score_label)
 
 	var score_sub := Label.new()
-	score_sub.text = "apples"
+	score_sub.text = "pops"
 	score_sub.add_theme_font_size_override("font_size", 20)
 	score_sub.add_theme_color_override("font_color", Color(0.50, 0.32, 0.08, 0.85))
 	score_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -110,6 +108,31 @@ func _draw() -> void:
 		if is_instance_valid(_current_apple):
 			draw_line(center, _current_apple.position, Color(1, 1, 1, 0.2), 1.0)
 
+	# Pin tool — tip at _player_pos, pointing toward balloon
+	var pin_dir: Vector2
+	if is_instance_valid(_current_apple):
+		pin_dir = (_current_apple.position - _player_pos)
+	elif _tracking_miss:
+		pin_dir = (_missed_apple_pos - _player_pos)
+	else:
+		pin_dir = Vector2(1.0, 0.0)
+	if pin_dir.length() > 0.01:
+		pin_dir = pin_dir.normalized()
+	var perp := Vector2(-pin_dir.y, pin_dir.x)
+	var tip  := _player_pos
+	var head := _player_pos - pin_dir * 30.0
+	# Shaft
+	draw_line(head, tip, Color(0.80, 0.82, 0.88), 2.5)
+	# Tip triangle
+	draw_colored_polygon(PackedVector2Array([
+		tip,
+		tip - pin_dir * 9.0 + perp * 3.5,
+		tip - pin_dir * 9.0 - perp * 3.5
+	]), Color(0.92, 0.94, 1.0))
+	# Head (red circle)
+	draw_circle(head, 7.0, Color(0.85, 0.12, 0.12))
+	draw_circle(head + Vector2(-2.0, -2.0), 2.5, Color(1.0, 0.55, 0.55, 0.5))
+
 func _connect_signals() -> void:
 	AdaptiveManager.trial_ended.connect(_on_trial_ended)
 	AdaptiveManager.trial_started.connect(_on_trial_started)
@@ -131,26 +154,29 @@ func _process(delta: float) -> void:
 	_update_player_pos()
 	AdaptiveManager.update_workspace(_player_pos)
 
-	if not _is_between_trial:
-		if _current_apple == null:
-			_spawn_apple()
-		else:
-			_check_catch(delta)
+	if _tracking_miss:
+		_miss_track_timer += delta
+		if _player_pos.distance_to(_missed_apple_pos) < _catch_radius:
+			AdaptiveManager.record_miss_completed()
+			_tracking_miss = false
+		elif _miss_track_timer >= MISS_TRACK_WINDOW:
+			_tracking_miss = false  # movement aborted — discard trial
 
-	_player_sprite.position = _player_pos
-	if _current_apple and is_instance_valid(_current_apple):
-		_player_sprite.flip_h = _current_apple.position.x < _player_pos.x
+	if not _is_between_trial:
+		if _current_apple == null and not _tracking_miss:
+			_spawn_apple()
+		elif _current_apple != null:
+			_check_catch(delta)
 
 	var rate_pct := int(AdaptiveManager.rolling_rate * 100.0)
 	var target_pct := int(AdaptiveManager.assigned_rate * 100.0)
 	var err_pct := rate_pct - target_pct
-	var ws_min := AdaptiveManager.ws_min
-	var ws_max := AdaptiveManager.ws_max
-	var center := (ws_min + ws_max) * 0.5
-	_debug_label.text = "T%d  thr:%.1fs  off:%+.2fs  rate:%d%%  err:%+d%%\nws:(%.0f,%.0f)->(%.0f,%.0f)  center:(%.0f,%.0f)" % [
-		AdaptiveManager.trial_number, AdaptiveManager.threshold,
-		AdaptiveManager.offset, rate_pct, err_pct,
-		ws_min.x, ws_min.y, ws_max.x, ws_max.y, center.x, center.y
+	var phase_names := ["WS_SCAN", "PREC_SCAN", "FITTS_CAL", "SESSION"]
+	var phase_str := phase_names[AdaptiveManager._phase] if AdaptiveManager._phase < phase_names.size() else "?"
+	_debug_label.text = "T%d  [%s]  a:%.3f  b:%.3f  ID:%.2f\nrate:%d%%  err:%+d%%  r:%d" % [
+		AdaptiveManager.trial_number, phase_str,
+		AdaptiveManager.fitts_a, AdaptiveManager.fitts_b, AdaptiveManager.difficulty,
+		rate_pct, err_pct, AdaptiveManager._rls_n
 	]
 
 	queue_redraw()
@@ -165,16 +191,19 @@ func _update_player_pos() -> void:
 func _spawn_apple() -> void:
 	if is_instance_valid(_current_apple):
 		_current_apple.queue_free()
-	var apple_lt: float = AdaptiveManager.get_apple_lifetime()
-	var spawn_pos := AdaptiveManager.get_spawn_position(_player_pos, apple_lt)
+	var spawn_pos := AdaptiveManager.get_spawn_position(_player_pos)
 	spawn_pos.x = clamp(spawn_pos.x, SCREEN_MIN.x, SCREEN_MAX.x)
 	spawn_pos.y = clamp(spawn_pos.y, SCREEN_MIN.y, SCREEN_MAX.y)
+	var apple_lt: float = AdaptiveManager.get_apple_lifetime(_player_pos, spawn_pos)
 	_current_apple = APPLE_SCENE.instantiate()
 	_current_apple.position = spawn_pos
 	_current_apple.lifetime = apple_lt
+	_current_apple.balloon_color = Color.from_hsv(randf(), 0.75, 0.92)
 	_current_apple.apple_eaten.connect(_on_apple_eaten)
 	_current_apple.apple_missed.connect(_on_apple_missed)
 	add_child(_current_apple)
+	_catch_radius = AdaptiveManager.get_apple_radius()
+	_tracking_miss = false
 	AdaptiveManager.record_spawn(_player_pos)
 	_catch_timer = 0.0
 
@@ -183,7 +212,7 @@ func _check_catch(delta: float) -> void:
 		_current_apple = null
 		_catch_timer = 0.0
 		return
-	if _player_pos.distance_to(_current_apple.position) < CATCH_RADIUS:
+	if _player_pos.distance_to(_current_apple.position) < _catch_radius:
 		_catch_timer += delta
 		_current_apple.set_catch_progress(clamp(_catch_timer / _catch_hold_time, 0.0, 1.0))
 		if _catch_timer >= _catch_hold_time:
@@ -204,9 +233,13 @@ func _on_apple_eaten() -> void:
 
 func _on_apple_missed() -> void:
 	var lt: float = _current_apple.lifetime if is_instance_valid(_current_apple) else 0.0
+	if is_instance_valid(_current_apple):
+		_missed_apple_pos  = _current_apple.position
+		_tracking_miss     = true
+		_miss_track_timer  = 0.0
 	AdaptiveManager.record_miss(lt)
 	_current_apple = null
-	_catch_timer = 0.0
+	_catch_timer   = 0.0
 
 func _spawn_catch_burst(pos: Vector2) -> void:
 	for i in 7:

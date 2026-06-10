@@ -3,16 +3,7 @@ extends Control
 var _override_rate: float = 0.8
 var _rate_buttons: Array = []
 var _settings_overlay: Control
-var _mode_btns: Array = []
-
-var _kp_edit:        LineEdit
-var _ki_edit:        LineEdit
-var _kd_edit:        LineEdit
-var _width_edit:     LineEdit
-var _hold_edit:      LineEdit
-var _sc_coarse_edit: LineEdit
-var _sc_fine_edit:   LineEdit
-var _sc_rev_edit:    LineEdit
+var _hold_edit: LineEdit
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -43,7 +34,7 @@ func _build_ui(patient_name: String) -> void:
 
 	_add_game_card(
 		vp * 0.5 - Vector2(180.0, 100.0),
-		"Apple Catch",
+		"Balloon Pop",
 		"res://v2/Games/random_reach/random_reach.tscn"
 	)
 	_add_rate_selector(vp)
@@ -191,7 +182,7 @@ func _build_settings_overlay(vp: Vector2) -> void:
 	_settings_overlay.add_child(dim)
 
 	var cw: float = 800.0
-	var ch: float = 370.0
+	var ch: float = 220.0
 	var cx: float = (vp.x - cw) * 0.5
 	var cy: float = (vp.y - ch) * 0.5
 
@@ -253,15 +244,7 @@ func _build_settings_overlay(vp: Vector2) -> void:
 
 	var y: float = 62.0
 
-	_add_section_label(card, "DIFFICULTY MODE", cw, y);  y += 22.0
-	_add_mode_section(card, cw, y);                       y += 48.0
-	_add_sep(card, cw, y);                                y += 14.0
-
-	_add_section_label(card, "PID GAINS", cw, y);         y += 22.0
-	_add_pid_section(card, cw, y);                        y += 46.0
-	_add_sep(card, cw, y);                                y += 14.0
-
-	_add_section_label(card, "TESTING", cw, y);           y += 22.0
+	_add_section_label(card, "TESTING", cw, y);  y += 22.0
 	_add_testing_section(card, cw, y)
 
 # ── Separator + section label ─────────────────────────────────────────────────
@@ -282,101 +265,6 @@ func _add_section_label(parent: Control, text: String, cw: float, y: float) -> v
 	lbl.custom_minimum_size  = Vector2(cw, 20.0)
 	lbl.position             = Vector2(0.0, y)
 	parent.add_child(lbl)
-
-# ── Mode section — segmented control ─────────────────────────────────────────
-
-func _add_mode_section(card: Control, cw: float, y: float) -> void:
-	var btn_w: float = 170.0
-	var btn_h: float = 38.0
-	var sx: float    = cw * 0.5 - btn_w  # two buttons total = btn_w * 2, center them
-
-	var lt_btn := Button.new()
-	lt_btn.text = "Lifetime"
-	lt_btn.custom_minimum_size = Vector2(btn_w, btn_h)
-	lt_btn.size = Vector2(btn_w, btn_h)
-	lt_btn.position = Vector2(sx, y)
-	lt_btn.add_theme_font_size_override("font_size", 15)
-	card.add_child(lt_btn)
-
-	var ws_btn := Button.new()
-	ws_btn.text = "Workspace"
-	ws_btn.custom_minimum_size = Vector2(btn_w, btn_h)
-	ws_btn.size = Vector2(btn_w, btn_h)
-	ws_btn.position = Vector2(sx + btn_w, y)
-	ws_btn.add_theme_font_size_override("font_size", 15)
-	card.add_child(ws_btn)
-
-	_mode_btns = [lt_btn, ws_btn]
-	_refresh_mode_btns(AdaptiveManager.difficulty_mode == AdaptiveManager.DifficultyMode.LIFETIME)
-
-	lt_btn.pressed.connect(func():
-		AdaptiveManager.difficulty_mode = AdaptiveManager.DifficultyMode.LIFETIME
-		_refresh_mode_btns(true)
-	)
-	ws_btn.pressed.connect(func():
-		AdaptiveManager.difficulty_mode = AdaptiveManager.DifficultyMode.WORKSPACE
-		_refresh_mode_btns(false)
-	)
-
-func _refresh_mode_btns(lifetime_active: bool) -> void:
-	if _mode_btns.size() < 2:
-		return
-	var states := [lifetime_active, not lifetime_active]
-	for i in 2:
-		var btn: Button  = _mode_btns[i]
-		var active: bool = states[i]
-		var sb := StyleBoxFlat.new()
-		sb.bg_color     = Color(0.18, 0.46, 0.86) if active else Color(0.96, 0.96, 1.00)
-		sb.border_color = Color(0.18, 0.46, 0.86) if active else Color(0.72, 0.76, 0.90)
-		sb.border_width_left   = 1; sb.border_width_right  = 1
-		sb.border_width_top    = 1; sb.border_width_bottom = 1
-		if i == 0:
-			sb.corner_radius_top_left    = 10; sb.corner_radius_bottom_left  = 10
-		else:
-			sb.corner_radius_top_right   = 10; sb.corner_radius_bottom_right = 10
-		btn.add_theme_stylebox_override("normal",  sb)
-		btn.add_theme_stylebox_override("hover",   sb)
-		btn.add_theme_stylebox_override("pressed", sb)
-		btn.add_theme_stylebox_override("focus",   sb)
-		var tc := Color(1.0, 1.0, 1.0) if active else Color(0.28, 0.36, 0.58)
-		btn.add_theme_color_override("font_color", tc)
-
-# ── PID section ───────────────────────────────────────────────────────────────
-
-func _add_pid_section(card: Control, cw: float, y: float) -> void:
-	var lbl_w:   float = 36.0
-	var edit_w:  float = 84.0
-	var gap:     float = 8.0
-	var col_gap: float = 60.0
-	var group_w: float = lbl_w + gap + edit_w
-	var total_w: float = 3.0 * group_w + 2.0 * col_gap
-	var sx: float      = cw * 0.5 - total_w * 0.5
-	var row_h: float   = 34.0
-
-	var gains := [
-		{"label": "Kp", "val": AdaptiveManager.gain_p},
-		{"label": "Ki", "val": AdaptiveManager.gain_i},
-		{"label": "Kd", "val": AdaptiveManager.gain_d},
-	]
-	for i in gains.size():
-		var gx: float = sx + i * (group_w + col_gap)
-
-		var glbl := Label.new()
-		glbl.text = gains[i]["label"]
-		glbl.add_theme_font_size_override("font_size", 15)
-		glbl.add_theme_color_override("font_color", Color(0.20, 0.26, 0.50))
-		glbl.custom_minimum_size = Vector2(lbl_w, row_h)
-		glbl.position            = Vector2(gx, y)
-		glbl.vertical_alignment  = VERTICAL_ALIGNMENT_CENTER
-		card.add_child(glbl)
-
-		var edit := _make_line_edit(gains[i]["val"], 2, edit_w, row_h)
-		edit.position = Vector2(gx + lbl_w + gap, y)
-		card.add_child(edit)
-
-		if i == 0: _kp_edit = edit
-		elif i == 1: _ki_edit = edit
-		else: _kd_edit = edit
 
 # ── Testing section ───────────────────────────────────────────────────────────
 
@@ -423,28 +311,12 @@ func _add_testing_section(card: Control, cw: float, y: float) -> void:
 
 	y += row_h + row_gap
 
-	# Row 2 — Window + Hold
+	# Row 2 — Hold time
 	var lbl_w2: float  = 84.0
 	var edit_w2: float = 70.0
-	var r2_gap: float  = 52.0
-	var row2_w: float  = lbl_w2 + edit_w2 + r2_gap + lbl_w2 + edit_w2
-	var row2_x: float  = cw * 0.5 - row2_w * 0.5
+	var row2_x: float  = cw * 0.5 - (lbl_w2 + edit_w2) * 0.5
 
-	_width_edit = _labeled_edit(card, "Window (s)", row2_x,                          y, lbl_w2, edit_w2, row_h, AdaptiveManager.window_width,    1)
-	_hold_edit  = _labeled_edit(card, "Hold (s)",   row2_x + lbl_w2 + edit_w2 + r2_gap, y, lbl_w2, edit_w2, row_h, AdaptiveManager.catch_hold_time, 1)
-
-	y += row_h + row_gap
-
-	# Row 3 — Staircase params
-	var lbl_w3: float  = 68.0
-	var edit_w3: float = 58.0
-	var r3_gap: float  = 36.0
-	var row3_w: float  = (lbl_w3 + edit_w3) * 3.0 + r3_gap * 2.0
-	var row3_x: float  = cw * 0.5 - row3_w * 0.5
-
-	_sc_coarse_edit = _labeled_edit(card, "Coarse", row3_x,                             y, lbl_w3, edit_w3, row_h, AdaptiveManager.sc_step_coarse,          1)
-	_sc_fine_edit   = _labeled_edit(card, "Fine",   row3_x + lbl_w3 + edit_w3 + r3_gap, y, lbl_w3, edit_w3, row_h, AdaptiveManager.sc_step_fine,            1)
-	_sc_rev_edit    = _labeled_edit(card, "Rev #",  row3_x + (lbl_w3 + edit_w3 + r3_gap) * 2.0, y, lbl_w3, edit_w3, row_h, float(AdaptiveManager.sc_n_reversals), 0)
+	_hold_edit = _labeled_edit(card, "Hold (s)", row2_x, y, lbl_w2, edit_w2, row_h, AdaptiveManager.catch_hold_time, 1)
 
 func _labeled_edit(parent: Control, lbl_text: String, x: float, y: float,
 		lbl_w: float, edit_w: float, h: float, value: float, decimals: int) -> LineEdit:
@@ -499,14 +371,7 @@ func _safe_float(text: String, fallback: float) -> float:
 	return fallback
 
 func _start_game(scene_path: String) -> void:
-	AdaptiveManager.gain_p          = _safe_float(_kp_edit.text,        AdaptiveManager.gain_p)
-	AdaptiveManager.gain_i          = _safe_float(_ki_edit.text,        AdaptiveManager.gain_i)
-	AdaptiveManager.gain_d          = _safe_float(_kd_edit.text,        AdaptiveManager.gain_d)
-	AdaptiveManager.window_width    = _safe_float(_width_edit.text,     AdaptiveManager.window_width)
-	AdaptiveManager.catch_hold_time = _safe_float(_hold_edit.text,      AdaptiveManager.catch_hold_time)
-	AdaptiveManager.sc_step_coarse  = _safe_float(_sc_coarse_edit.text, AdaptiveManager.sc_step_coarse)
-	AdaptiveManager.sc_step_fine    = _safe_float(_sc_fine_edit.text,   AdaptiveManager.sc_step_fine)
-	AdaptiveManager.sc_n_reversals  = int(_safe_float(_sc_rev_edit.text, float(AdaptiveManager.sc_n_reversals)))
+	AdaptiveManager.catch_hold_time = _safe_float(_hold_edit.text, AdaptiveManager.catch_hold_time)
 	if not AdaptiveManager.is_running:
 		AdaptiveManager.start_session(_override_rate)
 	get_tree().change_scene_to_file(scene_path)
