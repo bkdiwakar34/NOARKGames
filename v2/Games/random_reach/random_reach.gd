@@ -171,8 +171,8 @@ func _process(delta: float) -> void:
 	var rate_pct := int(AdaptiveManager.rolling_rate * 100.0)
 	var target_pct := int(AdaptiveManager.assigned_rate * 100.0)
 	var err_pct := rate_pct - target_pct
-	var phase_names := ["WS_SCAN", "PREC_SCAN", "FITTS_CAL", "SESSION"]
-	var phase_str := phase_names[AdaptiveManager._phase] if AdaptiveManager._phase < phase_names.size() else "?"
+	var phase_names: Array[String] = ["WS_SCAN", "PREC_SCAN", "FITTS_CAL", "SESSION"]
+	var phase_str: String = phase_names[AdaptiveManager._phase] if AdaptiveManager._phase < phase_names.size() else "?"
 	_debug_label.text = "T%d  [%s]  a:%.3f  b:%.3f  ID:%.2f\nrate:%d%%  err:%+d%%  r:%d" % [
 		AdaptiveManager.trial_number, phase_str,
 		AdaptiveManager.fitts_a, AdaptiveManager.fitts_b, AdaptiveManager.difficulty,
