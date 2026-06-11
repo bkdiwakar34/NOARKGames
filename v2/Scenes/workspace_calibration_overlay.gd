@@ -7,6 +7,7 @@ var _corners:          Array   = []
 var _btn:              Button  = null
 var _instruction_lbl:  Label   = null
 var _status_lbl:       Label   = null
+var _coords_lbl:       Label   = null
 
 
 func _ready() -> void:
@@ -64,10 +65,23 @@ func _build_ui() -> void:
 	cancel_btn.pressed.connect(func(): queue_free())
 	add_child(cancel_btn)
 
+	_coords_lbl = Label.new()
+	_coords_lbl.add_theme_font_size_override("font_size", 15)
+	_coords_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_coords_lbl.custom_minimum_size  = Vector2(vp.x, 26.0)
+	_coords_lbl.position             = Vector2(0.0, vp.y * 0.88)
+	add_child(_coords_lbl)
+
 
 func _process(_delta: float) -> void:
 	var raw: Vector2 = UDPReceiver.screen_pos if UDPReceiver.connected else get_global_mouse_position()
 	_cursor_pos = raw
+	if UDPReceiver.connected:
+		_coords_lbl.add_theme_color_override("font_color", Color(0.40, 0.90, 0.50))
+		_coords_lbl.text = "Hardware connected — x: %d  y: %d" % [int(_cursor_pos.x), int(_cursor_pos.y)]
+	else:
+		_coords_lbl.add_theme_color_override("font_color", Color(0.90, 0.65, 0.20))
+		_coords_lbl.text = "Hardware NOT connected (using mouse) — x: %d  y: %d" % [int(_cursor_pos.x), int(_cursor_pos.y)]
 	queue_redraw()
 
 
