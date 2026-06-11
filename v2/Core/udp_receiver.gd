@@ -37,7 +37,7 @@ func _start_tracker() -> void:
 	if not DirAccess.dir_exists_absolute(pyscripts_dir):
 		return
 	_tracker_pid = OS.create_process(
-		"bash", ["-c", "cd '" + pyscripts_dir + "' && python3 main.py"]
+		"bash", ["-c", "cd '" + pyscripts_dir + "' && /home/sujith/Documents/NOARKGames/.venv/bin/python3 main.py"]
 	)
 
 func _network_loop() -> void:
