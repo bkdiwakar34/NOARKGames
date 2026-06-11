@@ -48,6 +48,7 @@ class MainClass:
 
         self.stream_type     = settings.get("stream_type", "udp")
         self.ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
+        self.debug           = settings.get("debug", False)
 
         self.filter            = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
         self.default_ids       = Config.DEFAULT_IDS
@@ -315,8 +316,9 @@ class MainClass:
                         [datetime.now().strftime("%d/%m/%Y %H:%M:%S"), *local_coords]
                     )
 
-        self.video_frame = cv2.resize(self.video_frame, (350, 200))
-        cv2.imshow("frame", self.video_frame)
+        if self.debug:
+            self.video_frame = cv2.resize(self.video_frame, (350, 200))
+            cv2.imshow("frame", self.video_frame)
 
     def run(self) -> None:
         import time
@@ -341,13 +343,14 @@ class MainClass:
 
                 if self.received_message == b"STOP":
                     break
-                if cv2.waitKey(1) & 0xFF == ord("q"):
+                if self.debug and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
             if self.stream_type == "ble" and hasattr(self, "ble_streamer"):
                 print("[BLE] Stopping BLE streamer")
                 self.ble_streamer.stop()
-            cv2.destroyAllWindows()
+            if self.debug:
+                cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
