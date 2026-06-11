@@ -17,11 +17,15 @@ var _running: bool = true
 var _outgoing: String = "CONNECTED"
 var _offset_x: int
 var _offset_y: int
+var _viewport_size: Vector2 = Vector2(1152.0, 648.0)
 
 func _ready() -> void:
 	var screen = DisplayServer.screen_get_size()
 	_offset_x = int(screen.x / 4)
 	_offset_y = int(screen.y / 4)
+	# Cache viewport size on main thread — safe to use in the network thread
+	await get_tree().process_frame
+	_viewport_size = get_viewport().get_visible_rect().size
 
 	var settings = JSON.parse_string(FileAccess.get_file_as_string("res://settings.json"))
 	if settings:
@@ -58,8 +62,7 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 	raw_y = f[2]
 	raw_z = f[3]
 	if WorkspaceConfig.sensor_calibrated:
-		var vp := get_viewport().get_visible_rect().size
-		screen_pos = WorkspaceConfig.sensor_to_screen(raw_x, raw_z, vp)
+		screen_pos = WorkspaceConfig.sensor_to_screen(raw_x, raw_z, _viewport_size)
 	else:
 		screen_pos = Vector2(
 			raw_x * SCALER_X + _offset_x,
