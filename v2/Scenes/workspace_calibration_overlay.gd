@@ -2,12 +2,15 @@ extends Control
 
 signal calibration_done
 
-var _cursor_pos:       Vector2 = Vector2.ZERO
-var _corners:          Array   = []
-var _btn:              Button  = null
-var _instruction_lbl:  Label   = null
-var _status_lbl:       Label   = null
-var _coords_lbl:       Label   = null
+const CORNER_LABELS: Array = ["top-left", "top-right", "bottom-left", "bottom-right"]
+
+var _cursor_pos:      Vector2 = Vector2.ZERO
+var _raw_corners:     Array   = []   # Vector2(raw_x, raw_z) for each recorded corner
+var _screen_corners:  Array   = []   # screen_pos at each corner (visual feedback only)
+var _btn:             Button  = null
+var _instruction_lbl: Label   = null
+var _status_lbl:      Label   = null
+var _coords_lbl:      Label   = null
 
 
 func _ready() -> void:
@@ -78,23 +81,21 @@ func _process(_delta: float) -> void:
 	_cursor_pos = raw
 	if UDPReceiver.connected:
 		_coords_lbl.add_theme_color_override("font_color", Color(0.40, 0.90, 0.50))
-		_coords_lbl.text = "Hardware connected — x: %d  y: %d" % [int(_cursor_pos.x), int(_cursor_pos.y)]
+		_coords_lbl.text = "Hardware connected — raw_x: %.3f  raw_z: %.3f" % [UDPReceiver.raw_x, UDPReceiver.raw_z]
 	else:
 		_coords_lbl.add_theme_color_override("font_color", Color(0.90, 0.65, 0.20))
-		_coords_lbl.text = "Hardware NOT connected (using mouse) — x: %d  y: %d" % [int(_cursor_pos.x), int(_cursor_pos.y)]
+		_coords_lbl.text = "Hardware NOT connected — mouse position used"
 	queue_redraw()
 
 
 func _draw() -> void:
-	# Recorded corners
-	for c in _corners:
+	for c in _screen_corners:
 		draw_circle(c, 9.0, Color(0.20, 0.88, 0.30, 0.85))
 		draw_arc(c, 9.0, 0.0, TAU, 32, Color(0.20, 0.88, 0.30), 2.0)
 
-	# Live bounding rectangle as corners accumulate
-	if _corners.size() >= 2:
+	if _screen_corners.size() >= 2:
 		var xs: Array = []; var ys: Array = []
-		for c in _corners:
+		for c in _screen_corners:
 			xs.append(c.x); ys.append(c.y)
 		xs.sort(); ys.sort()
 		var rmin := Vector2(xs[0], ys[0])
@@ -102,7 +103,6 @@ func _draw() -> void:
 		draw_rect(Rect2(rmin, rmax - rmin), Color(0.25, 0.80, 0.30, 0.18), true)
 		draw_rect(Rect2(rmin, rmax - rmin), Color(0.25, 0.80, 0.30, 0.65), false, 2.0)
 
-	# Cursor
 	draw_arc(_cursor_pos, 15.0, 0.0, TAU, 48, Color(1.0, 0.88, 0.18, 0.92), 2.5)
 	draw_circle(_cursor_pos, 3.5, Color(1.0, 0.88, 0.18, 0.92))
 
@@ -115,18 +115,20 @@ func _input(event: InputEvent) -> void:
 
 
 func _on_btn_pressed() -> void:
-	if _corners.size() < 4:
-		_corners.append(_cursor_pos)
+	if _raw_corners.size() < 4:
+		_raw_corners.append(Vector2(UDPReceiver.raw_x, UDPReceiver.raw_z))
+		_screen_corners.append(_cursor_pos)
 		_update_ui()
 	else:
 		_save_and_close()
 
 
 func _update_ui() -> void:
-	var n: int = _corners.size()
+	var n: int = _raw_corners.size()
 	if n < 4:
-		_instruction_lbl.text = "Move arm to corner %d of 4 — then press Enter or the button" % (n + 1)
-		_btn.text             = "Record corner %d   [Enter]" % (n + 1)
+		var corner_name: String = CORNER_LABELS[n]
+		_instruction_lbl.text = "Move arm to the %s corner of the screen, then press Enter" % corner_name
+		_btn.text             = "Record %s   [Enter]" % corner_name
 		_status_lbl.text      = "%d / 4 corners recorded" % n
 	else:
 		_instruction_lbl.text = "All 4 corners recorded"
@@ -135,15 +137,15 @@ func _update_ui() -> void:
 
 
 func _save_and_close() -> void:
-	if _corners.size() < 4:
+	if _raw_corners.size() < 4:
 		return
-	var xs: Array = []; var ys: Array = []
-	for c in _corners:
-		xs.append(c.x); ys.append(c.y)
-	xs.sort(); ys.sort()
-	WorkspaceConfig.save_config(
-		Vector2(xs[0], ys[0]),
-		Vector2(xs[xs.size() - 1], ys[ys.size() - 1])
-	)
+	# Order: TL=0, TR=1, BL=2, BR=3
+	# x-left edge = average of TL.x and BL.x; x-right = average of TR.x and BR.x
+	# z-top edge  = average of TL.y and TR.y; z-bottom = average of BL.y and BR.y
+	var x_left:   float = (_raw_corners[0].x + _raw_corners[2].x) * 0.5
+	var x_right:  float = (_raw_corners[1].x + _raw_corners[3].x) * 0.5
+	var z_top:    float = (_raw_corners[0].y + _raw_corners[1].y) * 0.5
+	var z_bottom: float = (_raw_corners[2].y + _raw_corners[3].y) * 0.5
+	WorkspaceConfig.save_sensor_calibration(x_left, x_right, z_top, z_bottom, get_viewport_rect().size)
 	calibration_done.emit()
 	queue_free()

@@ -57,10 +57,14 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 	raw_x = f[1]
 	raw_y = f[2]
 	raw_z = f[3]
-	screen_pos = Vector2(
-		raw_x * SCALER_X + _offset_x,
-		(raw_z - 0.2) * 1400.0 + 40.0
-	)
+	if WorkspaceConfig.sensor_calibrated:
+		var vp := get_viewport().get_visible_rect().size
+		screen_pos = WorkspaceConfig.sensor_to_screen(raw_x, raw_z, vp)
+	else:
+		screen_pos = Vector2(
+			raw_x * SCALER_X + _offset_x,
+			(raw_z - 0.2) * 1400.0 + 40.0
+		)
 	connected = true
 
 func stop() -> void:
