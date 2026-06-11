@@ -5,6 +5,7 @@ var raw_y: float = 0.0
 var raw_z: float = 0.0
 var screen_pos: Vector2 = Vector2.ZERO
 var connected: bool = false
+var _tracker_pid: int = -1
 
 const SCALER_X: int = 2000
 const SCALER_Z: int = 2000
@@ -26,8 +27,18 @@ func _ready() -> void:
 	if settings:
 		_port = settings.get("udp_port", 12345)
 
+	_start_tracker()
 	_udp.connect_to_host("127.0.0.1", _port)
 	_thread.start(_network_loop)
+
+
+func _start_tracker() -> void:
+	var pyscripts_dir: String = ProjectSettings.globalize_path("res://pyscripts")
+	if not DirAccess.dir_exists_absolute(pyscripts_dir):
+		return
+	_tracker_pid = OS.create_process(
+		"bash", ["-c", "cd '" + pyscripts_dir + "' && python3 main.py"]
+	)
 
 func _network_loop() -> void:
 	while _running:
@@ -57,6 +68,9 @@ func stop() -> void:
 	_outgoing = "STOP"
 	_udp.put_packet(_outgoing.to_utf8_buffer())
 	_thread.wait_to_finish()
+	if _tracker_pid > 0:
+		OS.kill(_tracker_pid)
+		_tracker_pid = -1
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
