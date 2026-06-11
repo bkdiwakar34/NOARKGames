@@ -49,6 +49,7 @@ class MainClass:
         self.stream_type     = settings.get("stream_type", "udp")
         self.ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
         self.debug           = settings.get("debug", False)
+        self.udp_port        = settings.get("udp_port", 12345)
 
         self.filter            = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
         self.default_ids       = Config.DEFAULT_IDS
@@ -142,7 +143,7 @@ class MainClass:
 
     def _init_udp_socket(self) -> None:
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp_socket.bind((Config.UDP_IP, Config.UDP_PORT))
+        self.udp_socket.bind((Config.UDP_IP, self.udp_port))
         self.udp_socket.setblocking(False)
         print("UDP socket bound to", self.udp_socket.getsockname())
 
