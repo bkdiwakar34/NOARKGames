@@ -24,30 +24,29 @@ var _phase: Phase = Phase.WORKSPACE_SCAN
 var _viewport_size: Vector2 = Vector2(960.0, 540.0)
 var _center:        Vector2 = Vector2(480.0, 270.0)
 
-# ── Phase 0a: Workspace scan ──────────────────────────────────────────────────
-# 4 cardinal directions × 3 A fractions × 2 repeats = 24 apples
-const SCAN_A_FRACS: Array  = [0.3, 0.5, 0.7]
-const SCAN_REPEATS: int    = 2
-const SCAN_LIFETIME: float = 6.0
-var _scan_dir_vecs: Array  = [
-	Vector2(1.0, 0.0), Vector2(0.0, -1.0),
-	Vector2(-1.0, 0.0), Vector2(0.0, 1.0)
-]
-var _scan_dir_idx: int   = 0
-var _scan_a_idx:   int   = 0
-var _scan_rep:     int   = 0
-var _scan_hit:     int   = 0
-var _a_max:        Array = [0.0, 0.0, 0.0, 0.0]
-var _a_global_max: float = 200.0
+# ── Phase 0a: Workspace scan (grid spiral) ────────────────────────────────────
+const SCAN_CELL_SIZE: float = 120.0  # diameter = largest W
+const SCAN_LIFETIME:  float = 6.0
+var _scan_cells:        Array = []   # [{pos, ring, hit}] sorted inner→outer
+var _scan_cell_idx:     int   = 0
+var _scan_current_ring: int   = 0
+var _scan_ring_had_hit: bool  = false
+var _a_global_max:      float = 200.0
+var reachable_cells:    Array = []   # public output: [{pos}]
 
 # ── Phase 0b: Precision scan ──────────────────────────────────────────────────
-# Fixed A, 5 decreasing W values × 3 repeats = 15 apples
-const PREC_W_VALUES: Array = [120.0, 90.0, 60.0, 40.0, 25.0]  # W = diameter (px)
-const PREC_REPEATS:  int   = 3
-var _prec_w_idx: int   = 0
-var _prec_rep:   int   = 0
-var _prec_hit:   int   = 0
-var _w_min:      float = 120.0  # smallest usable W after scan
+# Alternating home/measurement pairs; 5 decreasing W values × 3 repeats = 15 measurements
+const PREC_W_VALUES:    Array = [120.0, 90.0, 60.0, 40.0, 25.0]  # W = diameter (px)
+const PREC_REPEATS:     int   = 3
+const PREC_HOME_RADIUS: float = 60.0  # home target radius (px)
+var _prec_w_idx:        int     = 0
+var _prec_rep:          int     = 0
+var _prec_hit:          int     = 0
+var _w_min:             float   = 120.0
+var _workspace_centre:  Vector2 = Vector2.ZERO
+var _a_comfortable:     float   = 100.0
+var _comfortable_cells: Array   = []
+var _prec_is_home:      bool    = true
 
 # ── Phase 0c: Fitts calibration ───────────────────────────────────────────────
 # 10 pairs × 20 valid observations each
@@ -108,9 +107,11 @@ func start_session(rate: float) -> void:
 	is_running        = true
 	ws_calibrated     = false
 	_phase            = Phase.WORKSPACE_SCAN
-	_scan_dir_idx     = 0;  _scan_a_idx = 0;  _scan_rep = 0;  _scan_hit = 0
-	_a_max            = [0.0, 0.0, 0.0, 0.0];  _a_global_max = 200.0
 	_prec_w_idx       = 0;  _prec_rep = 0;  _prec_hit = 0;  _w_min = 120.0
+	_workspace_centre = Vector2.ZERO
+	_a_comfortable    = 100.0
+	_comfortable_cells.clear()
+	_prec_is_home     = true
 	_cal_pair_idx     = 0;  _cal_rep = 0;  _cal_total = 0
 	_rls_theta        = [0.0, 0.5]
 	_rls_P            = [[1000.0, 0.0], [0.0, 1000.0]]
@@ -122,11 +123,18 @@ func start_session(rate: float) -> void:
 	_trial_caught     = 0;  _trial_spawned = 0
 	_current_pair_idx = -1
 	_center           = _viewport_size * 0.5
+	_a_global_max     = 200.0
+	reachable_cells.clear()
+	_build_scan_grid()
 
 
 func set_viewport_size(s: Vector2) -> void:
 	_viewport_size = s
 	_center        = s * 0.5
+	if is_running and _phase == Phase.WORKSPACE_SCAN:
+		_a_global_max = 200.0
+		reachable_cells.clear()
+		_build_scan_grid()
 
 
 func update_workspace(_screen_pos: Vector2) -> void:
@@ -155,7 +163,11 @@ func get_apple_lifetime(_player_pos: Vector2, _spawn_pos: Vector2) -> float:
 
 func get_apple_radius() -> float:
 	match _phase:
+		Phase.WORKSPACE_SCAN:
+			return SCAN_CELL_SIZE * 0.5
 		Phase.PRECISION_SCAN:
+			if _prec_is_home:
+				return PREC_HOME_RADIUS
 			if _prec_w_idx < PREC_W_VALUES.size():
 				return PREC_W_VALUES[_prec_w_idx] * 0.5
 		Phase.FITTS_CAL, Phase.SESSION:
@@ -187,6 +199,10 @@ func record_miss(_lt: float) -> void:
 		_cal_total += 1
 		if _cal_total >= CAL_PER_PAIR * 2:
 			_advance_cal_pair()
+	elif _phase == Phase.PRECISION_SCAN:
+		_on_prec_outcome(false)
+	elif _phase == Phase.WORKSPACE_SCAN:
+		_on_scan_outcome(false)
 
 
 func _on_valid_mt(mt: float, is_hit: bool) -> void:
@@ -205,63 +221,140 @@ func _on_valid_mt(mt: float, is_hit: bool) -> void:
 # ─── Phase 0a: Workspace scan ─────────────────────────────────────────────────
 
 func _scan_spawn() -> Vector2:
-	var diag: float  = _viewport_size.length() * 0.5
-	var a: float     = diag * SCAN_A_FRACS[_scan_a_idx]
-	var dir: Vector2 = _scan_dir_vecs[_scan_dir_idx]
 	_current_pair_idx = -1
-	return (_center + dir * a).clamp(
-		Vector2(_viewport_size.x * 0.05, _viewport_size.y * 0.05),
-		Vector2(_viewport_size.x * 0.95, _viewport_size.y * 0.95)
-	)
+	if _scan_cell_idx < _scan_cells.size():
+		return _scan_cells[_scan_cell_idx]["pos"]
+	return _center
 
 
 func _on_scan_outcome(hit: bool) -> void:
-	if hit:
-		_scan_hit += 1
-	_scan_rep += 1
-	if _scan_rep < SCAN_REPEATS:
-		return
-	var diag: float = _viewport_size.length() * 0.5
-	var a: float    = diag * SCAN_A_FRACS[_scan_a_idx]
-	if _scan_hit >= 1:
-		_a_max[_scan_dir_idx] = max(_a_max[_scan_dir_idx], a)
-	_scan_rep = 0;  _scan_hit = 0
-	_scan_a_idx += 1
-	if _scan_a_idx >= SCAN_A_FRACS.size():
-		_scan_a_idx = 0
-		_scan_dir_idx += 1
-	if _scan_dir_idx >= _scan_dir_vecs.size():
+	if _scan_cell_idx < _scan_cells.size():
+		_scan_cells[_scan_cell_idx]["hit"] = hit
+		if hit:
+			_scan_ring_had_hit = true
+	_scan_cell_idx += 1
+	if _scan_cell_idx < _scan_cells.size():
+		var next_ring: int = _scan_cells[_scan_cell_idx]["ring"]
+		if next_ring > _scan_current_ring:
+			if not _scan_ring_had_hit:
+				_finish_workspace_scan()
+				return
+			_scan_current_ring = next_ring
+			_scan_ring_had_hit = false
+	else:
 		_finish_workspace_scan()
 
 
 func _finish_workspace_scan() -> void:
-	for a_val in _a_max:
-		_a_global_max = max(_a_global_max, float(a_val))
+	reachable_cells = []
+	for cell in _scan_cells:
+		if cell["hit"]:
+			reachable_cells.append({"pos": cell["pos"]})
+	for cell in reachable_cells:
+		var d: float = cell["pos"].distance_to(_center)
+		_a_global_max = max(_a_global_max, d)
 	if _a_global_max < 50.0:
 		_a_global_max = _viewport_size.length() * 0.25
 	var r: float  = _a_global_max
 	ws_min        = _center - Vector2(r, r)
 	ws_max        = _center + Vector2(r, r)
 	ws_calibrated = true
+
+	# Workspace centre = centroid of reachable cells
+	if reachable_cells.size() > 0:
+		var sum: Vector2 = Vector2.ZERO
+		for cell in reachable_cells:
+			sum += cell["pos"]
+		_workspace_centre = sum / float(reachable_cells.size())
+	else:
+		_workspace_centre = _center
+
+	# _a_comfortable = median distance from workspace_centre to reachable cells
+	var distances: Array = []
+	for cell in reachable_cells:
+		distances.append(cell["pos"].distance_to(_workspace_centre))
+	distances.sort()
+	if distances.size() >= 1:
+		var mid: int = distances.size() / 2
+		if distances.size() % 2 == 1:
+			_a_comfortable = distances[mid]
+		else:
+			_a_comfortable = (distances[mid - 1] + distances[mid]) * 0.5
+	else:
+		_a_comfortable = 100.0
+	_a_comfortable = max(_a_comfortable, 30.0)
+
+	# _comfortable_cells = reachable cells within ±20% of _a_comfortable
+	_comfortable_cells = []
+	for cell in reachable_cells:
+		var d: float = cell["pos"].distance_to(_workspace_centre)
+		if d >= _a_comfortable * 0.8 and d <= _a_comfortable * 1.2:
+			_comfortable_cells.append(cell)
+	if _comfortable_cells.is_empty():
+		_comfortable_cells = reachable_cells.duplicate()
+
+	_prec_is_home = true
 	_phase        = Phase.PRECISION_SCAN
+
+
+func _build_scan_grid() -> void:
+	var gmin: Vector2
+	var gmax: Vector2
+	if WorkspaceConfig.is_calibrated:
+		gmin = WorkspaceConfig.workspace_min
+		gmax = WorkspaceConfig.workspace_max
+	else:
+		gmin = Vector2(_viewport_size.x * 0.04, _viewport_size.y * 0.05)
+		gmax = Vector2(_viewport_size.x * 0.95, _viewport_size.y * 0.93)
+	var usable_w: float = gmax.x - gmin.x
+	var usable_h: float = gmax.y - gmin.y
+	var cols: int     = max(1, int(usable_w / SCAN_CELL_SIZE))
+	var rows: int     = max(1, int(usable_h / SCAN_CELL_SIZE))
+	var step_x: float = usable_w / cols
+	var step_y: float = usable_h / rows
+	var ox:     float = gmin.x + step_x * 0.5
+	var oy:     float = gmin.y + step_y * 0.5
+	var by_ring: Dictionary = {}
+	for r in rows:
+		for c in cols:
+			var pos: Vector2 = Vector2(ox + c * step_x, oy + r * step_y)
+			var ring: int    = int(round(pos.distance_to(_center) / SCAN_CELL_SIZE))
+			if not by_ring.has(ring):
+				by_ring[ring] = []
+			by_ring[ring].append({"pos": pos, "ring": ring, "hit": false})
+	var ring_keys: Array = by_ring.keys()
+	ring_keys.sort()
+	_scan_cells = []
+	for k in ring_keys:
+		var ring_cells: Array = by_ring[k]
+		ring_cells.shuffle()
+		_scan_cells.append_array(ring_cells)
+	_scan_cell_idx     = 0
+	_scan_current_ring = _scan_cells[0]["ring"] if not _scan_cells.is_empty() else 0
+	_scan_ring_had_hit = false
 
 
 # ─── Phase 0b: Precision scan ─────────────────────────────────────────────────
 
 func _prec_spawn() -> Vector2:
-	var a: float     = _a_global_max * 0.4
-	var angle: float = randf() * TAU
 	_current_pair_idx = -1
-	return (_center + Vector2(cos(angle), sin(angle)) * a).clamp(
-		Vector2(_viewport_size.x * 0.05, _viewport_size.y * 0.05),
-		Vector2(_viewport_size.x * 0.95, _viewport_size.y * 0.95)
-	)
+	if _prec_is_home:
+		return _workspace_centre
+	if not _comfortable_cells.is_empty():
+		return _comfortable_cells[randi() % _comfortable_cells.size()]["pos"]
+	return _workspace_centre
 
 
 func _on_prec_outcome(hit: bool) -> void:
+	if _prec_is_home:
+		if hit:
+			_prec_is_home = false  # advance to measurement target
+		return                     # miss: re-spawn home, don't count
+	# measurement target
 	if hit:
 		_prec_hit += 1
 	_prec_rep += 1
+	_prec_is_home = true  # next target is home
 	if _prec_rep < PREC_REPEATS:
 		return
 	if _prec_hit >= 2:

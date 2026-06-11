@@ -3,19 +3,18 @@ extends Node2D
 signal apple_eaten
 signal apple_missed
 
-const BALLOON_RX := 22.0   # horizontal radius
-const BALLOON_RY := 28.0   # vertical radius (taller than wide)
-const CATCH_ARC_RADIUS := 46.0
-
-var lifetime: float = 10.0
-var balloon_color: Color = Color(0.9, 0.15, 0.12)
-var _lifetime: float = 0.0
+var lifetime:        float = 10.0
+var target_radius:   float = 28.0
+var balloon_color:   Color = Color(0.12, 0.42, 0.42)
+var _lifetime:       float = 0.0
 var _catch_progress: float = 0.0
-var _eaten: bool = false
+var _eaten:          bool  = false
+
 
 func set_catch_progress(p: float) -> void:
 	_catch_progress = p
 	queue_redraw()
+
 
 func eat() -> void:
 	if _eaten:
@@ -23,6 +22,7 @@ func eat() -> void:
 	_eaten = true
 	apple_eaten.emit()
 	queue_free()
+
 
 func _process(delta: float) -> void:
 	if _eaten:
@@ -35,60 +35,34 @@ func _process(delta: float) -> void:
 		return
 	queue_redraw()
 
+
 func _draw() -> void:
-	var bob := sin(_lifetime * 5.0) * 3.0
-	var center := Vector2(0.0, bob)
+	var r := target_radius
+	var fill := balloon_color
 
-	# Pulsing yellow ring — marks the target
-	var pulse := 0.5 + 0.5 * sin(_lifetime * 4.0)
-	var ring_r := CATCH_ARC_RADIUS + 5.0 * sin(_lifetime * 4.0)
-	draw_arc(center, ring_r, 0.0, TAU, 48, Color(1.0, 0.85, 0.1, pulse), 3.5)
-
-	# Balloon body (oval polygon)
-	var n := 36
-	var body_pts := PackedVector2Array()
-	for i in n:
-		var a := float(i) / n * TAU
-		body_pts.append(center + Vector2(cos(a) * BALLOON_RX, sin(a) * BALLOON_RY))
-	draw_colored_polygon(body_pts, balloon_color)
-
-	# Sheen highlight
-	var hi_pts := PackedVector2Array()
-	for i in 16:
-		var a := float(i) / 16.0 * TAU
-		hi_pts.append(center + Vector2(-7.0 + cos(a) * 5.0, -10.0 + sin(a) * 4.0))
-	draw_colored_polygon(hi_pts, Color(1.0, 1.0, 1.0, 0.35))
-
-	# Knot at bottom of balloon
-	var knot_y := bob + BALLOON_RY + 2.0
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-4.0, knot_y - 3.0),
-		Vector2( 4.0, knot_y - 3.0),
-		Vector2( 0.0, knot_y + 5.0)
-	]), balloon_color.darkened(0.25))
-
-	# String (gently swaying)
-	var prev := Vector2(0.0, knot_y + 5.0)
-	for i in 10:
-		var t := float(i + 1) / 10.0
-		var sx := sin(t * PI * 2.5 + _lifetime * 1.5) * 6.0
-		var next := Vector2(sx, knot_y + 5.0 + t * 45.0)
-		draw_line(prev, next, Color(0.55, 0.55, 0.55, 0.85), 1.5)
-		prev = next
-
-	# Lifetime bar
-	var t := _lifetime / lifetime
-	var bar_w := 52.0
-	var bar_h := 6.0
-	var bx := -bar_w * 0.5
-	var by := bob - BALLOON_RY - 18.0
-	draw_rect(Rect2(bx, by, bar_w, bar_h), Color(0.1, 0.1, 0.1, 0.65))
-	var bar_col := Color(0.2, 0.85, 0.2) if t < 0.5 \
-		else (Color(1.0, 0.75, 0.1) if t < 0.75 else Color(0.9, 0.15, 0.15))
-	draw_rect(Rect2(bx, by, bar_w * (1.0 - t), bar_h), bar_col)
-
-	# Catch arc — fills as pin holds position
+	# Brighten fill as patient holds on target
 	if _catch_progress > 0.0:
-		draw_arc(center, CATCH_ARC_RADIUS,
-			-PI * 0.5, -PI * 0.5 + TAU * _catch_progress,
-			32, Color.WHITE, 5.0)
+		fill = fill.lerp(Color(0.88, 0.97, 0.97), _catch_progress * 0.65)
+
+	# Solid circle
+	draw_circle(Vector2.ZERO, r, fill)
+
+	# Outline — darkened version of fill
+	draw_arc(Vector2.ZERO, r, 0.0, TAU, 64, fill.darkened(0.38), 2.5)
+
+	# Lifetime drain arc outside the circle, drains clockwise
+	var time_frac := _lifetime / lifetime
+	var arc_col: Color
+	if time_frac < 0.5:
+		arc_col = Color(0.52, 0.52, 0.52, 0.45)
+	elif time_frac < 0.75:
+		arc_col = Color(0.90, 0.58, 0.08, 0.65)
+	else:
+		arc_col = Color(0.85, 0.16, 0.16, 0.78)
+	draw_arc(Vector2.ZERO, r + 7.0, -PI * 0.5,
+		-PI * 0.5 + TAU * (1.0 - time_frac), 64, arc_col, 3.5)
+
+	# Catch fill arc inside the circle edge
+	if _catch_progress > 0.0:
+		draw_arc(Vector2.ZERO, r - 5.0, -PI * 0.5,
+			-PI * 0.5 + TAU * _catch_progress, 48, Color(1.0, 1.0, 1.0, 0.78), 4.5)

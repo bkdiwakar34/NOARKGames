@@ -4,6 +4,7 @@ var _override_rate: float = 0.8
 var _rate_buttons: Array = []
 var _settings_overlay: Control
 var _hold_edit: LineEdit
+var _cal_status_lbl: Label = null
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -182,7 +183,7 @@ func _build_settings_overlay(vp: Vector2) -> void:
 	_settings_overlay.add_child(dim)
 
 	var cw: float = 800.0
-	var ch: float = 220.0
+	var ch: float = 260.0
 	var cx: float = (vp.x - cw) * 0.5
 	var cy: float = (vp.y - ch) * 0.5
 
@@ -246,6 +247,11 @@ func _build_settings_overlay(vp: Vector2) -> void:
 
 	_add_section_label(card, "TESTING", cw, y);  y += 22.0
 	_add_testing_section(card, cw, y)
+
+	# Testing section ends at y ≈ 158; hardware section below
+	_add_sep(card, cw, 166.0)
+	_add_section_label(card, "HARDWARE", cw, 172.0)
+	_add_hardware_section(card, cw, 196.0)
 
 # ── Separator + section label ─────────────────────────────────────────────────
 
@@ -333,6 +339,53 @@ func _labeled_edit(parent: Control, lbl_text: String, x: float, y: float,
 	edit.position = Vector2(x + lbl_w, y)
 	parent.add_child(edit)
 	return edit
+
+# ── Hardware section ─────────────────────────────────────────────────────────
+
+func _add_hardware_section(card: Control, cw: float, y: float) -> void:
+	var row_h: float = 32.0
+	var btn_w: float = 180.0
+	var lbl_w: float = cw - btn_w - 40.0
+	var row_x: float = cw * 0.5 - (btn_w + lbl_w + 8.0) * 0.5
+
+	_cal_status_lbl = Label.new()
+	_cal_status_lbl.add_theme_font_size_override("font_size", 13)
+	_cal_status_lbl.custom_minimum_size = Vector2(lbl_w, row_h)
+	_cal_status_lbl.position            = Vector2(row_x, y)
+	_cal_status_lbl.vertical_alignment  = VERTICAL_ALIGNMENT_CENTER
+	_update_cal_status()
+	card.add_child(_cal_status_lbl)
+
+	var cal_btn := Button.new()
+	cal_btn.text = "Calibrate workspace"
+	cal_btn.custom_minimum_size = Vector2(btn_w, row_h)
+	cal_btn.size                = Vector2(btn_w, row_h)
+	cal_btn.position            = Vector2(row_x + lbl_w + 8.0, y)
+	cal_btn.add_theme_font_size_override("font_size", 13)
+	cal_btn.pressed.connect(_on_calibrate_pressed)
+	card.add_child(cal_btn)
+
+
+func _update_cal_status() -> void:
+	if _cal_status_lbl == null:
+		return
+	if WorkspaceConfig.is_calibrated:
+		var mn := WorkspaceConfig.workspace_min
+		var mx := WorkspaceConfig.workspace_max
+		_cal_status_lbl.add_theme_color_override("font_color", Color(0.15, 0.55, 0.20))
+		_cal_status_lbl.text = "Calibrated  (%d×%d px)" % [int(mx.x - mn.x), int(mx.y - mn.y)]
+	else:
+		_cal_status_lbl.add_theme_color_override("font_color", Color(0.65, 0.30, 0.20))
+		_cal_status_lbl.text = "Not calibrated"
+
+
+func _on_calibrate_pressed() -> void:
+	_settings_overlay.visible = false
+	var CAL_SCENE := load("res://v2/Scenes/workspace_calibration_overlay.gd")
+	var cal: Control = CAL_SCENE.new()
+	cal.calibration_done.connect(_update_cal_status)
+	add_child(cal)
+
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 

@@ -30,6 +30,7 @@ GlobalSignals="*res://v2/Core/global_signals.gd"
 UDPReceiver="*res://v2/Core/udp_receiver.gd"
 SessionManager="*res://v2/Core/session_manager.gd"
 AdaptiveManager="*res://v2/Core/adaptive_manager.gd"
+WorkspaceConfig="*res://v2/Core/workspace_config.gd"
 
 [display]
 

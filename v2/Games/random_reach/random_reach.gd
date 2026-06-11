@@ -30,8 +30,12 @@ var _graph_overlay: Control = null
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var vp := get_viewport_rect().size
-	SCREEN_MIN = Vector2(vp.x * 0.04, vp.y * 0.05)
-	SCREEN_MAX = Vector2(vp.x * 0.95, vp.y * 0.93)
+	if WorkspaceConfig.is_calibrated:
+		SCREEN_MIN = WorkspaceConfig.workspace_min
+		SCREEN_MAX = WorkspaceConfig.workspace_max
+	else:
+		SCREEN_MIN = Vector2(vp.x * 0.04, vp.y * 0.05)
+		SCREEN_MAX = Vector2(vp.x * 0.95, vp.y * 0.93)
 	_player_pos = vp * 0.5
 	_catch_hold_time = AdaptiveManager.catch_hold_time
 	AdaptiveManager.set_viewport_size(vp)
@@ -94,11 +98,11 @@ func _draw() -> void:
 	var size := get_rect().size
 	for i in 24:
 		var t := float(i) / 24.0
-		var col := Color(0.38, 0.68, 0.95).lerp(Color(0.72, 0.90, 1.0), t)
+		var col := Color(0.96, 0.94, 0.91).lerp(Color(0.88, 0.83, 0.76), t)
 		draw_rect(Rect2(0.0, t * size.y, size.x, size.y / 24.0 + 1.0), col)
 
 	if AdaptiveManager.ws_calibrated:
-		var ws_col := Color(1, 1, 1, 0.3)
+		var ws_col := Color(0.3, 0.3, 0.3, 0.22)
 		var ws_min := AdaptiveManager.ws_min
 		var ws_max := AdaptiveManager.ws_max
 		draw_rect(Rect2(ws_min, ws_max - ws_min), ws_col, false, 1.5)
@@ -108,30 +112,31 @@ func _draw() -> void:
 		if is_instance_valid(_current_apple):
 			draw_line(center, _current_apple.position, Color(1, 1, 1, 0.2), 1.0)
 
-	# Pin tool — tip at _player_pos, pointing toward balloon
-	var pin_dir: Vector2
-	if is_instance_valid(_current_apple):
-		pin_dir = (_current_apple.position - _player_pos)
-	elif _tracking_miss:
-		pin_dir = (_missed_apple_pos - _player_pos)
-	else:
-		pin_dir = Vector2(1.0, 0.0)
-	if pin_dir.length() > 0.01:
-		pin_dir = pin_dir.normalized()
-	var perp := Vector2(-pin_dir.y, pin_dir.x)
-	var tip  := _player_pos
-	var head := _player_pos - pin_dir * 30.0
-	# Shaft
-	draw_line(head, tip, Color(0.80, 0.82, 0.88), 2.5)
-	# Tip triangle
-	draw_colored_polygon(PackedVector2Array([
-		tip,
-		tip - pin_dir * 9.0 + perp * 3.5,
-		tip - pin_dir * 9.0 - perp * 3.5
-	]), Color(0.92, 0.94, 1.0))
-	# Head (red circle)
-	draw_circle(head, 7.0, Color(0.85, 0.12, 0.12))
-	draw_circle(head + Vector2(-2.0, -2.0), 2.5, Color(1.0, 0.55, 0.55, 0.5))
+	# Grid workspace scan overlay (visible during scan and until Phase 0b ends)
+	var scan_cells: Array = AdaptiveManager._scan_cells
+	if not scan_cells.is_empty() and AdaptiveManager._phase <= AdaptiveManager.Phase.PRECISION_SCAN:
+		var current_idx: int = AdaptiveManager._scan_cell_idx
+		var half: float = AdaptiveManager.SCAN_CELL_SIZE * 0.5
+		var cell_sz: float = AdaptiveManager.SCAN_CELL_SIZE
+		for i in scan_cells.size():
+			var cell: Dictionary = scan_cells[i]
+			var rect: Rect2 = Rect2(cell["pos"] - Vector2(half, half), Vector2(cell_sz, cell_sz))
+			if AdaptiveManager._phase == AdaptiveManager.Phase.WORKSPACE_SCAN and i == current_idx:
+				draw_rect(rect, Color(1.0, 0.85, 0.0, 0.30), true)
+				draw_rect(rect, Color(1.0, 0.85, 0.0, 0.90), false, 2.5)
+			elif cell["hit"]:
+				draw_rect(rect, Color(0.20, 0.80, 0.20, 0.28), true)
+				draw_rect(rect, Color(0.20, 0.80, 0.20, 0.70), false, 1.5)
+			elif i < current_idx:
+				draw_rect(rect, Color(0.90, 0.20, 0.20, 0.15), true)
+				draw_rect(rect, Color(0.90, 0.20, 0.20, 0.45), false, 1.0)
+			else:
+				draw_rect(rect, Color(0.70, 0.70, 0.70, 0.20), false, 1.0)
+
+	# Cursor — thin charcoal ring with small centre dot
+	var cursor_col := Color(0.22, 0.22, 0.22, 0.82)
+	draw_arc(_player_pos, 13.0, 0.0, TAU, 48, cursor_col, 2.0)
+	draw_circle(_player_pos, 2.5, cursor_col)
 
 func _connect_signals() -> void:
 	AdaptiveManager.trial_ended.connect(_on_trial_ended)
@@ -196,13 +201,14 @@ func _spawn_apple() -> void:
 	spawn_pos.y = clamp(spawn_pos.y, SCREEN_MIN.y, SCREEN_MAX.y)
 	var apple_lt: float = AdaptiveManager.get_apple_lifetime(_player_pos, spawn_pos)
 	_current_apple = APPLE_SCENE.instantiate()
+	_catch_radius = AdaptiveManager.get_apple_radius()
 	_current_apple.position = spawn_pos
 	_current_apple.lifetime = apple_lt
-	_current_apple.balloon_color = Color.from_hsv(randf(), 0.75, 0.92)
+	_current_apple.target_radius = _catch_radius
+	_current_apple.balloon_color = Color.from_hsv(randf(), 0.65, 0.72)
 	_current_apple.apple_eaten.connect(_on_apple_eaten)
 	_current_apple.apple_missed.connect(_on_apple_missed)
 	add_child(_current_apple)
-	_catch_radius = AdaptiveManager.get_apple_radius()
 	_tracking_miss = false
 	AdaptiveManager.record_spawn(_player_pos)
 	_catch_timer = 0.0
