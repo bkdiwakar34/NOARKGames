@@ -1,0 +1,22 @@
+[calibration]
+camera_matrix = [ [ 769.4372593101956, 0.0, 629.9342711485097,], [ 0.0, 789.9524669939815, 385.6590413968844,], [ 0.0, 0.0, 1.0,],]
+dist_coeffs = [ [ -0.08711487948474211, 0.7390189004989292, 0.0018670102020481609, -0.021840070947229492, -0.5308385063728016,],]
+
+[pose]
+human_pose = false
+marker_pose = true
+
+[aruco]
+marker_length = 0.05
+marker_spacing = 0.01
+
+[camera]
+resolution = [ 1200, 480,]
+
+[stream_data]
+udp = false
+ip = "localhost"
+port = 12345
+
+[display]
+display = false

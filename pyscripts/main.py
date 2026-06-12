@@ -21,7 +21,7 @@ def _load_settings() -> dict:
     if os.path.exists(path):
         with open(path) as f:
             return json.load(f)
-    return {"debug": False, "stream_type": "udp", "ble_device_name": "NOARK_Tracker"}
+    return {"debug": False}
 
 
 class Config:
@@ -46,9 +46,7 @@ class MainClass:
         if settings is None:
             settings = {}
 
-        self.stream_type     = settings.get("stream_type", "udp")
-        self.ble_device_name = settings.get("ble_device_name", "NOARK_Tracker")
-        self.debug           = settings.get("debug", False)
+        self.debug = settings.get("debug", False)
         self.udp_port        = settings.get("udp_port", 12345)
 
         self.filter            = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
@@ -85,13 +83,7 @@ class MainClass:
         else:
             self._init_camera()
 
-        # Transport
-        if self.stream_type == "udp":
-            self._init_udp_socket()
-        elif self.stream_type == "ble":
-            self._init_ble()
-        else:
-            raise ValueError(f"Unknown stream_type '{self.stream_type}' — use 'udp' or 'ble'")
+        self._init_udp_socket()
 
     # ── detector / board ─────────────────────────────────────────────────────
 
@@ -126,7 +118,8 @@ class MainClass:
         self.picam2.start()
 
         import toml
-        fish_params = toml.load("/home/sujith/Documents/Camera/rpi_python/undistort_best.toml")
+        _pyscripts_dir = os.path.dirname(os.path.abspath(__file__))
+        fish_params = toml.load(os.path.join(_pyscripts_dir, "good.toml"))
         fish_matrix = np.array(fish_params["calibration"]["camera_matrix"]).reshape(3, 3)
         fish_dist   = np.array(fish_params["calibration"]["dist_coeffs"])
         self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
@@ -147,36 +140,25 @@ class MainClass:
         self.udp_socket.setblocking(False)
         print("UDP socket bound to", self.udp_socket.getsockname())
 
-    def _init_ble(self) -> None:
-        from ble_streamer import BLEStreamer
-        self.ble_streamer = BLEStreamer(device_name=self.ble_device_name)
-        self.ble_streamer.start()
-
     # ── transport send / receive ──────────────────────────────────────────────
 
     def _recv_command(self) -> bytes:
         """Return the latest command from Godot, or b'' if none."""
-        if self.stream_type == "udp":
-            try:
-                data, self.addr = self.udp_socket.recvfrom(30)
-                return data
-            except socket.error:
-                return b""
-        elif self.stream_type == "ble":
-            return self.ble_streamer.get_command()
-        return b""
+        try:
+            data, self.addr = self.udp_socket.recvfrom(30)
+            return data
+        except socket.error:
+            return b""
 
     def _send_coordinates(self, command: str, coords: np.ndarray) -> None:
         """Map a string command to a float code and stream 4 floats to Godot."""
+        if self.addr is None:
+            return
         code_map = {"STOP": -99.0, "START": 2.0, "RESET": 5.0}
         msg_code = code_map.get(command, 2.0)
         data = np.append(msg_code, coords).flatten()
-
-        if self.stream_type == "udp" and self.addr is not None:
-            data_bytes = struct.pack("f" * len(data), *data)
-            self.udp_socket.sendto(data_bytes, self.addr)
-        elif self.stream_type == "ble":
-            self.ble_streamer.send(msg_code, float(coords[0]), float(coords[1]), float(coords[2]))
+        data_bytes = struct.pack("f" * len(data), *data)
+        self.udp_socket.sendto(data_bytes, self.addr)
 
     # ── pose estimation ───────────────────────────────────────────────────────
 
@@ -347,9 +329,6 @@ class MainClass:
                 if self.debug and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
-            if self.stream_type == "ble" and hasattr(self, "ble_streamer"):
-                print("[BLE] Stopping BLE streamer")
-                self.ble_streamer.stop()
             if self.debug:
                 cv2.destroyAllWindows()
 
@@ -357,10 +336,8 @@ class MainClass:
 if __name__ == "__main__":
     settings = _load_settings()
 
-    if platform.system() == "Linux":
-        CAMERA_CALIB_PATH = "/home/sujith/Documents/Camera/rpi_python/old_calibration/calib_mono_faith.toml"
-    else:
-        CAMERA_CALIB_PATH = r"E:\CMC\pyprojects\programs_rpi\rpi_python\webcam_calib.toml"
+    _pyscripts_dir = os.path.dirname(os.path.abspath(__file__))
+    CAMERA_CALIB_PATH = os.path.join(_pyscripts_dir, "calib_mono_faith.toml")
 
     main = MainClass(cam_calib_path=CAMERA_CALIB_PATH, settings=settings)
     main.run()
