@@ -392,13 +392,9 @@ func _cal_spawn(player_pos: Vector2) -> Vector2:
 	if aw_pairs.is_empty() or _cal_pair_idx >= aw_pairs.size():
 		return _center
 	_current_pair_idx = _cal_pair_idx
-	var a: float      = aw_pairs[_cal_pair_idx]["A"]
-	var angle: float  = randf() * TAU
-	difficulty        = _fitts_id(aw_pairs[_cal_pair_idx]["A"], aw_pairs[_cal_pair_idx]["W"])
-	return (player_pos + Vector2(cos(angle), sin(angle)) * a).clamp(
-		Vector2(_viewport_size.x * 0.05, _viewport_size.y * 0.05),
-		Vector2(_viewport_size.x * 0.95, _viewport_size.y * 0.95)
-	)
+	var pair: Dictionary = aw_pairs[_cal_pair_idx]
+	difficulty           = _fitts_id(pair["A"], pair["W"])
+	return _sample_reachable_spawn(player_pos, pair["A"])
 
 
 func _on_cal_outcome(mt: float) -> void:
@@ -472,13 +468,55 @@ func _session_spawn(player_pos: Vector2) -> Vector2:
 		return _center
 	_current_pair_idx    = randi_range(0, aw_pairs.size() - 1)
 	var pair: Dictionary = aw_pairs[_current_pair_idx]
-	var a: float         = pair["A"]
-	var angle: float     = randf() * TAU
 	difficulty           = _fitts_id(pair["A"], pair["W"])
-	return (player_pos + Vector2(cos(angle), sin(angle)) * a).clamp(
-		Vector2(_viewport_size.x * 0.05, _viewport_size.y * 0.05),
-		Vector2(_viewport_size.x * 0.95, _viewport_size.y * 0.95)
-	)
+	return _sample_reachable_spawn(player_pos, pair["A"])
+
+
+# Try several random angles at distance `a` from the player; accept the first
+# that lands inside the patient's reachable workspace. Falls back to a random
+# comfortable / reachable cell if none of the angle samples land in-region.
+func _sample_reachable_spawn(player_pos: Vector2, a: float) -> Vector2:
+	var clamp_lo: Vector2 = Vector2(_viewport_size.x * 0.05, _viewport_size.y * 0.05)
+	var clamp_hi: Vector2 = Vector2(_viewport_size.x * 0.95, _viewport_size.y * 0.95)
+	for i in 24:
+		var angle: float = randf() * TAU
+		var pos: Vector2 = player_pos + Vector2(cos(angle), sin(angle)) * a
+		if _is_position_reachable(pos):
+			return pos.clamp(clamp_lo, clamp_hi)
+	if not _comfortable_cells.is_empty():
+		return _comfortable_cells[randi() % _comfortable_cells.size()]["pos"]
+	if not reachable_cells.is_empty():
+		return reachable_cells[randi() % reachable_cells.size()]["pos"]
+	return _center
+
+
+func _is_position_reachable(pos: Vector2) -> bool:
+	if reachable_cells.is_empty():
+		return true  # workspace not yet known; allow anywhere
+	var tol: float = SCAN_CELL_SIZE  # within one scan cell of any reachable cell
+	for cell in reachable_cells:
+		if pos.distance_to(cell["pos"]) <= tol:
+			return true
+	return false
+
+
+# Progress info for the calibration phases — used by the game UI to show
+# "Setting up — apple X / N" before the actual session starts.
+func get_calibration_progress() -> Dictionary:
+	match _phase:
+		Phase.WORKSPACE_SCAN:
+			return {"phase": 1, "name": "Workspace scan",
+				"current": _scan_cell_idx, "total": _scan_cells.size()}
+		Phase.PRECISION_SCAN:
+			return {"phase": 2, "name": "Precision scan",
+				"current": _prec_w_idx * PREC_REPEATS + _prec_rep,
+				"total":   PREC_W_VALUES.size() * PREC_REPEATS}
+		Phase.FITTS_CAL:
+			return {"phase": 3, "name": "Fitts calibration",
+				"current": _cal_pair_idx * CAL_PER_PAIR + _cal_rep,
+				"total":   aw_pairs.size() * CAL_PER_PAIR}
+		_:
+			return {}
 
 
 func _fitts_lifetime() -> float:

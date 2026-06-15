@@ -24,6 +24,7 @@ var _log_file: FileAccess = null
 var _log_timer: Timer = null
 var _score_label: Label = null
 var _debug_label: Label = null
+var _calib_label: Label = null
 var _is_between_trial: bool = false
 var _graph_overlay: Control = null
 
@@ -76,6 +77,25 @@ func _build_ui() -> void:
 	stop_btn.modulate.a = 0.70
 	stop_btn.pressed.connect(_on_stop_pressed)
 	add_child(stop_btn)
+
+	_calib_label = Label.new()
+	_calib_label.add_theme_font_size_override("font_size", 20)
+	_calib_label.add_theme_color_override("font_color", Color(0.10, 0.10, 0.12, 0.92))
+	_calib_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_calib_label.custom_minimum_size = Vector2(vp.x, 30.0)
+	_calib_label.position = Vector2(0.0, 14.0)
+	var calib_bg := StyleBoxFlat.new()
+	calib_bg.bg_color = Color(1.0, 0.95, 0.78, 0.85)
+	calib_bg.content_margin_left = 10.0
+	calib_bg.content_margin_right = 10.0
+	calib_bg.content_margin_top = 4.0
+	calib_bg.content_margin_bottom = 4.0
+	calib_bg.corner_radius_top_left = 6
+	calib_bg.corner_radius_top_right = 6
+	calib_bg.corner_radius_bottom_left = 6
+	calib_bg.corner_radius_bottom_right = 6
+	_calib_label.add_theme_stylebox_override("normal", calib_bg)
+	add_child(_calib_label)
 
 	_debug_label = Label.new()
 	_debug_label.position = Vector2(12.0, vp.y - 56.0)
@@ -183,6 +203,15 @@ func _process(delta: float) -> void:
 		AdaptiveManager.fitts_a, AdaptiveManager.fitts_b, AdaptiveManager.difficulty,
 		rate_pct, err_pct, AdaptiveManager._rls_n
 	]
+
+	var prog: Dictionary = AdaptiveManager.get_calibration_progress()
+	if prog.is_empty():
+		_calib_label.visible = false
+	else:
+		_calib_label.visible = true
+		_calib_label.text = "Setting up (%d/3) — %s: apple %d / %d" % [
+			prog["phase"], prog["name"], prog["current"] + 1, prog["total"]
+		]
 
 	queue_redraw()
 
