@@ -23,8 +23,8 @@ import numpy as np
 import toml
 
 
-BOARD_INNER_CORNERS = (12, 8)    # (cols, rows) of inner corners — change if your board differs
-SQUARE_SIZE_M       = 0.030      # 30 mm squares
+BOARD_INNER_CORNERS = (9, 6)     # (cols, rows) of inner corners — change if your board differs
+SQUARE_SIZE_M       = 0.02435    # measured with vernier on the printed OpenCV pattern
 FRAME_SIZE          = (1280, 800)
 NUM_CAPTURES        = 20
 NUM_VERIFY_POSES    = 6          # how many distinct poses to test the calibration at
