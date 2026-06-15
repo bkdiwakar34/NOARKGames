@@ -26,7 +26,7 @@ def _load_settings() -> dict:
 
 
 class Config:
-    FRAME_SIZE = (1200, 800)
+    FRAME_SIZE = (1280, 800)        # OV9281 native resolution; matches camera_calib.toml
     MARKER_LENGTH = 0.05
     MARKER_SEPARATION = 0.01
     UDP_IP = "localhost"
@@ -55,13 +55,20 @@ class MainClass:
 
         import toml
         calib_data = toml.load(cam_calib_path)
-        self.camera_matrix    = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
-        self.distortion_coeff = np.array(calib_data["calibration"]["dist_coeffs"])
+        self.camera_matrix = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
+        self.dist_coeffs   = np.array(calib_data["calibration"]["dist_coeffs"])
+
+        # Fisheye undistort map. After remapping a frame with these, the image is
+        # pinhole-equivalent with intrinsics = camera_matrix and zero distortion,
+        # so downstream solvePnP uses camera_matrix with np.zeros(5).
+        self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
+            self.camera_matrix, self.dist_coeffs, np.eye(3),
+            self.camera_matrix, self.frame_size, cv2.CV_16SC2,
+        )
 
         self.detector = self._init_detector()
-    
 
-        self.picam2 = self.map1 = self.map2 = None  # Pi camera object + fisheye undistort maps (set in _init_rpi_camera)
+        self.picam2 = None                          # Pi camera object (set in _init_rpi_camera)
         self.video_frame  = None                    # latest captured image, refreshed every frame
         self.first_frame  = True                    # True until the first frame with detected markers — used to lock the world origin
         self.save_path    = None                    # folder for this patient's CSV, created on first USER: message
@@ -112,15 +119,6 @@ class MainClass:
         self.picam2.configure(config)
         self.picam2.start()
 
-        import toml
-        _pyscripts_dir = os.path.dirname(os.path.abspath(__file__))
-        fish_params = toml.load(os.path.join(_pyscripts_dir, "good.toml"))
-        fish_matrix = np.array(fish_params["calibration"]["camera_matrix"]).reshape(3, 3)
-        fish_dist   = np.array(fish_params["calibration"]["dist_coeffs"])
-        self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
-            fish_matrix, fish_dist, np.eye(3), fish_matrix, self.frame_size, cv2.CV_16SC2
-        )
-
     def _init_camera(self) -> None:
         self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
@@ -168,9 +166,10 @@ class MainClass:
             dtype=np.float32,
         )
         rvecs, tvecs = [], []
+        zero_dist = np.zeros(5)  # frame is undistorted upstream → no residual distortion
         for corner in corners:
             success, rvec, tvec = cv2.solvePnP(
-                marker_points, corner, self.camera_matrix, self.distortion_coeff,
+                marker_points, corner, self.camera_matrix, zero_dist,
                 flags=cv2.SOLVEPNP_IPPE_SQUARE,
             )
             if success:
@@ -179,9 +178,10 @@ class MainClass:
         return np.array(rvecs), np.array(tvecs)
 
     def _draw_axes(self, rvecs, tvecs) -> None:
+        zero_dist = np.zeros(5)
         for rvec, tvec in zip(rvecs, tvecs):
             cv2.drawFrameAxes(
-                self.video_frame, self.camera_matrix, self.distortion_coeff, rvec, tvec, 0.05
+                self.video_frame, self.camera_matrix, zero_dist, rvec, tvec, 0.05
             )
 
     def _get_centroid(self, ids, rvecs, tvecs) -> np.ndarray:
@@ -235,14 +235,14 @@ class MainClass:
         # Capture frame
         if platform.system() == "Linux":
             self.video_frame = self.picam2.capture_array()
-            self.video_frame = cv2.remap(
-                self.video_frame, self.map1, self.map2, interpolation=cv2.INTER_LINEAR
-            )
-            self.video_frame = cv2.flip(self.video_frame, 1)
         else:
             ret, self.video_frame = self.camera.read()
             if not ret or self.video_frame is None:
                 return
+
+        self.video_frame = cv2.remap(
+            self.video_frame, self.map1, self.map2, interpolation=cv2.INTER_LINEAR
+        )
 
         # Poll command from Godot
         cmd = self._recv_command()
@@ -335,7 +335,7 @@ if __name__ == "__main__":
     settings = _load_settings()
 
     _pyscripts_dir = os.path.dirname(os.path.abspath(__file__))
-    CAMERA_CALIB_PATH = os.path.join(_pyscripts_dir, "calib_mono_faith.toml")
+    CAMERA_CALIB_PATH = os.path.join(_pyscripts_dir, "camera_calib.toml")
 
     main = MainClass(cam_calib_path=CAMERA_CALIB_PATH, settings=settings)
     main.run()

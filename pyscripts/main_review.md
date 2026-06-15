@@ -8,13 +8,15 @@ Started: 2026-06-15
 
 ## TODO (open)
 
-- **Switch `main.py` over to the new `camera_calib.toml`.** Once the Pi has been calibrated with `calibrate_camera.py`, replace the two-file setup (`calib_mono_faith.toml` + `good.toml`) with a single load of `camera_calib.toml`. The pipeline becomes: undistort frame with the fisheye params, then `solvePnP` using the same K with **zero distortion** (because the undistorted image is now pinhole-equivalent). Delete the old TOML files when done.
-- **Run `calibrate_camera.py` on the Pi** and check the three quality numbers (accuracy < 1 mm, precision < 0.5 mm is the rough target).
+- **Re-run the 4-corner screen-mapping calibration.** Two things changed in `main.py` that the screen-mapping was silently absorbing: (1) `cv2.flip(frame, 1)` was removed, (2) the camera intrinsics now come from a correctly-calibrated `camera_calib.toml`. The old screen-mapping coefficients are no longer valid.
+- **Resolution alignment audit.** `Config.FRAME_SIZE` was bumped from `(1200, 800)` to `(1280, 800)` to match the calibration. Confirm the Pi camera still configures at 1280×800 cleanly and the downstream Godot mapping still works at the new resolution.
 
 ## TODO (done)
 
 - ~~Warn when `settings.json` is missing instead of silently using defaults.~~ Done — `_load_settings()` now prints the path it tried.
 - ~~Write a new calibration script.~~ Done — see `pyscripts/calibrate_camera.py`. Auto-capture on stable detection, fisheye calibration, saves to `camera_calib.toml`, verify step reports accuracy/precision/fit.
+- ~~Run calibration on the Pi.~~ Done.
+- ~~Switch `main.py` over to `camera_calib.toml`.~~ Done. Two TOML files (`calib_mono_faith.toml` + `good.toml`) replaced by one. Undistort map is built in `__init__` from the loaded fisheye `K`/`D`; `solvePnP` and `drawFrameAxes` now use `K` with zero distortion because the frame is already undistorted upstream. `cv2.flip(frame, 1)` removed (was introducing a small x-error against the calibration's `cx`). Old TOML files deleted.
 
 ---
 
