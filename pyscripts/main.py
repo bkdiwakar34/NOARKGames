@@ -74,9 +74,11 @@ class MainClass:
         self.first_frame  = True                    # True until the world origin has been locked (see _maybe_lock_origin)
         self.save_path    = None                    # folder for this patient's CSV, created on first USER: message
         self.csv_writer   = None                    # csv.writer for the active session, created alongside save_path
+        self._csv_file    = None                    # underlying file handle for csv_writer; closed when CHANGE happens or run() exits
         self.record       = False                   # True once Godot has sent USER: and we should log rows
         self.received_message: bytes = b""          # most recent UDP command from Godot (sticky — last command is reused each frame)
         self.addr         = None                    # Godot's UDP address, learned from the first incoming packet
+        self._hid         = None                    # current patient hospital ID; set on first USER:/CHANGE: message
         self._dbg_last_print = 0.0                  # timestamp of last debug print, to throttle to ~1/sec
 
         # World-origin lock state: don't anchor the reference frame to a single noisy detection.
@@ -267,6 +269,12 @@ class MainClass:
 
     def _select_hospitalid(self) -> None:
         if self.save_path is None:
+            # Close any previously-open CSV before opening a new one (avoids leak on CHANGE).
+            if self._csv_file is not None:
+                self._csv_file.close()
+                self._csv_file = None
+                self.csv_writer = None
+
             self.save_path = os.path.join(
                 os.path.expanduser("~/Documents/NOARK/data"),
                 self._hid,
@@ -277,7 +285,8 @@ class MainClass:
                 self.save_path,
                 datetime.now().strftime("%Y_%m_%d_%H_%M_%S") + "_data.csv",
             )
-            self.csv_writer = csv.writer(open(csv_path, "w", newline=""))
+            self._csv_file  = open(csv_path, "w", newline="")
+            self.csv_writer = csv.writer(self._csv_file)
             self.csv_writer.writerow(["Time", "X", "Y", "Z"])
 
     # ── main loop ─────────────────────────────────────────────────────────────
@@ -322,17 +331,20 @@ class MainClass:
                 if self.received_message == b"STOP":
                     self._send_coordinates("STOP", local_coords)
                 elif self.received_message.startswith(b"USER:"):
-                    self._hid = self.received_message.decode().split(":")[1]
-                    if self.save_path is None:
+                    new_hid = self.received_message.decode().split(":")[1]
+                    if new_hid != self._hid:
+                        self._hid = new_hid
                         self._select_hospitalid()
+                        self.record = True
                     self._send_coordinates("START", local_coords)
-                    self.record = True
                 elif self.received_message.startswith(b"CHANGE:"):
-                    self.save_path = None
-                    self._hid = self.received_message.decode().split(":")[1]
-                    self._select_hospitalid()
+                    new_hid = self.received_message.decode().split(":")[1]
+                    if new_hid != self._hid:
+                        self.save_path = None      # force _select_hospitalid to make a new folder/CSV
+                        self._hid = new_hid
+                        self._select_hospitalid()
+                        self.record = True
                     self._send_coordinates("START", local_coords)
-                    self.record = True
                 elif self.received_message == b"RESET":
                     self._send_coordinates("RESET", local_coords)
                 else:
@@ -340,7 +352,7 @@ class MainClass:
 
                 if self.record and self.csv_writer:
                     self.csv_writer.writerow(
-                        [datetime.now().strftime("%d/%m/%Y %H:%M:%S"), *local_coords]
+                        [datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3], *local_coords]
                     )
 
         if self.debug:
@@ -369,6 +381,8 @@ class MainClass:
                 if self.debug and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
+            if self._csv_file is not None:
+                self._csv_file.close()
             if self.debug:
                 cv2.destroyAllWindows()
 
