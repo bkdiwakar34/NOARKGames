@@ -28,9 +28,10 @@ def _load_settings() -> dict:
 class Config:
     FRAME_SIZE = (1280, 800)        # OV9281 native resolution; matches camera_calib.toml
     MARKER_LENGTH = 0.05
-    MARKER_SEPARATION = 0.01
     UDP_IP = "localhost"
     ALPHA = 0.4
+    ORIGIN_LOCK_FRAMES = 10         # consecutive stable frames required before locking the world origin
+    ORIGIN_STABLE_PX   = 2.0        # max mean corner motion (px) between frames to count as stable
     MARKER_OFFSETS = {
         4:  np.array([0.00,  0.1,    -0.069]),
         8:  np.array([0.00,  0.01,   -0.069]),
@@ -48,10 +49,9 @@ class MainClass:
         self.debug = settings.get("debug", False)
         self.udp_port        = settings.get("udp_port", 12345)
 
-        self.filter            = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
-        self.frame_size        = Config.FRAME_SIZE
-        self.marker_length     = Config.MARKER_LENGTH
-        self.marker_separation = Config.MARKER_SEPARATION
+        self.filter        = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
+        self.frame_size    = Config.FRAME_SIZE
+        self.marker_length = Config.MARKER_LENGTH
 
         import toml
         calib_data = toml.load(cam_calib_path)
@@ -70,13 +70,19 @@ class MainClass:
 
         self.picam2 = None                          # Pi camera object (set in _init_rpi_camera)
         self.video_frame  = None                    # latest captured image, refreshed every frame
-        self.first_frame  = True                    # True until the first frame with detected markers — used to lock the world origin
+        self.first_frame  = True                    # True until the world origin has been locked (see _maybe_lock_origin)
         self.save_path    = None                    # folder for this patient's CSV, created on first USER: message
         self.csv_writer   = None                    # csv.writer for the active session, created alongside save_path
         self.record       = False                   # True once Godot has sent USER: and we should log rows
         self.received_message: bytes = b""          # most recent UDP command from Godot (sticky — last command is reused each frame)
         self.addr         = None                    # Godot's UDP address, learned from the first incoming packet
         self._dbg_last_print = 0.0                  # timestamp of last debug print, to throttle to ~1/sec
+
+        # World-origin lock state: don't anchor the reference frame to a single noisy detection.
+        # Wait for ORIGIN_LOCK_FRAMES consecutive frames with the same marker set and < ORIGIN_STABLE_PX motion.
+        self._origin_stable_count = 0
+        self._prev_corners = None
+        self._prev_ids = None
 
         self._curr_session = os.path.join(
             "Session-" + datetime.today().strftime("%Y-%m-%d"), "MovementData"
@@ -95,7 +101,7 @@ class MainClass:
     def _init_detector(self):
         params = aruco.DetectorParameters()
         params.useAruco3Detection     = True
-        params.cornerRefinementMethod = aruco.CORNER_REFINE_CONTOUR
+        params.cornerRefinementMethod = aruco.CORNER_REFINE_APRILTAG
         dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
         return aruco.ArucoDetector(dictionary, params)
 
@@ -177,6 +183,35 @@ class MainClass:
                 tvecs.append(tvec.flatten())
         return np.array(rvecs), np.array(tvecs)
 
+    def _detection_matches_prev(self, corners, ids) -> bool:
+        """True if the current detection has the same marker IDs and barely moved since the previous frame."""
+        if self._prev_ids is None:
+            return False
+        if set(self._prev_ids.flatten().tolist()) != set(ids.flatten().tolist()):
+            return False
+        prev_map = {int(i): c for i, c in zip(self._prev_ids.flatten(), self._prev_corners)}
+        curr_map = {int(i): c for i, c in zip(ids.flatten(), corners)}
+        motions = [float(np.linalg.norm(prev_map[i] - curr_map[i], axis=-1).mean()) for i in prev_map]
+        return float(np.mean(motions)) < Config.ORIGIN_STABLE_PX
+
+    def _maybe_lock_origin(self, corners, ids, rvecs, tvecs) -> None:
+        """Count consecutive stable detections; when the threshold is hit, lock the world origin."""
+        if self._detection_matches_prev(corners, ids):
+            self._origin_stable_count += 1
+        else:
+            self._origin_stable_count = 1
+        self._prev_corners = corners
+        self._prev_ids = ids
+
+        if self._origin_stable_count >= Config.ORIGIN_LOCK_FRAMES:
+            self.first_id   = ids
+            self.first_rvec = rvecs
+            self.first_tvec = tvecs
+            self.first_frame = False
+            self._prev_corners = None
+            self._prev_ids = None
+            print(f"World origin locked after {self._origin_stable_count} stable frames.")
+
     def _draw_axes(self, rvecs, tvecs) -> None:
         zero_dist = np.zeros(5)
         for rvec, tvec in zip(rvecs, tvecs):
@@ -256,11 +291,9 @@ class MainClass:
             rvecs, tvecs = self.estimate_pose(corners)
 
             if self.first_frame:
-                self.first_id   = ids
-                self.first_rvec = rvecs
-                self.first_tvec = tvecs
-                self.first_frame = False
+                self._maybe_lock_origin(corners, ids, rvecs, tvecs)
 
+        if ids is not None and not self.first_frame:
             self._draw_axes(rvecs, tvecs)
             centroid    = self._get_centroid(ids, rvecs, tvecs)
             local_coords = self._get_local_coordinates(
