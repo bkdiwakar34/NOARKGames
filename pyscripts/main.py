@@ -21,6 +21,7 @@ def _load_settings() -> dict:
     if os.path.exists(path):
         with open(path) as f:
             return json.load(f)
+    print(f"settings.json not found at {path}, using defaults")
     return {"debug": False}
 
 
@@ -29,8 +30,6 @@ class Config:
     MARKER_LENGTH = 0.05
     MARKER_SEPARATION = 0.01
     UDP_IP = "localhost"
-    UDP_PORT = 8000
-    DEFAULT_IDS = [4, 8, 12, 14, 20]
     ALPHA = 0.4
     MARKER_OFFSETS = {
         4:  np.array([0.00,  0.1,    -0.069]),
@@ -50,7 +49,6 @@ class MainClass:
         self.udp_port        = settings.get("udp_port", 12345)
 
         self.filter            = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
-        self.default_ids       = Config.DEFAULT_IDS
         self.frame_size        = Config.FRAME_SIZE
         self.marker_length     = Config.MARKER_LENGTH
         self.marker_separation = Config.MARKER_SEPARATION
@@ -61,17 +59,17 @@ class MainClass:
         self.distortion_coeff = np.array(calib_data["calibration"]["dist_coeffs"])
 
         self.detector = self._init_detector()
-        self.board    = self._init_board()
+    
 
-        self.picam2 = self.map1 = self.map2 = None
-        self.video_frame  = None
-        self.tvec_dist    = np.zeros(3)
-        self.first_frame  = True
-        self.save_path    = None
-        self.csv_writer   = None
-        self.record       = False
-        self.received_message: bytes = b""
-        self.addr         = None
+        self.picam2 = self.map1 = self.map2 = None  # Pi camera object + fisheye undistort maps (set in _init_rpi_camera)
+        self.video_frame  = None                    # latest captured image, refreshed every frame
+        self.first_frame  = True                    # True until the first frame with detected markers — used to lock the world origin
+        self.save_path    = None                    # folder for this patient's CSV, created on first USER: message
+        self.csv_writer   = None                    # csv.writer for the active session, created alongside save_path
+        self.record       = False                   # True once Godot has sent USER: and we should log rows
+        self.received_message: bytes = b""          # most recent UDP command from Godot (sticky — last command is reused each frame)
+        self.addr         = None                    # Godot's UDP address, learned from the first incoming packet
+        self._dbg_last_print = 0.0                  # timestamp of last debug print, to throttle to ~1/sec
 
         self._curr_session = os.path.join(
             "Session-" + datetime.today().strftime("%Y-%m-%d"), "MovementData"
@@ -85,7 +83,7 @@ class MainClass:
 
         self._init_udp_socket()
 
-    # ── detector / board ─────────────────────────────────────────────────────
+    # ── detector ─────────────────────────────────────────────────────────────
 
     def _init_detector(self):
         params = aruco.DetectorParameters()
@@ -94,13 +92,6 @@ class MainClass:
         dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
         return aruco.ArucoDetector(dictionary, params)
 
-    def _init_board(self):
-        return aruco.GridBoard(
-            size=(1, 1),
-            markerLength=self.marker_length,
-            markerSeparation=self.marker_separation,
-            dictionary=self.detector.getDictionary(),
-        )
 
     # ── cameras ──────────────────────────────────────────────────────────────
 
@@ -110,9 +101,15 @@ class MainClass:
 
         self.picam2 = Picamera2()
         config = self.picam2.create_video_configuration(
+            # YUV420 is the camera's native format → no conversion cost.
+            # Y plane is already grayscale, which is what marker detection uses.
             {"format": "YUV420", "size": self.frame_size},
-            controls={"FrameRate": 100, "ExposureTime": 5000},
-            transform=libcamera.Transform(vflip=1),
+            controls={
+                "FrameRate": 100,       # high rate for low-latency tracking; real-world rate may be lower
+                "ExposureTime": 5000,   # 5 ms — short enough to freeze hand motion (no blur on marker corners)
+                "AeEnable": False,      # lock auto-exposure off so the camera can't override ExposureTime
+            },
+            transform=libcamera.Transform(vflip=1),  # camera is mounted upside-down in the rig
         )
         self.picam2.configure(config)
         self.picam2.start()
@@ -157,7 +154,7 @@ class MainClass:
         code_map = {"STOP": -99.0, "START": 2.0, "RESET": 5.0}
         msg_code = code_map.get(command, 2.0)
         data = np.append(msg_code, coords).flatten()
-        data_bytes = struct.pack("f" * len(data), *data)
+        data_bytes = struct.pack("<" + "f" * len(data), *data)
         self.udp_socket.sendto(data_bytes, self.addr)
 
     # ── pose estimation ───────────────────────────────────────────────────────
@@ -176,7 +173,7 @@ class MainClass:
         for corner in corners:
             success, rvec, tvec = cv2.solvePnP(
                 marker_points, corner, self.camera_matrix, self.distortion_coeff,
-                flags=cv2.SOLVEPNP_ITERATIVE,
+                flags=cv2.SOLVEPNP_IPPE_SQUARE,
             )
             if success:
                 rvecs.append(rvec.flatten())
@@ -300,6 +297,12 @@ class MainClass:
                     )
 
         if self.debug:
+            import time
+            if ids is not None and time.time() - self._dbg_last_print > 1.0:
+                sides = [np.linalg.norm(c[0][i] - c[0][(i + 1) % 4])
+                         for c in corners for i in range(4)]
+                print(f"marker side: avg {np.mean(sides):.1f} px  (n={len(sides)//4} markers)")
+                self._dbg_last_print = time.time()
             self.video_frame = cv2.resize(self.video_frame, (350, 200))
             cv2.imshow("frame", self.video_frame)
 
@@ -307,7 +310,6 @@ class MainClass:
         import time
 
         last_heartbeat = time.time()
-        use_heartbeat  = self.stream_type == "udp"
 
         try:
             while True:
@@ -315,14 +317,12 @@ class MainClass:
                     self.process_frame()
                     if self.received_message:
                         last_heartbeat = time.time()
-                    if use_heartbeat and time.time() - last_heartbeat > 3.0:
+                    if time.time() - last_heartbeat > 3.0:
                         print("Lost connection to Godot, exiting…")
                         break
                 except Exception as exc:
-                    if use_heartbeat:
-                        print(f"Error: {exc} — Godot likely closed")
-                        break
-                    raise
+                    print(f"Error: {exc} — Godot likely closed")
+                    break
 
                 if self.received_message == b"STOP":
                     break
