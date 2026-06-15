@@ -4,6 +4,7 @@ import os
 import platform
 import socket
 import struct
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -84,6 +85,11 @@ class MainClass:
         self._prev_corners = None
         self._prev_ids = None
 
+        # Timestamp of the last fresh UDP packet from Godot. run() exits if no fresh packet
+        # arrives for 3 seconds — Godot sends "CONNECTED" every 100 ms by default, so this
+        # only trips when Godot has actually died or stopped responding.
+        self._last_msg_time = time.time()
+
         self._curr_session = os.path.join(
             "Session-" + datetime.today().strftime("%Y-%m-%d"), "MovementData"
         )
@@ -117,13 +123,22 @@ class MainClass:
             # Y plane is already grayscale, which is what marker detection uses.
             {"format": "YUV420", "size": self.frame_size},
             controls={
-                "FrameRate": 100,       # high rate for low-latency tracking; real-world rate may be lower
-                "ExposureTime": 5000,   # 5 ms — short enough to freeze hand motion (no blur on marker corners)
-                "AeEnable": False,      # lock auto-exposure off so the camera can't override ExposureTime
+                "FrameRate": 100,    # high rate for low-latency tracking; real-world rate may be lower
+                "AeEnable": True,    # start with auto-exposure so it can adapt to room lighting
             },
         )
         self.picam2.configure(config)
         self.picam2.start()
+
+        # Let auto-exposure converge for ~1 s, then lock whatever it picked so the
+        # exposure can't drift mid-session. Cap at 20 ms to avoid motion blur if the
+        # room is unusually dim.
+        time.sleep(1.0)
+        meta = self.picam2.capture_metadata()
+        exposure = min(int(meta.get("ExposureTime", 5000)), 20_000)
+        gain     = float(meta.get("AnalogueGain", 1.0))
+        self.picam2.set_controls({"AeEnable": False, "ExposureTime": exposure, "AnalogueGain": gain})
+        print(f"Camera exposure locked at {exposure} us, gain {gain:.2f}")
 
     def _init_camera(self) -> None:
         self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -145,6 +160,7 @@ class MainClass:
         """Return the latest command from Godot, or b'' if none."""
         try:
             data, self.addr = self.udp_socket.recvfrom(30)
+            self._last_msg_time = time.time()
             return data
         except socket.error:
             return b""
@@ -328,7 +344,6 @@ class MainClass:
                     )
 
         if self.debug:
-            import time
             if ids is not None and time.time() - self._dbg_last_print > 1.0:
                 sides = [np.linalg.norm(c[0][i] - c[0][(i + 1) % 4])
                          for c in corners for i in range(4)]
@@ -338,18 +353,12 @@ class MainClass:
             cv2.imshow("frame", self.video_frame)
 
     def run(self) -> None:
-        import time
-
-        last_heartbeat = time.time()
-
         try:
             while True:
                 try:
                     self.process_frame()
-                    if self.received_message:
-                        last_heartbeat = time.time()
-                    if time.time() - last_heartbeat > 3.0:
-                        print("Lost connection to Godot, exiting…")
+                    if time.time() - self._last_msg_time > 3.0:
+                        print("No UDP packets from Godot for 3 s — exiting.")
                         break
                 except Exception as exc:
                     print(f"Error: {exc} — Godot likely closed")
