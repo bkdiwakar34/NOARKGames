@@ -41,13 +41,11 @@ OUTPUT_PATH = os.path.join(_SCRIPT_DIR, "camera_calib.toml")
 def init_camera():
     if platform.system() == "Linux":
         from picamera2 import Picamera2
-        import libcamera
 
         picam2 = Picamera2()
         config = picam2.create_video_configuration(
             {"format": "YUV420", "size": FRAME_SIZE},
             controls={"FrameRate": 100, "ExposureTime": 5000, "AeEnable": False},
-            transform=libcamera.Transform(vflip=1),
         )
         picam2.configure(config)
         picam2.start()

@@ -97,7 +97,6 @@ class MainClass:
 
     def _init_rpi_camera(self) -> None:
         from picamera2 import Picamera2
-        import libcamera
 
         self.picam2 = Picamera2()
         config = self.picam2.create_video_configuration(
@@ -109,7 +108,6 @@ class MainClass:
                 "ExposureTime": 5000,   # 5 ms — short enough to freeze hand motion (no blur on marker corners)
                 "AeEnable": False,      # lock auto-exposure off so the camera can't override ExposureTime
             },
-            transform=libcamera.Transform(vflip=1),  # camera is mounted upside-down in the rig
         )
         self.picam2.configure(config)
         self.picam2.start()
