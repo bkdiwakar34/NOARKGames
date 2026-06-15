@@ -125,22 +125,23 @@ class MainClass:
             # Y plane is already grayscale, which is what marker detection uses.
             {"format": "YUV420", "size": self.frame_size},
             controls={
-                "FrameRate": 100,    # high rate for low-latency tracking; real-world rate may be lower
-                "AeEnable": True,    # start with auto-exposure so it can adapt to room lighting
+                "FrameRate": 100,      # high rate for low-latency tracking; real-world rate may be lower
+                "ExposureTime": 5000,  # 5 ms — short enough to freeze hand motion (no blur on marker corners)
+                "AeEnable": False,     # lock auto-exposure off so the camera can't override ExposureTime
             },
         )
         self.picam2.configure(config)
         self.picam2.start()
 
-        # Let auto-exposure converge for ~1 s, then lock whatever it picked so the
-        # exposure can't drift mid-session. Cap at 20 ms to avoid motion blur if the
-        # room is unusually dim.
-        time.sleep(1.0)
-        meta = self.picam2.capture_metadata()
-        exposure = min(int(meta.get("ExposureTime", 5000)), 20_000)
-        gain     = float(meta.get("AnalogueGain", 1.0))
-        self.picam2.set_controls({"AeEnable": False, "ExposureTime": exposure, "AnalogueGain": gain})
-        print(f"Camera exposure locked at {exposure} us, gain {gain:.2f}")
+        # Auto-exposure tune-then-lock disabled for now — the 1-second AE convergence
+        # was adding noticeable lag and the chosen exposure caused lag during gameplay.
+        # Re-enable later if room lighting becomes an issue.
+        # time.sleep(1.0)
+        # meta = self.picam2.capture_metadata()
+        # exposure = min(int(meta.get("ExposureTime", 5000)), 20_000)
+        # gain     = float(meta.get("AnalogueGain", 1.0))
+        # self.picam2.set_controls({"AeEnable": False, "ExposureTime": exposure, "AnalogueGain": gain})
+        # print(f"Camera exposure locked at {exposure} us, gain {gain:.2f}")
 
     def _init_camera(self) -> None:
         self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
