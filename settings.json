@@ -1,4 +1,5 @@
 {
 	"debug": false,
-	"udp_port": 12345
+	"udp_port": 12345,
+	"filter_type": "ema"
 }
