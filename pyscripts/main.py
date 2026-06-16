@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 from cv2 import aruco
 
-from filters import ExponentialMovingAverageFilter3D
+from filters import ExponentialMovingAverageFilter3D, KalmanFilter3D
 
 
 def _load_settings() -> dict:
@@ -50,7 +50,14 @@ class MainClass:
         self.debug = settings.get("debug", False)
         self.udp_port        = settings.get("udp_port", 12345)
 
-        self.filter        = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
+        filter_type = str(settings.get("filter_type", "ema")).lower()
+        if filter_type == "kalman":
+            kf_proc = float(settings.get("kalman_process_noise",     0.01))
+            kf_meas = float(settings.get("kalman_measurement_noise", 0.05))
+            self.filter = KalmanFilter3D(process_noise=kf_proc, measurement_noise=kf_meas)
+        else:
+            self.filter = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
+        print(f"Using {filter_type} filter for smoothing")
         self.frame_size    = Config.FRAME_SIZE
         self.marker_length = Config.MARKER_LENGTH
 

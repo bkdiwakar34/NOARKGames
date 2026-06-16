@@ -1,5 +1,7 @@
+import time
+
+import cv2
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 
 
 class ExponentialMovingAverageFilter3D:
@@ -9,16 +11,75 @@ class ExponentialMovingAverageFilter3D:
         self.ema_y = None
         self.ema_z = None
 
-    def update(self, ema):
+    def update(self, sample):
         if self.ema_x is None:
-            self.ema_x = ema[0]
-            self.ema_y = ema[1]
-            self.ema_z = ema[2]
+            self.ema_x = sample[0]
+            self.ema_y = sample[1]
+            self.ema_z = sample[2]
         else:
-            self.ema_x = self.alpha * ema[0] + (1 - self.alpha) * self.ema_x
-            self.ema_y = self.alpha * ema[1] + (1 - self.alpha) * self.ema_y
-            self.ema_z = self.alpha * ema[2] + (1 - self.alpha) * self.ema_z
+            self.ema_x = self.alpha * sample[0] + (1 - self.alpha) * self.ema_x
+            self.ema_y = self.alpha * sample[1] + (1 - self.alpha) * self.ema_y
+            self.ema_z = self.alpha * sample[2] + (1 - self.alpha) * self.ema_z
         return np.array([self.ema_x, self.ema_y, self.ema_z])
+
+
+class KalmanFilter3D:
+    """
+    Constant-velocity Kalman filter for 3D position.
+
+    State : [x, y, z, vx, vy, vz]  (6-D)
+    Measurement : [x, y, z]        (3-D, from solvePnP centroid)
+
+    dt is measured per-update from time.monotonic() so the model stays correct
+    regardless of frame-rate jitter. process_noise controls how much velocity
+    can change between frames (higher = follows fast hand motion more closely,
+    less smoothing). measurement_noise reflects how noisy the raw centroid is
+    (higher = trust the model more, smooth harder).
+    """
+
+    def __init__(self, process_noise: float = 0.01, measurement_noise: float = 0.05) -> None:
+        self.kf = cv2.KalmanFilter(6, 3)
+        self.kf.measurementMatrix = np.array(
+            [[1, 0, 0, 0, 0, 0],
+             [0, 1, 0, 0, 0, 0],
+             [0, 0, 1, 0, 0, 0]],
+            dtype=np.float32,
+        )
+        self.kf.processNoiseCov     = np.eye(6, dtype=np.float32) * process_noise
+        self.kf.measurementNoiseCov = np.eye(3, dtype=np.float32) * measurement_noise
+        self.kf.errorCovPost        = np.eye(6, dtype=np.float32) * 1.0
+        self._last_time: float | None = None
+        self._initialised: bool = False
+
+    def update(self, sample) -> np.ndarray:
+        m = np.array(sample, dtype=np.float32).reshape(3, 1)
+        now = time.monotonic()
+
+        if not self._initialised:
+            # Seed the state with the first measurement, zero velocity.
+            self.kf.statePost = np.array(
+                [m[0, 0], m[1, 0], m[2, 0], 0.0, 0.0, 0.0],
+                dtype=np.float32,
+            ).reshape(6, 1)
+            self._last_time   = now
+            self._initialised = True
+            return np.array([m[0, 0], m[1, 0], m[2, 0]])
+
+        dt = float(now - self._last_time)
+        self._last_time = now
+        self.kf.transitionMatrix = np.array(
+            [[1, 0, 0, dt, 0, 0],
+             [0, 1, 0, 0, dt, 0],
+             [0, 0, 1, 0, 0, dt],
+             [0, 0, 0, 1, 0,  0],
+             [0, 0, 0, 0, 1,  0],
+             [0, 0, 0, 0, 0,  1]],
+            dtype=np.float32,
+        )
+
+        self.kf.predict()
+        corrected = self.kf.correct(m)
+        return np.array([corrected[0, 0], corrected[1, 0], corrected[2, 0]])
 
 
 class CoordinateTransform:
