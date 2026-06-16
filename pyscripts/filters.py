@@ -1,3 +1,4 @@
+import math
 import time
 
 import cv2
@@ -80,6 +81,59 @@ class KalmanFilter3D:
         self.kf.predict()
         corrected = self.kf.correct(m)
         return np.array([corrected[0, 0], corrected[1, 0], corrected[2, 0]])
+
+
+class OneEuroFilter3D:
+    """
+    One Euro Filter (https://gery.casiez.net/1euro/) for 3D position.
+
+    Adaptive low-pass: the cutoff frequency rises with hand speed, so the
+    filter smooths heavily when the device is held still (small jitter
+    rejected) and opens up when the user reaches for a target (no lag).
+
+    min_cutoff : cutoff in Hz at zero speed. Lower → smoother hold.
+    beta       : how much the cutoff grows with speed. Higher → more reactive.
+    d_cutoff   : cutoff in Hz for the speed (derivative) estimate.
+    """
+
+    def __init__(self, min_cutoff: float = 1.0, beta: float = 0.007, d_cutoff: float = 1.0) -> None:
+        self.min_cutoff = float(min_cutoff)
+        self.beta       = float(beta)
+        self.d_cutoff   = float(d_cutoff)
+        self._x_prev    = None
+        self._dx_prev   = np.zeros(3, dtype=np.float64)
+        self._t_prev: float | None = None
+
+    @staticmethod
+    def _alpha(cutoff: float, dt: float) -> float:
+        tau = 1.0 / (2.0 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def update(self, sample) -> np.ndarray:
+        x = np.array(sample, dtype=np.float64)
+        now = time.monotonic()
+        if self._x_prev is None:
+            self._x_prev = x.copy()
+            self._t_prev = now
+            return x
+
+        dt = max(now - self._t_prev, 1e-6)
+        self._t_prev = now
+
+        # Smoothed derivative (used as the speed estimate).
+        dx          = (x - self._x_prev) / dt
+        a_d         = self._alpha(self.d_cutoff, dt)
+        dx_smoothed = a_d * dx + (1.0 - a_d) * self._dx_prev
+
+        # Adaptive cutoff scales with speed.
+        speed  = float(np.linalg.norm(dx_smoothed))
+        cutoff = self.min_cutoff + self.beta * speed
+        a_x    = self._alpha(cutoff, dt)
+
+        x_smoothed    = a_x * x + (1.0 - a_x) * self._x_prev
+        self._x_prev  = x_smoothed
+        self._dx_prev = dx_smoothed
+        return x_smoothed
 
 
 class CoordinateTransform:

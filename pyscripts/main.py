@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 from cv2 import aruco
 
-from filters import ExponentialMovingAverageFilter3D, KalmanFilter3D
+from filters import ExponentialMovingAverageFilter3D, KalmanFilter3D, OneEuroFilter3D
 
 
 def _load_settings() -> dict:
@@ -55,6 +55,11 @@ class MainClass:
             kf_proc = float(settings.get("kalman_process_noise",     0.01))
             kf_meas = float(settings.get("kalman_measurement_noise", 0.05))
             self.filter = KalmanFilter3D(process_noise=kf_proc, measurement_noise=kf_meas)
+        elif filter_type == "one_euro":
+            oe_min   = float(settings.get("one_euro_min_cutoff", 1.0))
+            oe_beta  = float(settings.get("one_euro_beta",       0.007))
+            oe_dcut  = float(settings.get("one_euro_d_cutoff",   1.0))
+            self.filter = OneEuroFilter3D(min_cutoff=oe_min, beta=oe_beta, d_cutoff=oe_dcut)
         else:
             self.filter = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
         print(f"Using {filter_type} filter for smoothing")
