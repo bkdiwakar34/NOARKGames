@@ -314,7 +314,7 @@ class MainClass:
                 return
 
         self.video_frame = cv2.remap(
-            self.video_frame, self.map1, self.map2, interpolation=cv2.INTER_LINEAR
+            self.video_frame, self.map1, self.map2, interpolation=cv2.INTER_CUBIC
         )
 
         # Poll command from Godot
