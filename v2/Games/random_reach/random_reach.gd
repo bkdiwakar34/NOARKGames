@@ -158,6 +158,94 @@ func _draw() -> void:
 	draw_arc(_player_pos, 13.0, 0.0, TAU, 48, cursor_col, 2.0)
 	draw_circle(_player_pos, 2.5, cursor_col)
 
+	# Fitts fit overlay (bottom-right) — live scatter of (ID, MT) points and
+	# the current a + b·ID line. Visible during Phase 0c and the live session.
+	if AdaptiveManager._phase >= AdaptiveManager.Phase.FITTS_CAL:
+		_draw_fitts_overlay()
+
+
+func _draw_fitts_overlay() -> void:
+	var aw_pairs: Array = AdaptiveManager.aw_pairs
+	if aw_pairs.is_empty():
+		return
+
+	# Collect (ID, MT) points from the outcome log.
+	var pts: Array = []
+	for entry in AdaptiveManager.outcome_log:
+		var pi: int   = entry["pair_idx"]
+		var mt: float = entry["mt"]
+		if pi < 0 or pi >= aw_pairs.size() or mt < 0.0:
+			continue
+		var pair: Dictionary = aw_pairs[pi]
+		var id_: float = log(pair["A"] / max(pair["W"], 1.0) + 1.0) / log(2.0)
+		pts.append(Vector2(id_, mt))
+
+	# Box position + size.
+	var vp:    Vector2 = get_rect().size
+	var box_w: float   = 240.0
+	var box_h: float   = 170.0
+	var pad:   float   = 14.0
+	var ox:    float   = vp.x - box_w - pad
+	var oy:    float   = vp.y - box_h - pad
+
+	# Background panel.
+	draw_rect(Rect2(ox, oy, box_w, box_h), Color(0.98, 0.96, 0.92, 0.88), true)
+	draw_rect(Rect2(ox, oy, box_w, box_h), Color(0.30, 0.30, 0.32, 0.80), false, 1.5)
+
+	# Plot area within the box.
+	var plot_l: float = ox + 40.0
+	var plot_r: float = ox + box_w - 14.0
+	var plot_t: float = oy + 28.0
+	var plot_b: float = oy + box_h - 26.0
+
+	# Axis ranges. ID typically 1–6 bits; MT capped at 3 s (or auto if larger).
+	var x_min: float = 0.5
+	var x_max: float = 6.0
+	var y_min: float = 0.0
+	var y_max: float = 3.0
+	for p in pts:
+		if p.y > y_max:
+			y_max = p.y
+	if y_max > 6.0:
+		y_max = 6.0  # hard cap
+
+	# Axes.
+	var axis_col := Color(0.30, 0.30, 0.32, 0.85)
+	draw_line(Vector2(plot_l, plot_t), Vector2(plot_l, plot_b), axis_col, 1.0)
+	draw_line(Vector2(plot_l, plot_b), Vector2(plot_r, plot_b), axis_col, 1.0)
+
+	# Fit line: MT = a + b · ID.
+	var a: float = AdaptiveManager.fitts_a
+	var b: float = AdaptiveManager.fitts_b
+	var y1: float = a + b * x_min
+	var y2: float = a + b * x_max
+	var px1: float = lerp(plot_l, plot_r, (x_min - x_min) / (x_max - x_min))
+	var py1: float = lerp(plot_b, plot_t, clamp((y1 - y_min) / (y_max - y_min), 0.0, 1.0))
+	var px2: float = lerp(plot_l, plot_r, (x_max - x_min) / (x_max - x_min))
+	var py2: float = lerp(plot_b, plot_t, clamp((y2 - y_min) / (y_max - y_min), 0.0, 1.0))
+	draw_line(Vector2(px1, py1), Vector2(px2, py2), Color(0.85, 0.22, 0.20, 0.95), 1.8)
+
+	# Scatter points.
+	var pt_col := Color(0.18, 0.45, 0.85, 0.82)
+	for p in pts:
+		var sx: float = lerp(plot_l, plot_r, clamp((p.x - x_min) / (x_max - x_min), 0.0, 1.0))
+		var sy: float = lerp(plot_b, plot_t, clamp((p.y - y_min) / (y_max - y_min), 0.0, 1.0))
+		draw_circle(Vector2(sx, sy), 2.5, pt_col)
+
+	# Labels.
+	var font: Font = get_theme_default_font()
+	var text_col := Color(0.18, 0.18, 0.20)
+	draw_string(font, Vector2(ox + 10.0, oy + 18.0),
+		"Fitts: MT = %.2f + %.2f·ID" % [a, b],
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
+	draw_string(font, Vector2(plot_r - 16.0, plot_b + 14.0), "ID",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, text_col)
+	draw_string(font, Vector2(ox + 6.0, plot_t - 4.0), "MT (s)",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, text_col)
+	draw_string(font, Vector2(ox + 10.0, oy + box_h - 8.0),
+		"n=%d" % pts.size(),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, text_col)
+
 func _connect_signals() -> void:
 	AdaptiveManager.trial_ended.connect(_on_trial_ended)
 	AdaptiveManager.trial_started.connect(_on_trial_started)
@@ -209,8 +297,9 @@ func _process(delta: float) -> void:
 		_calib_label.visible = false
 	else:
 		_calib_label.visible = true
-		_calib_label.text = "Setting up (%d/3) — %s: apple %d / %d" % [
-			prog["phase"], prog["name"], prog["current"] + 1, prog["total"]
+		_calib_label.text = "Setting up (%d/%d) — %s: apple %d / %d" % [
+			prog["phase"], prog["phases"], prog["name"],
+			prog["current"] + 1, prog["total"]
 		]
 
 	queue_redraw()

@@ -49,9 +49,13 @@ var _comfortable_cells: Array   = []
 var _prec_is_home:      bool    = true
 
 # ── Phase 0c: Fitts calibration ───────────────────────────────────────────────
-# 10 pairs × 20 valid observations each
-const NUM_PAIRS:    int = 10
-const CAL_PER_PAIR: int = 20
+# 5 distances × 3 widths = 15 pairs, 5 valid observations each.
+# Widths span small → large so this same phase also measures _w_min
+# (the smallest width the patient can reliably hit) — that's why Phase 0b
+# (precision scan) is now skipped.
+const NUM_PAIRS:    int   = 15
+const CAL_PER_PAIR: int   = 5
+const CAL_W_VALUES: Array = [120.0, 60.0, 25.0]  # large, medium, small
 
 var aw_pairs:      Array = []  # [{A, W, cal_n, mt_sum, mt_sq}]
 var _cal_pair_idx: int   = 0
@@ -210,7 +214,7 @@ func _on_valid_mt(mt: float, is_hit: bool) -> void:
 	match _phase:
 		Phase.WORKSPACE_SCAN: _on_scan_outcome(is_hit)
 		Phase.PRECISION_SCAN: _on_prec_outcome(is_hit)
-		Phase.FITTS_CAL:      _on_cal_outcome(mt)
+		Phase.FITTS_CAL:      _on_cal_outcome(mt, is_hit)
 		Phase.SESSION:
 			if is_hit:
 				_trial_caught += 1
@@ -293,8 +297,12 @@ func _finish_workspace_scan() -> void:
 	if _comfortable_cells.is_empty():
 		_comfortable_cells = reachable_cells.duplicate()
 
-	_prec_is_home = true
-	_phase        = Phase.PRECISION_SCAN
+	# Skip Phase 0b (precision scan). Phase 0c now spans a wider W range so
+	# the smallest reliably-hit width is measured at the end of 0c, not in a
+	# dedicated phase.
+	_build_aw_pairs()
+	_phase        = Phase.FITTS_CAL
+	_cal_pair_idx = 0;  _cal_rep = 0;  _cal_total = 0
 
 
 func _build_scan_grid() -> void:
@@ -374,14 +382,12 @@ func _finish_precision_scan() -> void:
 func _build_aw_pairs() -> void:
 	aw_pairs.clear()
 	_welford.clear()
-	var w_high: float = 120.0
-	var w_low:  float = max(_w_min, 40.0)
-	var idx:    int   = 0
+	var idx: int = 0
 	for i in 5:
 		var t: float = float(i) / 4.0
 		var a: float = lerp(_a_global_max * 0.20, _a_global_max * 0.85, t)
-		for w in [w_high, w_low]:
-			aw_pairs.append({"A": a, "W": float(w), "cal_n": 0, "mt_sum": 0.0, "mt_sq": 0.0})
+		for w in CAL_W_VALUES:
+			aw_pairs.append({"A": a, "W": float(w), "cal_n": 0, "mt_sum": 0.0, "mt_sq": 0.0, "hits": 0})
 			_welford[idx] = {"n": 0, "mean": 0.0, "M2": 0.0}
 			idx += 1
 
@@ -397,11 +403,13 @@ func _cal_spawn(player_pos: Vector2) -> Vector2:
 	return _sample_reachable_spawn(player_pos, pair["A"])
 
 
-func _on_cal_outcome(mt: float) -> void:
+func _on_cal_outcome(mt: float, is_hit: bool) -> void:
 	var pair: Dictionary = aw_pairs[_cal_pair_idx]
 	pair["cal_n"]  += 1
 	pair["mt_sum"] += mt
 	pair["mt_sq"]  += mt * mt
+	if is_hit:
+		pair["hits"] += 1
 	_update_fitts_online(mt)
 	_cal_rep   += 1
 	_cal_total += 1
@@ -418,6 +426,7 @@ func _advance_cal_pair() -> void:
 
 
 func _finish_fitts_cal() -> void:
+	_derive_w_min_from_cal()
 	_fit_fitts_batch()
 	_phase             = Phase.SESSION
 	trial_number       = 0
@@ -425,6 +434,30 @@ func _finish_fitts_cal() -> void:
 	_trial_spawned     = 0
 	_trial_apple_start = outcome_log.size()
 	_start_trial()
+
+
+# Aggregate per-W hit rate across all distances; _w_min is the smallest W whose
+# aggregated hit rate is ≥ 50%. Mirrors what the old Phase 0b precision scan
+# measured, but uses Phase 0c data so we don't need a dedicated phase for it.
+func _derive_w_min_from_cal() -> void:
+	var per_w_n:    Dictionary = {}   # W → total attempts
+	var per_w_hits: Dictionary = {}   # W → total hits
+	for pair in aw_pairs:
+		var w: float = pair["W"]
+		per_w_n[w]    = per_w_n.get(w,    0) + pair["cal_n"]
+		per_w_hits[w] = per_w_hits.get(w, 0) + pair["hits"]
+	var widths: Array = per_w_n.keys()
+	widths.sort()  # ascending
+	_w_min = widths[widths.size() - 1] if not widths.is_empty() else 120.0
+	for w in widths:
+		var n: int = per_w_n[w]
+		if n == 0:
+			continue
+		var rate: float = float(per_w_hits[w]) / float(n)
+		if rate >= 0.5:
+			_w_min = w
+			break
+	print("Derived _w_min = %.0f px from Phase 0c hit rates" % _w_min)
 
 
 func _fit_fitts_batch() -> void:
@@ -501,20 +534,22 @@ func _is_position_reachable(pos: Vector2) -> bool:
 
 
 # Progress info for the calibration phases — used by the game UI to show
-# "Setting up — apple X / N" before the actual session starts.
+# "Setting up — apple X / N" before the actual session starts. Phase 0b
+# (precision scan) is skipped now; the Fitts phase spans wider W values
+# and derives _w_min from its own hit rates.
+const _TOTAL_CAL_PHASES: int = 2
+
 func get_calibration_progress() -> Dictionary:
 	match _phase:
 		Phase.WORKSPACE_SCAN:
 			return {"phase": 1, "name": "Workspace scan",
-				"current": _scan_cell_idx, "total": _scan_cells.size()}
-		Phase.PRECISION_SCAN:
-			return {"phase": 2, "name": "Precision scan",
-				"current": _prec_w_idx * PREC_REPEATS + _prec_rep,
-				"total":   PREC_W_VALUES.size() * PREC_REPEATS}
+				"current": _scan_cell_idx, "total": _scan_cells.size(),
+				"phases": _TOTAL_CAL_PHASES}
 		Phase.FITTS_CAL:
-			return {"phase": 3, "name": "Fitts calibration",
+			return {"phase": 2, "name": "Fitts calibration",
 				"current": _cal_pair_idx * CAL_PER_PAIR + _cal_rep,
-				"total":   aw_pairs.size() * CAL_PER_PAIR}
+				"total":   aw_pairs.size() * CAL_PER_PAIR,
+				"phases":  _TOTAL_CAL_PHASES}
 		_:
 			return {}
 
