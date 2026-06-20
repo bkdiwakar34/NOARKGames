@@ -93,6 +93,15 @@ class MainClass:
         self._hid         = None                    # current patient hospital ID; set on first USER:/CHANGE: message
         self._dbg_last_print = 0.0                  # timestamp of last debug print, to throttle to ~1/sec
 
+        # Per-stage timing buffer (filled by process_frame, drained by the debug print
+        # once a second). Each entry is [capture_ms, remap_ms, detect_ms, pose_send_ms].
+        self._stage_times = []
+        # Tracker timing log — opened only when debug is on. Plays nice with
+        # `tail -f` from another terminal even when Godot launches main.py.
+        self._timing_log = open("/tmp/tracker_timing.log", "a", buffering=1) if self.debug else None
+        if self._timing_log is not None:
+            self._timing_log.write(f"\n--- tracker started {datetime.now().isoformat(timespec='seconds')} ---\n")
+
         # World-origin lock state: don't anchor the reference frame to a single noisy detection.
         # Wait for ORIGIN_LOCK_FRAMES consecutive frames with the same marker set and < ORIGIN_STABLE_PX motion.
         self._origin_stable_count = 0
@@ -305,6 +314,8 @@ class MainClass:
     # ── main loop ─────────────────────────────────────────────────────────────
 
     def process_frame(self) -> None:
+        t0 = time.perf_counter() if self.debug else 0.0
+
         # Capture frame
         if platform.system() == "Linux":
             self.video_frame = self.picam2.capture_array()
@@ -312,10 +323,12 @@ class MainClass:
             ret, self.video_frame = self.camera.read()
             if not ret or self.video_frame is None:
                 return
+        t1 = time.perf_counter() if self.debug else 0.0
 
         self.video_frame = cv2.remap(
             self.video_frame, self.map1, self.map2, interpolation=cv2.INTER_CUBIC
         )
+        t2 = time.perf_counter() if self.debug else 0.0
 
         # Poll command from Godot
         cmd = self._recv_command()
@@ -324,6 +337,7 @@ class MainClass:
 
         # Detect markers
         corners, ids, _ = self.detector.detectMarkers(self.video_frame)
+        t3 = time.perf_counter() if self.debug else 0.0
         if ids is not None:
             self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners, ids)
             rvecs, tvecs = self.estimate_pose(corners)
@@ -369,11 +383,36 @@ class MainClass:
                     )
 
         if self.debug:
-            if ids is not None and time.time() - self._dbg_last_print > 1.0:
-                sides = [np.linalg.norm(c[0][i] - c[0][(i + 1) % 4])
-                         for c in corners for i in range(4)]
-                print(f"marker side: avg {np.mean(sides):.1f} px  (n={len(sides)//4} markers)")
-                self._dbg_last_print = time.time()
+            t4 = time.perf_counter()
+            self._stage_times.append((
+                (t1 - t0) * 1000.0,   # capture
+                (t2 - t1) * 1000.0,   # remap (undistort)
+                (t3 - t2) * 1000.0,   # detect
+                (t4 - t3) * 1000.0,   # pose + filter + send
+            ))
+
+            now = time.time()
+            if now - self._dbg_last_print > 1.0:
+                if ids is not None:
+                    sides = [np.linalg.norm(c[0][i] - c[0][(i + 1) % 4])
+                             for c in corners for i in range(4)]
+                    print(f"marker side: avg {np.mean(sides):.1f} px  (n={len(sides)//4} markers)")
+                if self._stage_times:
+                    arr = np.array(self._stage_times)
+                    means = arr.mean(axis=0)
+                    total = float(means.sum())
+                    line = (f"capture: {means[0]:5.2f} ms  |  "
+                            f"remap: {means[1]:5.2f} ms  |  "
+                            f"detect: {means[2]:5.2f} ms  |  "
+                            f"pose+send: {means[3]:5.2f} ms  |  "
+                            f"total: {total:5.2f} ms  ({len(arr)} frames)")
+                    print(line)
+                    if self._timing_log is not None:
+                        self._timing_log.write(
+                            f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]}  {line}\n"
+                        )
+                    self._stage_times.clear()
+                self._dbg_last_print = now
             self.video_frame = cv2.resize(self.video_frame, (350, 200))
             cv2.imshow("frame", self.video_frame)
 
@@ -396,6 +435,8 @@ class MainClass:
         finally:
             if self._csv_file is not None:
                 self._csv_file.close()
+            if self._timing_log is not None:
+                self._timing_log.close()
             if self.debug:
                 cv2.destroyAllWindows()
 
