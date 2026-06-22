@@ -86,6 +86,7 @@ class MainClass:
             self.camera_matrix, self.frame_size, cv2.CV_16SC2,
         )
 
+        self._corner_refine_name = str(settings.get("corner_refine", "contour")).lower()
         self.detector = self._init_detector()
 
         self.picam2 = None                          # Pi camera object (set in _init_rpi_camera)
@@ -135,10 +136,18 @@ class MainClass:
     # ── detector ─────────────────────────────────────────────────────────────
 
     def _init_detector(self):
+        refine_map = {
+            "none":     aruco.CORNER_REFINE_NONE,
+            "subpix":   aruco.CORNER_REFINE_SUBPIX,
+            "contour":  aruco.CORNER_REFINE_CONTOUR,
+            "apriltag": aruco.CORNER_REFINE_APRILTAG,
+        }
+        refine_flag = refine_map.get(self._corner_refine_name, aruco.CORNER_REFINE_CONTOUR)
         params = aruco.DetectorParameters()
         params.useAruco3Detection     = True
-        params.cornerRefinementMethod = aruco.CORNER_REFINE_APRILTAG
+        params.cornerRefinementMethod = refine_flag
         dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+        print(f"Detector corner refinement: {self._corner_refine_name}")
         return aruco.ArucoDetector(dictionary, params)
 
 

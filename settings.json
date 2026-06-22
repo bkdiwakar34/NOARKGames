@@ -2,6 +2,7 @@
 	"debug": false,
 	"udp_port": 12345,
 	"calibration_file": "camera_calib.toml",
+	"corner_refine": "contour",
 	"filter_type": "one_euro",
 	"kalman_process_noise": 0.01,
 	"kalman_measurement_noise": 0.05,
