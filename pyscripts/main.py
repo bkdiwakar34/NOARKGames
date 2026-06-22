@@ -445,7 +445,14 @@ if __name__ == "__main__":
     settings = _load_settings()
 
     _pyscripts_dir = os.path.dirname(os.path.abspath(__file__))
-    CAMERA_CALIB_PATH = os.path.join(_pyscripts_dir, "camera_calib.toml")
+    # settings.json["calibration_file"] picks which .toml to load. A bare
+    # filename is resolved relative to pyscripts/; an absolute path is used as-is.
+    _calib_name = settings.get("calibration_file", "camera_calib.toml")
+    CAMERA_CALIB_PATH = (
+        _calib_name if os.path.isabs(_calib_name)
+        else os.path.join(_pyscripts_dir, _calib_name)
+    )
+    print(f"Loading calibration from: {CAMERA_CALIB_PATH}")
 
     main = MainClass(cam_calib_path=CAMERA_CALIB_PATH, settings=settings)
     main.run()
