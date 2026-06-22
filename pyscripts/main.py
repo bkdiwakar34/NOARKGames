@@ -12,7 +12,12 @@ import cv2
 import numpy as np
 from cv2 import aruco
 
-from filters import ExponentialMovingAverageFilter3D, KalmanFilter3D, OneEuroFilter3D
+from filters import (
+    ExponentialMovingAverageFilter3D,
+    KalmanFilter3D,
+    NoOpFilter3D,
+    OneEuroFilter3D,
+)
 
 
 def _load_settings() -> dict:
@@ -51,7 +56,9 @@ class MainClass:
         self.udp_port        = settings.get("udp_port", 12345)
 
         filter_type = str(settings.get("filter_type", "ema")).lower()
-        if filter_type == "kalman":
+        if filter_type == "none":
+            self.filter = NoOpFilter3D()
+        elif filter_type == "kalman":
             kf_proc = float(settings.get("kalman_process_noise",     0.01))
             kf_meas = float(settings.get("kalman_measurement_noise", 0.05))
             self.filter = KalmanFilter3D(process_noise=kf_proc, measurement_noise=kf_meas)
