@@ -139,13 +139,10 @@ func _update_ui() -> void:
 func _save_and_close() -> void:
 	if _raw_corners.size() < 4:
 		return
-	# Order: TL=0, TR=1, BL=2, BR=3
-	# x-left edge = average of TL.x and BL.x; x-right = average of TR.x and BR.x
-	# z-top edge  = average of TL.y and TR.y; z-bottom = average of BL.y and BR.y
-	var x_left:   float = (_raw_corners[0].x + _raw_corners[2].x) * 0.5
-	var x_right:  float = (_raw_corners[1].x + _raw_corners[3].x) * 0.5
-	var z_top:    float = (_raw_corners[0].y + _raw_corners[1].y) * 0.5
-	var z_bottom: float = (_raw_corners[2].y + _raw_corners[3].y) * 0.5
-	WorkspaceConfig.save_sensor_calibration(x_left, x_right, z_top, z_bottom, get_viewport_rect().size)
+	# _raw_corners ordered: TL=0, TR=1, BL=2, BR=3. WorkspaceConfig fits a
+	# 2D affine transform from these four samples to the viewport corners,
+	# which handles tilt between the camera and the table — straight hand
+	# motion produces straight cursor motion on screen.
+	WorkspaceConfig.save_sensor_calibration(_raw_corners, get_viewport_rect().size)
 	calibration_done.emit()
 	queue_free()
