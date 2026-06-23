@@ -22,29 +22,146 @@ End-to-end derivation of how a raw fisheye camera frame becomes a 3D position br
 
 ---
 
-## 0. The pinhole camera model (the reference everything is built on)
+## 0. The pinhole camera model — how a 3D point becomes a pixel
 
-The simplest model of how 3D points project to 2D pixels. A 3D point in the **camera frame** at $(X, Y, Z)$, with $Z$ along the camera's optical axis, projects to image coordinates:
+This is the foundation for everything that follows. Goal: derive *exactly* how a 3D point in space ends up at a specific pixel $(u, v)$ on the camera sensor. The equation $u = f_x \cdot X/Z + c_x$ shows up over and over later — here's where it comes from and what each piece means.
+
+### 0.1 The camera frame
+
+First we need a coordinate system to describe 3D positions. The **camera frame** is the natural one:
+
+- The **origin** sits at the camera's optical centre — conceptually a single point inside the lens.
+- The **Z-axis** points *forward*, straight out of the lens, along the direction the camera is facing.
+- The **X-axis** points *right* (when looking at the camera from behind).
+- The **Y-axis** points *down* (OpenCV convention — opposite of a typical maths textbook).
+
+So a point at $(X, Y, Z) = (0, 0, 1)$ is exactly 1 metre directly in front of the camera, on the optical axis. $(0.1, 0, 1)$ is 1 metre in front and 10 cm to the right. $(0, 0, 2)$ is 2 metres directly in front.
+
+```
+                    ↑ -Y (up)
+                    |        / Z (forward, into scene)
+                    |      /
+      camera  ●─────────────→ +X (right)
+                    |
+                    ↓ +Y (down)
+```
+
+### 0.2 The pinhole intuition
+
+Imagine the lens is reduced to a single tiny hole. Light from every 3D point in the scene travels in a straight line through that hole and lands on the image sensor sitting some distance $f$ (the **focal length**) behind it.
+
+For a 3D point at $(X, Y, Z)$ in camera frame, draw a straight line from it through the origin. Extend the line past the origin until it hits the sensor plane. By **similar triangles** (the big triangle from the 3D point to the origin, and the small triangle from the origin to the sensor), the image of $\mathbf{X}$ lands at:
 
 $$
-u = f_x \cdot \frac{X}{Z} + c_x \qquad v = f_y \cdot \frac{Y}{Z} + c_y
+x_{\text{sensor}} = f \cdot \frac{X}{Z}, \qquad y_{\text{sensor}} = f \cdot \frac{Y}{Z}
 $$
 
-In matrix form, with the projection matrix:
+That's the core of the entire projection. Read it as: **"take the X coordinate, scale by focal length, divide by depth."** Two important consequences fall out:
+
+1. **Depth shrinks things.** Doubling $Z$ halves $x_{\text{sensor}}$ — that's why distant objects appear smaller on the sensor.
+2. **The relationship is linear in X and Y at a fixed depth.** A 1 cm shift in $X$ produces a fixed $f/Z$ pixel shift in the image — predictable and well-behaved.
+
+### 0.3 From sensor metres to pixels
+
+The sensor is a grid of pixels. If each pixel is $p$ metres wide, then a sensor position of $x_{\text{sensor}}$ metres corresponds to $x_{\text{sensor}} / p$ pixels from the sensor's centre. Substituting from the previous equation:
+
+$$
+u_{\text{from-centre}} = \frac{f}{p} \cdot \frac{X}{Z}
+$$
+
+The combined quantity $f / p$ has units of **pixels** and is what we call **focal length in pixels**, written $f_x$. It bakes both the physical focal length and the pixel pitch into one number — so we never need to know $f$ or $p$ separately at runtime.
+
+If the sensor's pixels aren't perfectly square (different $p_x$ and $p_y$ along the two axes), we get two values:
+
+$$
+f_x = \frac{f}{p_x}, \qquad f_y = \frac{f}{p_y}
+$$
+
+These are the two focal-length numbers in your calibration file. **Their units are pixels**, not metres.
+
+### 0.4 Shifting from sensor-centre to image-corner
+
+Pixel coordinates in an image are usually measured from a corner of the image (typically top-left), not from the centre of the sensor. So we add a constant offset:
+
+$$
+u = f_x \cdot \frac{X}{Z} + c_x, \qquad v = f_y \cdot \frac{Y}{Z} + c_y
+$$
+
+$(c_x, c_y)$ is the **principal point** — the pixel position where the optical axis (the Z-axis itself, i.e. the direction the camera is facing) hits the sensor. For an ideal camera with the sensor perfectly centred on the lens axis, $c_x \approx \text{image\_width} / 2$ and $c_y \approx \text{image\_height} / 2$. In practice, manufacturing tolerances shift it by a few pixels.
+
+### 0.5 Worked numerical example
+
+Suppose your camera has:
+- $f_x = 800$ pixels, $f_y = 800$ pixels
+- $c_x = 640$, $c_y = 400$ (perfectly centred on a 1280×800 image)
+
+**Question 1.** Where does a point at $(X, Y, Z) = (0.0, 0.0, 0.5)$ land?
+
+$$
+u = 800 \cdot \frac{0.0}{0.5} + 640 = 0 + 640 = 640
+$$
+$$
+v = 800 \cdot \frac{0.0}{0.5} + 400 = 0 + 400 = 400
+$$
+
+Dead centre of the image. Makes sense — the 3D point is on the optical axis at 0.5 m depth.
+
+**Question 2.** Where does $(0.05, 0.0, 0.5)$ land? (5 cm to the right of the optical axis, 0.5 m depth.)
+
+$$
+u = 800 \cdot \frac{0.05}{0.5} + 640 = 800 \cdot 0.1 + 640 = 80 + 640 = 720
+$$
+$$
+v = 800 \cdot \frac{0.0}{0.5} + 400 = 400
+$$
+
+80 pixels right of centre. The Y projection is still 0 because the 3D point has $Y = 0$.
+
+**Question 3.** Now move the same lateral point further away — $(0.05, 0.0, 1.0)$. Where?
+
+$$
+u = 800 \cdot \frac{0.05}{1.0} + 640 = 40 + 640 = 680
+$$
+
+Only 40 pixels right of centre. Twice as far away → half as offset on the sensor. That's the perspective effect captured cleanly.
+
+### 0.6 The inverse problem
+
+The equations above go *forward*: given a 3D point and the intrinsics, find the pixel.
+
+**Marker tracking does the opposite** — given pixels (the detected marker corners) and the intrinsics, find the marker's 3D pose. That's the **PnP problem** solved by `solvePnP` later (§5). Notice that depth $Z$ is what makes the inverse hard — any single pixel could correspond to a near point or a far point. You need *multiple* pixels from a known geometry (the four corners of a square marker of known size) to disentangle depth from lateral position.
+
+### 0.7 Matrix form
+
+We bundle the intrinsics into a single $3 \times 3$ matrix:
 
 $$
 \mathbf{K} = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}
 $$
 
-we write:
+and write the projection compactly using **homogeneous coordinates**:
 
 $$
 \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} \sim \mathbf{K} \begin{bmatrix} X/Z \\ Y/Z \\ 1 \end{bmatrix}
 $$
 
-The four numbers $(f_x, f_y, c_x, c_y)$ are the **intrinsics**. They are properties of the lens + sensor pair, not the scene.
+The "$\sim$" means *equal up to a positive scale factor* — divide the right side by its third component to recover the actual pixel coordinates. In code:
 
-**This model assumes light travels in a straight line from the scene to the sensor through a single optical centre.** Real lenses bend light non-linearly — especially fisheye lenses. That's why we need distortion.
+```python
+projected = K @ np.array([X / Z, Y / Z, 1.0])
+u, v = projected[0], projected[1]
+```
+
+### 0.8 What the model assumes — and why we need distortion next
+
+This model assumes:
+
+- Light travels in **straight lines** from each 3D point through a single optical centre.
+- The sensor is **flat** and perpendicular to the optical axis.
+
+Real lenses **bend** light non-linearly. The wider the field of view, the more they bend it. Your OV9281 has a 160° lens — it bends light *a lot*. The next section is about how we model and correct that bending so the pinhole equations above can still be used downstream.
+
+The four numbers $(f_x, f_y, c_x, c_y)$ are called the **intrinsics**. They are properties of the lens + sensor pair, not of the scene. The calibration session (`calibrate_camera.py`) measures them once for your specific camera unit.
 
 ---
 
