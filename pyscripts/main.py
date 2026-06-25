@@ -92,6 +92,17 @@ class MainClass:
         self._corner_refine_name = str(settings.get("corner_refine", "contour")).lower()
         self.detector = self._init_detector()
 
+        pnp_map = {
+            "iterative": cv2.SOLVEPNP_ITERATIVE,
+            "square":    cv2.SOLVEPNP_IPPE_SQUARE,
+        }
+        pnp_name = str(settings.get("pnp_method", "square")).lower()
+        self._pnp_flag = pnp_map.get(pnp_name, cv2.SOLVEPNP_IPPE_SQUARE)
+        print(f"PnP method: {pnp_name}  (options: {list(pnp_map)})")
+
+        self._framerate = int(settings.get("framerate", 100))
+        print(f"Camera framerate target: {self._framerate}")
+
         # Skip solvePnP when corners haven't moved — reuse last pose instead.
         # Eliminates per-frame jitter from solvePnP returning slightly different
         # answers on near-identical inputs.
@@ -173,9 +184,9 @@ class MainClass:
             # Y plane is already grayscale, which is what marker detection uses.
             {"format": "YUV420", "size": self.frame_size},
             controls={
-                "FrameRate": 100,      # high rate for low-latency tracking; real-world rate may be lower
-                "ExposureTime": 5000,  # 5 ms — short enough to freeze hand motion (no blur on marker corners)
-                "AeEnable": False,     # lock auto-exposure off so the camera can't override ExposureTime
+                "FrameRate": self._framerate,  # target rate; real-world rate may be lower
+                "ExposureTime": 5000,          # 5 ms — short enough to freeze hand motion (no blur on marker corners)
+                "AeEnable": False,             # lock auto-exposure off so the camera can't override ExposureTime
             },
         )
         self.picam2.configure(config)
@@ -243,7 +254,7 @@ class MainClass:
         for corner in corners:
             success, rvec, tvec = cv2.solvePnP(
                 marker_points, corner, self.camera_matrix, zero_dist,
-                flags=cv2.SOLVEPNP_IPPE_SQUARE,
+                flags=self._pnp_flag,
             )
             if success:
                 rvecs.append(rvec.flatten())

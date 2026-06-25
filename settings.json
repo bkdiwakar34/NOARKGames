@@ -4,6 +4,8 @@
 	"calibration_file": "camera_calib.toml",
 	"corner_refine": "contour",
 	"corner_stability_threshold": 2.0,
+	"pnp_method": "square",
+	"framerate": 100,
 	"filter_type": "one_euro",
 	"kalman_process_noise": 0.01,
 	"kalman_measurement_noise": 0.05,
