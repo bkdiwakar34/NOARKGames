@@ -41,11 +41,12 @@ class Config:
     ORIGIN_STABLE_PX   = 2.0        # max mean corner motion (px) between frames to count as stable
     # Offsets from each marker's center to the handle grip point, expressed
     # in the marker's own frame (+X = printed-right, +Y = printed-up, +Z = out
-    # of face). Derived from the CAD model — see notes for derivation.
+    # of face). Derived from the CAD model — markers are glued with +Y
+    # (printed-up) aligned to device-up.
     MARKER_OFFSETS = {
-        12: np.array([ 0.046, -0.001, -0.059]),   # front face
-        14: np.array([ 0.045,  0.125, -0.054]),   # left face
-        20: np.array([ 0.045, -0.125, -0.054]),   # right face
+        12: np.array([ 0.001,  0.046, -0.059]),   # front face
+        14: np.array([-0.125,  0.045, -0.054]),   # left face
+        20: np.array([ 0.125,  0.045, -0.054]),   # right face
     }
 
 
