@@ -39,12 +39,13 @@ class Config:
     ALPHA = 0.4
     ORIGIN_LOCK_FRAMES = 10         # consecutive stable frames required before locking the world origin
     ORIGIN_STABLE_PX   = 2.0        # max mean corner motion (px) between frames to count as stable
+    # Offsets from each marker's center to the handle grip point, expressed
+    # in the marker's own frame (+X = printed-right, +Y = printed-up, +Z = out
+    # of face). Derived from the CAD model — see notes for derivation.
     MARKER_OFFSETS = {
-        4:  np.array([0.00,  0.1,    -0.069]),
-        8:  np.array([0.00,  0.01,   -0.069]),
-        12: np.array([0.00,  0.0,    -0.1075]),
-        14: np.array([-0.09, 0.0,    -0.069]),
-        20: np.array([0.1,   0.0,    -0.069]),
+        12: np.array([ 0.046, -0.001, -0.059]),   # front face
+        14: np.array([ 0.045,  0.125, -0.054]),   # left face
+        20: np.array([ 0.045, -0.125, -0.054]),   # right face
     }
 
 
