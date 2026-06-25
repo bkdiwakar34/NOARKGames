@@ -14,10 +14,6 @@ var SCREEN_MAX: Vector2
 var _player_pos: Vector2
 var _current_apple: Node2D = null
 var _catch_timer: float = 0.0
-var _missed_apple_pos: Vector2 = Vector2.ZERO
-var _tracking_miss: bool = false
-var _miss_track_timer: float = 0.0
-const MISS_TRACK_WINDOW: float = 6.0
 var _trial_caught: int = 0
 var _between_trial: CanvasLayer = null
 var _log_file: FileAccess = null
@@ -267,16 +263,8 @@ func _process(delta: float) -> void:
 	_update_player_pos()
 	AdaptiveManager.update_workspace(_player_pos)
 
-	if _tracking_miss:
-		_miss_track_timer += delta
-		if _player_pos.distance_to(_missed_apple_pos) < _catch_radius:
-			AdaptiveManager.record_miss_completed()
-			_tracking_miss = false
-		elif _miss_track_timer >= MISS_TRACK_WINDOW:
-			_tracking_miss = false  # movement aborted — discard trial
-
 	if not _is_between_trial:
-		if _current_apple == null and not _tracking_miss:
+		if _current_apple == null:
 			_spawn_apple()
 		elif _current_apple != null:
 			_check_catch(delta)
@@ -327,7 +315,6 @@ func _spawn_apple() -> void:
 	_current_apple.apple_eaten.connect(_on_apple_eaten)
 	_current_apple.apple_missed.connect(_on_apple_missed)
 	add_child(_current_apple)
-	_tracking_miss = false
 	AdaptiveManager.record_spawn(_player_pos)
 	_catch_timer = 0.0
 
@@ -357,10 +344,6 @@ func _on_apple_eaten() -> void:
 
 func _on_apple_missed() -> void:
 	var lt: float = _current_apple.lifetime if is_instance_valid(_current_apple) else 0.0
-	if is_instance_valid(_current_apple):
-		_missed_apple_pos  = _current_apple.position
-		_tracking_miss     = true
-		_miss_track_timer  = 0.0
 	AdaptiveManager.record_miss(lt)
 	_current_apple = null
 	_catch_timer   = 0.0

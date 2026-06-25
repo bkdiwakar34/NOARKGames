@@ -191,12 +191,6 @@ func record_catch(_lt: float) -> void:
 	_on_valid_mt(max(mt, 0.05), true)
 
 
-func record_miss_completed() -> void:
-	# Called from random_reach when player crosses target boundary after a miss
-	var mt: float = (Time.get_ticks_msec() - _spawn_time) / 1000.0
-	_on_valid_mt(max(mt, 0.05), false)
-
-
 func record_miss(_lt: float) -> void:
 	outcome_log.append({"hit": 0, "mt": -1.0, "pair_idx": _current_pair_idx})
 	if _phase == Phase.FITTS_CAL:
