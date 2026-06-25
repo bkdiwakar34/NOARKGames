@@ -13,6 +13,7 @@ import numpy as np
 from cv2 import aruco
 
 from filters import (
+    CornerStabilityFilter,
     ExponentialMovingAverageFilter3D,
     KalmanFilter3D,
     NoOpFilter3D,
@@ -88,6 +89,14 @@ class MainClass:
 
         self._corner_refine_name = str(settings.get("corner_refine", "contour")).lower()
         self.detector = self._init_detector()
+
+        # Skip solvePnP when corners haven't moved — reuse last pose instead.
+        # Eliminates per-frame jitter from solvePnP returning slightly different
+        # answers on near-identical inputs.
+        stability_threshold = float(settings.get("corner_stability_threshold", 2.0))
+        self.corner_stability = CornerStabilityFilter(threshold=stability_threshold)
+        self._cached_rvecs = None
+        self._cached_tvecs = None
 
         self.picam2 = None                          # Pi camera object (set in _init_rpi_camera)
         self.video_frame  = None                    # latest captured image, refreshed every frame
@@ -356,7 +365,12 @@ class MainClass:
         t3 = time.perf_counter() if self.debug else 0.0
         if ids is not None:
             self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners, ids)
-            rvecs, tvecs = self.estimate_pose(corners)
+
+            if self.corner_stability.is_stable(corners, ids) and self._cached_rvecs is not None:
+                rvecs, tvecs = self._cached_rvecs, self._cached_tvecs
+            else:
+                rvecs, tvecs = self.estimate_pose(corners)
+                self._cached_rvecs, self._cached_tvecs = rvecs, tvecs
 
             if self.first_frame:
                 self._maybe_lock_origin(corners, ids, rvecs, tvecs)

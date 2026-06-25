@@ -12,6 +12,44 @@ class NoOpFilter3D:
         return np.asarray(sample, dtype=np.float64)
 
 
+class CornerStabilityFilter:
+    """Gate solvePnP calls: skip re-estimation when marker corners haven't moved."""
+
+    def __init__(self, threshold: float = 2.0):
+        self.threshold = threshold
+        self._prev_corners = None
+        self._prev_ids = None
+
+    def is_stable(self, corners, ids) -> bool:
+        """Return True if all corners moved less than threshold pixels since last update."""
+        ids_flat = np.array(ids).flatten()
+        n = len(corners)
+
+        if self._prev_corners is None or n != len(self._prev_corners):
+            self._store(corners, ids_flat)
+            return False
+
+        if not np.array_equal(np.sort(ids_flat), np.sort(self._prev_ids)):
+            self._store(corners, ids_flat)
+            return False
+
+        curr = np.array(corners)  # (N, 1, 4, 2)
+        prev = np.array(self._prev_corners)
+        if curr.shape != prev.shape:
+            self._store(corners, ids_flat)
+            return False
+
+        if float(np.max(np.linalg.norm(curr - prev, axis=-1))) > self.threshold:
+            self._store(corners, ids_flat)
+            return False
+
+        return True
+
+    def _store(self, corners, ids_flat) -> None:
+        self._prev_corners = [c.copy() for c in corners]
+        self._prev_ids = ids_flat.copy()
+
+
 class ExponentialMovingAverageFilter3D:
     def __init__(self, alpha):
         self.alpha = alpha
