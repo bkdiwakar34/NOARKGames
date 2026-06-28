@@ -2,7 +2,9 @@
 
 **NOARKGames** — Godot 4.5 rehabilitation gaming platform for stroke patients.
 All active development is in `v2/`. The old codebase (`Main_screen/`, `Games/`) is untouched.
-Read `build.md` for current state. Read `design.md` for the adaptive difficulty design.
+Read [docs/design.md](docs/design.md) for the architecture + current Fitts'-Law adaptive design.
+Read [docs/setup.md](docs/setup.md) for hardware and how to run.
+Read [docs/todo.md](docs/todo.md) for open work.
 
 ---
 
@@ -53,6 +55,3 @@ python pyscripts/main.py                          # streams to 127.0.0.1:12345
 
 ---
 
-## Legacy codebase reference
-
-Old architecture (14 autoloads, old games) documented in `CLAUDE_legacy.md`.

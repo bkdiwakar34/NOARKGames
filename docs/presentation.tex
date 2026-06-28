@@ -1,0 +1,958 @@
+% Beamer presentation — Adaptive difficulty: Lifetime & Workspace modes
+% Paste into Overleaf. Compile with pdfLaTeX.
+
+\documentclass[10pt,aspectratio=169]{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+
+\newcommand{\target}{r}
+\newcommand{\obs}{s_n}
+\newcommand{\err}{e_n}
+\newcommand{\Kp}{K_p}
+\newcommand{\Ki}{K_i}
+\newcommand{\Iaccum}{I_n}
+\newcommand{\dband}{\delta}
+
+\title[Adaptive Difficulty]{Adaptive Difficulty }
+\subtitle{Lifetime and Workspace Modes}
+\author{}
+\institute{}
+\date{}
+
+\begin{document}
+
+\frame{\titlepage}
+
+% ============================================================
+\begin{frame}{System overview}
+\begin{itemize}
+    \item Goal: keep each patient's success rate at a daily target $\target_d$, drawn each day from a Gaussian centred on the patient's assigned group mean.
+    \item Three patient groups in the study: group means $\mu \in \{0.7,\ 0.8,\ 0.9\}$, with standard deviation $\sigma = 0.05$ across days.
+    \item 14 daily targets per patient are sampled in advance: $\target_d \sim \mathcal{N}(\mu, \sigma^2)$ for $d = 1, \ldots, 14$.
+    \item The controller treats each day independently: receives the day's $\target_d$, drives the observed success rate toward it.
+    \item Two interchangeable difficulty modes:
+    \begin{itemize}
+        \item \textbf{Lifetime mode} --- difficulty $=$ apple lifetime (seconds).
+        \item \textbf{Workspace mode} --- difficulty $=$ spawn distance from workspace centre.
+    \end{itemize}
+    \item Both use the same calibration and controller method; only the units differ.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Assigned target rate --- per-day Gaussian sampling}
+\textbf{Per-patient setup (Day 0):}
+\begin{enumerate}
+    \item Patient is randomised to one of three groups: $\mu \in \{0.70,\ 0.80,\ 0.90\}$.
+    \item Standard deviation fixed at $\sigma = 0.05$ for all groups (matches the typical SD of session-to-session variation in pilot data).
+    \item Pre-sample $14$ daily targets:
+    \[
+    \target_d \sim \mathcal{N}(\mu, \sigma^2), \qquad d = 1, \ldots, 14
+    \]
+
+\end{enumerate}
+
+\end{frame}
+
+% ============================================================
+\begin{frame}{Trial structure (both modes)}
+\begin{itemize}
+    \item \textbf{Trial 1 --- calibration.} Apple difficulty is randomised across the full range. Catch/miss outcomes are logged.
+    \item At end of Trial 1, estimate the patient's $50\%$ catch \textbf{threshold} $t$.
+    \item \textbf{Trial 2 onward --- control.} Each apple's difficulty is sampled from a window of width $W$ centred at $t + \Delta_n$.
+    \item After each trial, the PI controller updates $\Delta$ based on observed success rate.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\section{Lifetime mode}
+
+\begin{frame}{Lifetime mode --- variables}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Symbol & Meaning & Units \\
+\midrule
+$\ell$ & apple lifetime & s \\
+$t$ & threshold ($50\%$ catch lifetime) & s \\
+$\Delta_n$ & controller offset after trial $n$ & s \\
+$W$ & window width (fixed) & s \\
+$\target$ & assigned target success rate (this day) & --- \\
+$\obs$ & observed catch rate in trial $n$ & --- \\
+$\err$ & error signal $= \obs - \target$ & --- \\
+$\Iaccum$ & integral accumulator (sum of errors) & --- \\
+$u_n$ & correction applied to offset after trial $n$ & s \\
+$\Kp$ & proportional gain & --- \\
+$\Ki$ & integral gain & --- \\
+$\dband$ & dead-band half-width & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{0.5em}
+Fixed constants: $W = 2.4$ s, $\Kp = 0.35$, $\Ki = 0.05$, $\dband = 0.05$, $\ell_{\min} = 0.1$ s, $\ell_{\max} = 8$ s.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Lifetime mode --- Trial 1 calibration}
+\textbf{Per-apple lifetime (random across full range):}
+\[
+\ell \sim \mathcal{U}(\ell_{\min},\, \ell_{\max})
+\]
+
+\textbf{At end of Trial 1, from the catch/miss log:}
+\begin{align*}
+\ell_{\min}^{\text{caught}} &= \min \{\ell : \text{apple was caught}\} \\
+\ell_{\max}^{\text{missed}} &= \max \{\ell : \text{apple was missed}\}
+\end{align*}
+
+\textbf{Threshold (midpoint between extremes --- estimator of the $50\%$ catch point):}
+\[
+\boxed{t = \tfrac{1}{2}\bigl(\ell_{\min}^{\text{caught}} + \ell_{\max}^{\text{missed}}\bigr)}
+\]
+
+\textbf{Initial controller offset (set so the sampling window is biased toward the target rate):}
+\[
+\Delta_0 = (\target - 0.5)\, W
+\]
+\end{frame}
+
+% ============================================================
+\begin{frame}{Lifetime mode --- sampling in Trial 2 onward}
+\textbf{Window centre:}
+\[
+c_n = t + \Delta_n
+\]
+
+\textbf{Per-apple lifetime (uniform within the window):}
+\[
+\ell \sim \mathcal{U}\!\left( c_n - \tfrac{W}{2},\ c_n + \tfrac{W}{2} \right)
+\]
+clamped to $[\ell_{\min}, \ell_{\max}]$.
+
+\vspace{1em}
+\textbf{Geometric interpretation of the initial offset:}
+\begin{itemize}
+    \item Window spans from $t - (1-\target)W$ to $t + \target W$.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Lifetime mode --- PI controller update}
+\textbf{After trial $n$:}
+\begin{align*}
+\obs &= \frac{\text{caught}_n}{\text{spawned}_n}, \qquad \err = \obs - \target \\[3pt]
+\Iaccum &= I_{n-1} + \err \qquad \text{(integral accumulator updated every trial)}
+\end{align*}
+
+\textbf{Correction (integral runs always, proportional only outside dead band):}
+\[
+u_n =
+\begin{cases}
+\Kp \cdot \err + \Ki \cdot \Iaccum & \text{if } |\err| > \dband \\[4pt]
+\Ki \cdot \Iaccum & \text{otherwise}
+\end{cases}
+\]
+
+\textbf{Offset update:}
+\[
+\Delta_{n+1} = \mathrm{clip}\bigl(\Delta_n - u_n,\ \Delta_{\min},\ \Delta_{\max}\bigr)
+\]
+
+\textbf{Sign convention:}
+\begin{itemize}
+    \item $\err > 0$ $\Rightarrow$ observed rate exceeds target $\Rightarrow$ $u_n > 0$ $\Rightarrow$ $\Delta$ decreases $\Rightarrow$ window shifts toward harder difficulties.
+    \item $\err < 0$ $\Rightarrow$ observed rate below target $\Rightarrow$ $u_n < 0$ $\Rightarrow$ $\Delta$ increases $\Rightarrow$ window shifts toward easier difficulties.
+\end{itemize}
+
+\textbf{Bounds:} $\Delta_{\min} = \ell_{\min} - t + \tfrac{W}{2}, \quad \Delta_{\max} = \ell_{\max} - t - \tfrac{W}{2}$
+\end{frame}
+
+% ============================================================
+\begin{frame}{Why PI and not just P?}
+\textbf{Limitation of pure P:}
+\begin{itemize}
+    \item Inside the dead band ($|\err| \le \dband$), the proportional term contributes zero.
+    \item If the observed rate settles at a small persistent offset from target (e.g.\ $77\%$ vs target $80\%$), the error lies inside the dead band, no correction is applied, and the offset is never reduced.
+\end{itemize}
+
+\textbf{Role of the integral term:}
+\begin{itemize}
+    \item $\Iaccum$ accumulates all past errors.
+    \item $\Ki \cdot \Iaccum$ is applied at every trial, including those inside the dead band.
+    \item Provides slow continuous correction when the error is small, and an additive correction when the error is large.
+    \item Eliminates the steady-state offset that pure proportional control leaves behind.
+\end{itemize}
+
+\textbf{Limitations:}
+\begin{itemize}
+    \item Introduces slower-timescale dynamics in the closed-loop response.
+    \item Susceptible to integral windup if $\Delta$ saturates at its bounds; no anti-windup mechanism is implemented in this version.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\section{Workspace mode}
+
+\begin{frame}{Workspace mode --- the rectangle}
+During Trial 1, every cursor position $(x, y)$ is observed.
+
+\vspace{0.5em}
+\textbf{Bounding rectangle:}
+\begin{align*}
+\mathbf{ws}_{\min} &= \bigl(\min_i x_i,\ \min_i y_i\bigr) \\
+\mathbf{ws}_{\max} &= \bigl(\max_i x_i,\ \max_i y_i\bigr)
+\end{align*}
+
+\textbf{Derived geometry:}
+\begin{align*}
+\mathbf{ws}_c &= \tfrac{1}{2}(\mathbf{ws}_{\min} + \mathbf{ws}_{\max}) \quad \text{(centre)} \\
+d_x &= \tfrac{1}{2}(\mathbf{ws}_{\max,x} - \mathbf{ws}_{\min,x}) \quad \text{(half-width)} \\
+d_y &= \tfrac{1}{2}(\mathbf{ws}_{\max,y} - \mathbf{ws}_{\min,y}) \quad \text{(half-height)}
+\end{align*}
+
+The rectangle defines the patient's reachable region for this session.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Workspace mode --- rect-scale}
+For an apple at position $\mathbf{p}$, define the displacement vector and angle:
+\[
+\mathbf{v} = \mathbf{p} - \mathbf{ws}_c, \quad \theta = \mathrm{atan2}(v_y,\, v_x)
+\]
+
+\textbf{Distance from centre to rectangle edge in direction $\theta$:}
+\[
+r_{\text{edge}}(\theta) = \min\!\left( \frac{d_x}{|\cos\theta|},\ \frac{d_y}{|\sin\theta|} \right)
+\]
+
+\textbf{Rect-scale (dimensionless difficulty, $\rho \in [0, 1]$):}
+\[
+\boxed{\rho(\mathbf{p}) = \frac{\|\mathbf{v}\|}{r_{\text{edge}}(\theta)}}
+\]
+
+\begin{itemize}
+    \item $\rho = 0$ $\Rightarrow$ apple at centre (easy).
+    \item $\rho = 1$ $\Rightarrow$ apple at edge (hard).
+    \item $\rho > 1$ $\Rightarrow$ apple outside reachable rectangle.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Workspace mode --- variables}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Symbol & Meaning & Units \\
+\midrule
+$\rho$ & rect-scale of an apple & dimensionless, $[0,1]$ \\
+$t_w$ & workspace threshold & dimensionless \\
+$\Delta_n^w$ & controller offset after trial $n$ & dimensionless \\
+$W_w$ & window width fraction & dimensionless \\
+$\target,\obs,\err,\Iaccum,\Kp,\Ki,\dband$ & (same as lifetime mode) & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.5em}
+Fixed constants: $W_w = 0.30$, $\Kp = 0.35$, $\Ki = 0.05$, $\dband = 0.05$.
+
+In workspace mode the apple lifetime is held constant at $\ell_{\max} = 8$ s so that reach time does not bias the difficulty estimate.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Workspace mode --- Trial 1 calibration}
+\textbf{Per-apple position (uniform across viewport):}
+\[
+(x, y) \sim \mathcal{U}\bigl([0.10\,w,\ 0.85\,w]\bigr) \times \mathcal{U}\bigl([0.10\,h,\ 0.85\,h]\bigr)
+\]
+
+\textbf{At end of Trial 1, from the catch/miss log:}
+\begin{align*}
+\rho_{\max}^{\text{caught}} &= \max \{\rho : \text{apple was caught}\} \\
+\rho_{\min}^{\text{missed}} &= \min \{\rho : \text{apple was missed}\}
+\end{align*}
+
+\textbf{Threshold (midpoint between extremes):}
+\[
+\boxed{t_w = \tfrac{1}{2}\bigl(\rho_{\max}^{\text{caught}} + \rho_{\min}^{\text{missed}}\bigr)}
+\]
+
+\textbf{Initial controller offset:}
+\[
+\Delta_0^w = (\target - 0.5)\, W_w
+\]
+\end{frame}
+
+% ============================================================
+\begin{frame}{Workspace mode --- sampling in Trial 2 onward}
+\textbf{Window centre (note: minus sign --- positive offset means easier $=$ inward):}
+\[
+c_n^w = t_w - \Delta_n^w
+\]
+
+\textbf{Per-apple rect-scale (uniform within window):}
+\[
+\rho \sim \mathcal{U}\!\left( c_n^w - \tfrac{W_w}{2},\ c_n^w + \tfrac{W_w}{2} \right)
+\]
+clamped to $\rho \ge 0$.
+
+\textbf{Per-apple angle (uniform):}
+\[
+\theta \sim \mathcal{U}(0,\ 2\pi)
+\]
+
+\textbf{Spawn position:}
+\[
+\mathbf{p} = \mathbf{ws}_c + (\cos\theta,\ \sin\theta) \cdot \rho \cdot r_{\text{edge}}(\theta)
+\]
+\end{frame}
+
+% ============================================================
+\begin{frame}{Workspace mode --- PI controller update}
+\textbf{After trial $n$:}
+\[
+\obs = \frac{\text{caught}_n}{\text{spawned}_n}, \qquad \err = \obs - \target, \qquad \Iaccum = I_{n-1} + \err
+\]
+
+\textbf{Correction (identical template to lifetime mode):}
+\[
+u_n =
+\begin{cases}
+\Kp \cdot \err + \Ki \cdot \Iaccum & \text{if } |\err| > \dband \\[4pt]
+\Ki \cdot \Iaccum & \text{otherwise}
+\end{cases}
+\]
+
+\textbf{Offset update:}
+\[
+\Delta_{n+1}^w = \mathrm{clip}\bigl(\Delta_n^w - u_n,\ \Delta_{\min}^w,\ \Delta_{\max}^w\bigr)
+\]
+
+\textbf{Bounds:}
+\[
+\Delta_{\min}^w = -t_w + \tfrac{W_w}{2}, \quad \Delta_{\max}^w = (1 - t_w) - \tfrac{W_w}{2}
+\]
+ensuring the window stays inside $[0, 1]$.
+\end{frame}
+
+% ============================================================
+\section{Refinements}
+
+\begin{frame}{Two refinements added to the PI system}
+After the initial PI controller, two improvements were made:
+\begin{enumerate}
+    \item \textbf{Staircase calibration}  --- a more accurate replacement for the midpoint-of-extremes threshold estimator used in Trial 1.
+    \item \textbf{Reachability constraint}  --- a post-spawn safety clamp preventing apples from appearing further than the patient can physically reach in the chosen lifetime.
+\end{enumerate}
+The PI controller itself was unchanged in both cases.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Refinement 1 --- staircase calibration}
+\textbf{Motivation:} the midpoint-of-extremes estimator was crude --- one lucky catch or unlucky miss could bias the threshold significantly. A standard 1-up 1-down adaptive staircase concentrates measurements near the $50\%$ point.
+
+\textbf{Procedure:}
+\begin{enumerate}
+    \item Start at the hardest end of the range: $\ell_0 = \ell_{\min} = 0.1$ s.
+    \item For each apple:
+    \begin{itemize}
+        \item If \textbf{caught} $\Rightarrow$ make harder: $\ell_{n+1} = \ell_n - s$.
+        \item If \textbf{missed} $\Rightarrow$ make easier: $\ell_{n+1} = \ell_n + s$.
+    \end{itemize}
+    \item Track \emph{reversals} (points where the direction changes).
+    \item Use a coarse step $s_c = 1.5$ s for the first 2 reversals, then a fine step $s_f = 0.5$ s.
+    \item Stop after $N_r = 6$ reversals.
+\end{enumerate}
+
+\textbf{Threshold estimate (mean of reversal values):}
+\[
+t = \frac{1}{N_r} \sum_{i=1}^{N_r} \ell^{(\text{rev}_i)}
+\]
+\end{frame}
+
+% ============================================================
+% \begin{frame}{Refinement 1 --- why staircase is better}
+% \begin{itemize}
+%     \item \textbf{Concentrates samples near the threshold.} After a few reversals, the staircase bounces around the $50\%$ point. Most of the $\sim$15 trial samples land near the threshold, not spread uniformly over the entire $[\ell_{\min}, \ell_{\max}]$ range.
+%     \item \textbf{Self-correcting.} An unlucky miss makes the next apple easier $\Rightarrow$ likely catch $\Rightarrow$ direction reverses $\Rightarrow$ reversal recorded. Random noise is absorbed by the procedure.
+%     \item \textbf{Coarse-then-fine schedule.} Large initial step quickly brackets the threshold; smaller step refines the estimate without wasting trials.
+%     \item \textbf{Standard psychophysical method.} The 1-up 1-down staircase is known to converge on the $50\%$ point of the psychometric function (Levitt, 1971), giving the procedure a published statistical foundation.
+% \end{itemize}
+
+% \textbf{Calibration trial timing change:} Trial 1 timer no longer enforces a strict 60-second cutoff --- calibration ends only when the staircase completes its 6 reversals. Fallback to the old midpoint estimator if the timer fires before staircase completion.
+% \end{frame}
+
+% ============================================================
+\begin{frame}{Refinement 2 --- reachability constraint}
+\textbf{Variables:} $\ell$ apple lifetime (s), $\hat{v}$ estimated speed (px/s), $\mathbf{p}_s$ spawn, $\mathbf{p}_p$ player.
+
+\vspace{0.4em}
+\textbf{Speed estimation (running max over catches $i$):}
+\[
+\hat{v} \leftarrow \max\!\left( \hat{v},\ d_i / \ell_i \right), \qquad d_i = \|\mathbf{p}_s^{(i)} - \mathbf{p}_p^{(i)}\|
+\]
+
+\textbf{Maximum reachable distance:}
+\[
+d_{\max} = \ell \cdot \hat{v}
+\]
+
+\textbf{Constraint applied after random spawn:}
+Let $\mathbf{u} = \mathbf{p}_s - \mathbf{p}_p$ and $d = \|\mathbf{u}\|$.
+\[
+\mathbf{p}_s \leftarrow
+\begin{cases}
+\mathbf{p}_p + (\mathbf{u} / d) \cdot d_{\max} & \text{if } d > d_{\max} \\[4pt]
+\mathbf{p}_s & \text{otherwise}
+\end{cases}
+\]
+
+If the spawn is further than the patient can physically reach in time $\ell$, it is pulled back along the same direction so that distance equals $d_{\max}$.
+\end{frame}
+
+% ============================================================
+% \begin{frame}{Refinement 2 --- reachability constraint (notes)}
+% \textbf{Why ``maximum'' speed estimate (not mean):}
+% \begin{itemize}
+%     \item Any successful catch demonstrates that the patient \emph{can} cover that distance in that time.
+%     \item Maximum across catches is therefore a conservative lower bound on their true peak capability.
+%     \item Initialised at $\hat{v} = 0$ (no catches yet); grows monotonically over the session.
+% \end{itemize}
+
+% \textbf{Effect on the PI controller:}
+% \begin{itemize}
+%     \item The controller itself was unchanged --- still PI on offset.
+%     \item The reachability constraint was added \emph{after} the spawn position was chosen, as a post-hoc safety clamp.
+%     \item Removed the failure mode where the controller's window-sampled lifetime was too short to physically reach the chosen position.
+% \end{itemize}
+% \end{frame}
+
+% ============================================================
+\section{Comparison}
+
+\begin{frame}{Lifetime vs Workspace --- side by side}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+& \textbf{Lifetime} & \textbf{Workspace} \\
+\midrule
+Difficulty parameter & lifetime $\ell$ (s) & rect-scale $\rho$ \\
+Easier direction & longer $\ell$ & smaller $\rho$ (inward) \\
+Harder direction & shorter $\ell$ & larger $\rho$ (outward) \\
+Threshold & $t$ (s) & $t_w$ \\
+Window width & $W = 2.4$ s & $W_w = 0.30$ \\
+Window centre & $t + \Delta$ & $t_w - \Delta$ \\
+Update rule & $\Delta \leftarrow \Delta - (K_p e + K_i I)$ & $\Delta^w \leftarrow \Delta^w - (K_p e + K_i I)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.8em}
+Identical controller math, identical calibration logic, identical update rule.\\
+Only the \textbf{units} (seconds vs dimensionless) and the \textbf{quantity being calibrated} (lifetime vs rect-scale) differ.
+\end{frame}
+
+% ============================================================
+\section{Fitts' Law system}
+
+\begin{frame}{Motivation --- moving beyond PI on lifetime}
+\textbf{Limitations of the PI + staircase system:}
+\begin{itemize}
+    \item Lifetime alone is not a good difficulty axis. The same lifetime is easy for a close apple and impossible for a far one. The controller did not see this.
+    \item One difficulty threshold per patient (from staircase) collapsed all task geometries into a single number, losing information.
+    \item No principled model relating task geometry to reach time.
+\end{itemize}
+
+\textbf{Fitts' Law provides a principled model:}
+\begin{itemize}
+    \item Movement time is a function of target distance $A$ and target width $W$.
+    \item Two patient-specific parameters $(a, b)$ capture the patient's motor capability.
+    \item Difficulty can be set per apple by choosing $A$ and $W$, with lifetime derived from the predicted movement time.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Fitts' Law --- equation and Index of Difficulty}
+\textbf{The law (Shannon formulation, MacKenzie 1992):}
+\[
+\boxed{\text{MT} = a + b \cdot \text{ID}}
+\]
+
+\textbf{Index of Difficulty:}
+\[
+\text{ID} = \log_2\!\left( \frac{A}{W} + 1 \right)
+\]
+\begin{itemize}
+    \item $A$ --- amplitude (distance from current position to target centre), in pixels.
+    \item $W$ --- target width (diameter of the catch zone), in pixels.
+    \item ID is dimensionless --- larger ID means harder reach (further and/or narrower target).
+    \item Typical range in this game: $\text{ID} \in [1, 4]$ bits.
+\end{itemize}
+
+\textbf{Parameters:}
+\begin{itemize}
+    \item $a$ (s) --- intercept; reaction/initiation time independent of difficulty.
+    \item $b$ (s/bit) --- slope; additional time per bit of difficulty. Captures motor capability.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Calibration --- Phase 0a (workspace scan)}
+\textbf{Goal:} discover which regions of the screen the patient can actually reach with the device, before the Fitts' calibration begins. Replaces the implicit bounding-box workspace of the PI era with an explicit set of reachable cells.
+
+\textbf{Procedure (grid-spiral):}
+\begin{enumerate}
+    \item Tile the screen with a grid of cells, each $120 \times 120$ px (cell diameter matches the largest Fitts width $W$).
+    \item Group cells by ring index $k = \mathrm{round}(\|\mathbf{p}_{\text{cell}} - \mathbf{p}_{\text{centre}}\| / 120)$ (distance from screen centre, quantised by cell size).
+    \item Present cells one at a time, inner rings first; within each ring the order is shuffled.
+    \item Each cell is presented as a target with fixed lifetime $\ell = 6$ s.
+    \item Record hit / miss outcome for each cell.
+    \item \textbf{Early termination:} if no cell in a ring is hit, the scan stops --- assume outer rings are unreachable.
+\end{enumerate}
+
+\textbf{Outputs (used by Phase 0c):}
+\begin{itemize}
+    \item \texttt{reachable\_cells} --- the subset of cells the patient hit.
+    \item Workspace centre $=$ centroid of reachable cells.
+    \item $a_{\text{comfortable}}$ $=$ median distance from workspace centre to reachable cells.
+    \item Maximum reach radius $R_{ws}$ $=$ furthest hit cell from screen centre.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Calibration --- Phase 0c}
+\textbf{Goal:} measure $(a, b)$ for this patient at the start of every session.
+
+\textbf{Design:}
+\begin{itemize}
+    \item $5$ distances $A_1, \ldots, A_5$ spanning $0.20 R_{ws}$ to $0.85 R_{ws}$ (where $R_{ws}$ is the patient's workspace radius from Phase 0a).
+    \item $3$ widths $W \in \{120, 60, 25\}$ px (large, medium, small).
+    \item All $5 \times 3 = 15$ pairs presented, each repeated $5$ times.
+    \item Total: $75$ calibration apples.
+\end{itemize}
+
+\textbf{Per apple:}
+\begin{enumerate}
+    \item Pick $(A, W)$ pair.
+    \item Spawn target at distance $A$ from current player position, random angle.
+    \item Apple radius $= W / 2$.
+    \item Record movement time:
+    \[
+    \text{MT} = t_{\text{caught}} - t_{\text{spawn}} - t_{\text{hold}}
+    \]
+    where $t_{\text{hold}} = 1$ s is the catch-confirmation hold.
+\end{enumerate}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Calibration --- batch fit of $(a, b)$}
+At the end of Phase 0c, fit the model $\text{MT}_k = a + b \cdot \text{ID}_k$ across the 15 pairs by ordinary least squares.
+
+\textbf{Per pair $k$:}
+\begin{itemize}
+    \item $\text{ID}_k = \log_2(A_k / W_k + 1)$
+    \item $\overline{\text{MT}}_k = $ mean movement time across the $5$ valid catches for that pair.
+\end{itemize}
+
+\textbf{OLS normal equations:}
+\[
+b = \frac{N \sum_k \text{ID}_k \, \overline{\text{MT}}_k - \sum_k \text{ID}_k \sum_k \overline{\text{MT}}_k}{N \sum_k \text{ID}_k^2 - (\sum_k \text{ID}_k)^2}
+\]
+\[
+a = \frac{1}{N}\!\left( \sum_k \overline{\text{MT}}_k - b \sum_k \text{ID}_k \right)
+\]
+with $N = 15$ pairs.
+
+\textbf{Per-pair residual variance (initialised from calibration data):}
+\[
+\sigma_k^2 = \frac{1}{n_k - 1}\!\left( \sum_i \text{MT}_i^2 - \frac{(\sum_i \text{MT}_i)^2}{n_k} \right)
+\]
+\end{frame}
+
+% ============================================================
+\begin{frame}{Setting apple lifetime in the session}
+For each apple, sample an $(A, W)$ pair uniformly at random from the $15$ calibration pairs, then choose lifetime so the patient catches it with probability $r$ (the assigned target rate).
+
+\textbf{Step 1 --- predicted movement time:}
+\[
+\widehat{\text{MT}} = a + b \cdot \text{ID}, \qquad \text{ID} = \log_2(A/W + 1)
+\]
+
+\textbf{Step 2 --- residual standard deviation for this pair:}
+\[
+\sigma = \sqrt{\sigma_k^2}
+\]
+
+\textbf{Step 3 --- lifetime via inverse normal CDF:}
+\[
+\boxed{\ell = \mathrm{clip}\bigl(\widehat{\text{MT}} + z(r) \cdot \sigma,\ \ell_{\min},\ \ell_{\max}\bigr)}
+\]
+
+where $z(r) = \Phi^{-1}(r)$ is the standard-normal quantile for catch rate $r$:
+\begin{itemize}
+    \item $r = 0.5 \Rightarrow z = 0.00$ (lifetime $= \widehat{\text{MT}}$, $\sim$50\% catch).
+    \item $r = 0.7 \Rightarrow z = 0.52$.
+    \item $r = 0.8 \Rightarrow z = 0.84$.
+    \item $r = 0.9 \Rightarrow z = 1.28$.
+\end{itemize}
+
+This assumes movement times for a given $(A, W)$ are approximately normally distributed.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Online adaptation --- RLS for $(a, b)$}
+The patient's $(a, b)$ may drift during the session (warm-up, fatigue). Update them online after every successful catch using \textbf{recursive least squares}.
+
+\textbf{State:}
+\[
+\boldsymbol{\theta} = \begin{bmatrix} a \\ b \end{bmatrix}, \qquad
+\mathbf{P} \in \mathbb{R}^{2 \times 2} \text{ (covariance, initialised as } 1000 \cdot \mathbf{I})
+\]
+
+\textbf{Per observation $(\text{MT}, \text{ID})$:}
+\[
+\mathbf{x} = \begin{bmatrix} 1 \\ \text{ID} \end{bmatrix}, \qquad
+e = \text{MT} - \mathbf{x}^\top \boldsymbol{\theta}
+\]
+\[
+\mathbf{g} = \frac{\mathbf{P}\mathbf{x}}{1 + \mathbf{x}^\top \mathbf{P} \mathbf{x}}, \qquad
+\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} + \mathbf{g} \cdot e, \qquad
+\mathbf{P} \leftarrow \mathbf{P} - \mathbf{g} \mathbf{x}^\top \mathbf{P}
+\]
+
+\begin{itemize}
+    \item Computationally cheap (no matrix inversion past initialisation; only a $2 \times 2$ update).
+    \item Equivalent to OLS on all data seen so far, but updated incrementally.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Online adaptation --- Welford for per-pair $\sigma$}
+The per-pair residual SD $\sigma_k$ also updates online, using \textbf{Welford's algorithm} for numerically stable streaming variance.
+
+\textbf{State per pair $k$:} $n_k$ (count), $\mu_k$ (mean), $M_k$ (sum of squared deviations from mean).
+
+\textbf{Per residual $\varepsilon = \text{MT} - (a + b \cdot \text{ID})$:}
+\begin{align*}
+n_k &\leftarrow n_k + 1 \\
+\delta &= \varepsilon - \mu_k \\
+\mu_k &\leftarrow \mu_k + \delta / n_k \\
+M_k &\leftarrow M_k + \delta \cdot (\varepsilon - \mu_k)
+\end{align*}
+
+\textbf{Variance estimate:}
+\[
+\sigma_k^2 = \frac{M_k}{n_k - 1}
+\]
+
+\begin{itemize}
+    \item Numerically stable --- avoids catastrophic cancellation in $\sum x^2 - (\sum x)^2 / n$.
+    \item Streaming --- no need to store individual MT values.
+    \item Per-pair --- captures that variance may differ across $(A, W)$ combinations.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\section{Tracker pipeline}
+
+\begin{frame}{Tracker overview and motivation}
+\textbf{Role of the tracker:} a Python process running on the Raspberry Pi that converts camera frames into 3D position estimates of the patient's device, transmitted to the Godot game via UDP at 30--60 Hz.
+
+\textbf{Pipeline (every frame):}
+\begin{enumerate}
+    \item Capture grayscale frame from Pi camera.
+    \item Undistort using fisheye intrinsics.
+    \item Detect ArUco / AprilTag markers on the device.
+    \item Refine corner positions to sub-pixel accuracy.
+    \item Solve PnP per marker $\Rightarrow$ rotation $\mathbf{R}$ and translation $\mathbf{t}$.
+    \item Apply marker-to-grip offsets, average across visible markers, transform into the world frame fixed at session start.
+    \item Smooth temporally and transmit over UDP.
+\end{enumerate}
+
+\textbf{Why this matters for the study:} systematic tracker error propagates directly into game cursor position. Patient success rate becomes a function of \emph{tracker accuracy} as well as patient ability --- confounding the variable being studied.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Calibration mismatch on the Pi}
+\textbf{Problem identified on inspection of inherited code:}
+
+The original `main.py` loaded a hardcoded calibration file `calib_mono_faith.toml`. This file contained the intrinsics of a \emph{laptop webcam}, not the Pi camera.
+
+\textbf{Consequence:} every \texttt{solvePnP} call on the Pi used the wrong intrinsic matrix $\mathbf{K}$ and the wrong distortion coefficients $\mathbf{D}$. Pose estimates were systematically biased --- though the system appeared to ``work'' because Godot received plausible-looking numbers.
+
+\textbf{Why this is silent:} \texttt{solvePnP} does not validate that the supplied intrinsics match the camera that produced the image. Wrong intrinsics yield wrong but smooth pose estimates; the error is invisible without a ground-truth reference.
+
+\textbf{Required fix:} produce a true calibration for the Pi camera and load it in place of the laptop's.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Camera calibration --- concepts}
+\textbf{What calibration produces:}
+
+A camera is described by two sets of parameters that map 3D world points to 2D image pixels.
+
+\textbf{Intrinsic matrix:}
+\[
+\mathbf{K} = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}
+\]
+\begin{itemize}
+    \item $f_x, f_y$ --- focal length in pixels (sensor-dependent).
+    \item $c_x, c_y$ --- principal point (image centre, not always at the geometric centre of the sensor).
+\end{itemize}
+
+\textbf{Distortion coefficients:}
+\begin{itemize}
+    \item Pinhole model: $\mathbf{D} = [k_1, k_2, p_1, p_2, k_3]$ --- radial + tangential.
+    \item Fisheye (Kannala-Brandt) model: $\mathbf{D} = [k_1, k_2, k_3, k_4]$ --- polynomial in incidence angle, accurate to large field-of-view.
+\end{itemize}
+
+The OV9281 has a $160^\circ$ fisheye lens. The pinhole model cannot fit this --- the fisheye model is required.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Fisheye calibration script}
+\textbf{Implementation:} \texttt{pyscripts/calibrate\_camera.py}.
+
+\textbf{Procedure:}
+\begin{enumerate}
+    \item Display a $9 \times 6$ chessboard pattern (square side $= 24.35$ mm, measured) at varying poses in front of the camera.
+    \item For each frame, detect chessboard corners via \texttt{cv2.findChessboardCorners}.
+    \item Auto-capture a frame when the corner positions have been stable for several frames (rejects motion blur).
+    \item Collect $N \ge 20$ valid captures spanning different orientations and depths.
+    \item Solve for $(\mathbf{K}, \mathbf{D})$ via \texttt{cv2.fisheye.calibrate} (Kannala-Brandt model).
+    \item Save to \texttt{camera\_calib.toml}.
+\end{enumerate}
+
+\textbf{Multi-pose verification (post-calibration):} for $N$ held-still poses of the calibration board, report
+\begin{itemize}
+    \item \textbf{Accuracy} --- measured square edge length vs the true $24.35$ mm (tilt-invariant).
+    \item \textbf{Precision} --- standard deviation of position across $N$ frames at the same pose.
+    \item \textbf{Fit} --- mean reprojection error (px) of detected corners back to predicted positions.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Pipeline corrections in \texttt{main.py}}
+After producing a valid Pi-camera calibration, three downstream bugs in the existing pipeline were corrected:
+
+\begin{enumerate}
+    \item \textbf{Calibration file selection moved to \texttt{settings.json}.} A single \texttt{calibration\_file} key replaces the hardcoded filename; the same code now loads the correct file on any machine.
+    \item \textbf{Removed \texttt{cv2.flip(frame, 1)}.} A horizontal flip was being applied to every frame before detection. The flip mirrored the image across $x$, which made the detected marker centroids appear at $(W - u, v)$ instead of $(u, v)$. Since the calibration's principal point $c_x$ was fitted on un-flipped frames, the flip introduced a systematic $x$-axis offset in every pose estimate.
+    \item \textbf{Removed \texttt{libcamera.Transform(vflip=1)}.} The picamera2 configuration was vertically flipping the sensor input. The OV9281 is mounted right-side up; the flip was a left-over from a different mounting orientation.
+\end{enumerate}
+
+\textbf{Resolution alignment:} \texttt{Config.FRAME\_SIZE} was \texttt{(1200, 800)}, but the calibration was performed at the OV9281 native \texttt{(1280, 800)}. Aligned to \texttt{(1280, 800)} so that downstream intrinsics match the captured frame dimensions.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Sensor-to-screen mapping --- 2D affine fit}
+\textbf{Problem:} the tracker reports the device's 3D position in metres relative to a marker-anchored frame. The Godot game needs a 2D screen position in pixels. The mapping must absorb the camera-to-screen tilt and any axis misalignment between the workspace plane and the screen plane.
+
+\textbf{Model (6-parameter affine transform):}
+\begin{align*}
+s_x &= a_{11} \, r_x + a_{12} \, r_z + a_{13} \\
+s_y &= a_{21} \, r_x + a_{22} \, r_z + a_{23}
+\end{align*}
+where $(r_x, r_z)$ are the tracker's planar coordinates (metres) and $(s_x, s_y)$ are the screen position (pixels). The six coefficients capture scale, rotation, shear and translation.
+
+\textbf{Calibration:} the patient touches four screen corners (top-left, top-right, bottom-left, bottom-right) with the device. Recorded as four $(r_x, r_z) \to (s_x, s_y)$ pairs. This yields $8$ equations for $6$ unknowns --- an over-determined system.
+
+\textbf{Solved via ordinary least squares} (normal equations on a $3 \times 3$ system):
+\[
+\mathbf{N}^\top \mathbf{N} \, \boldsymbol{\theta} = \mathbf{N}^\top \mathbf{b}
+\]
+solved separately for each axis. The least-squares fit averages noise across the four corner samples rather than committing to a unique three-point solution.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Marker offsets from the CAD model}
+\textbf{Problem:} when several markers are visible simultaneously, each one independently estimates the grip-point position via its own pose plus an offset vector. If the offsets are wrong, the per-marker estimates disagree and the centroid jumps when markers go in or out of view.
+
+\textbf{Offset vector definition:} for each marker, an offset $\mathbf{o}$ expressed in the marker's \emph{own coordinate frame} (with $+\mathbf{X}$ = printed-right, $+\mathbf{Y}$ = printed-up, $+\mathbf{Z}$ = outward normal of marker face). The grip position in the camera frame is then
+\[
+\mathbf{p}_{\text{grip}} = \mathbf{R}_{\text{marker}} \, \mathbf{o} + \mathbf{t}_{\text{marker}}
+\]
+
+\textbf{Derivation procedure (Fusion 360):}
+\begin{enumerate}
+    \item Place a construction point at the grip location on the handle (centre of the cylindrical grip section).
+    \item For each marker face, place a construction point at the centre of the mounting surface (intersection of diagonal construction lines).
+    \item Read world coordinates of each point from Fusion's \texttt{Inspect} tool.
+    \item For each marker, identify the face's outward normal $\hat{\mathbf{n}}$ in world coordinates (e.g.\ $+\mathbf{X}$ for the front face).
+    \item Establish the marker's local frame in world coordinates: $\hat{\mathbf{Y}}_m = \text{device-up}$, $\hat{\mathbf{Z}}_m = \hat{\mathbf{n}}$, $\hat{\mathbf{X}}_m = \hat{\mathbf{Y}}_m \times \hat{\mathbf{Z}}_m$.
+    \item Compute the world-frame displacement $\mathbf{d} = \mathbf{p}_{\text{grip}}^{\text{world}} - \mathbf{p}_{\text{face}}^{\text{world}}$ and project onto the local marker axes via dot products to obtain $\mathbf{o}$.
+\end{enumerate}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Marker offsets --- deployed values}
+\textbf{Marker orientation convention} (verified per marker via the live debug overlay):
+
+Each side marker is glued with its printed $+\mathbf{Y}$ axis aligned to the device's upward direction. The printed $+\mathbf{Z}$ axis points outward from the marker face.
+
+\textbf{Computed offsets (metres, marker-local frame):}
+\[
+\begin{array}{lll}
+\text{Marker 12 (front face)} & \mathbf{o}_{12} & = (\phantom{-}0.001,\ \phantom{-}0.046,\ -0.059) \\
+\text{Marker 14 (left face)}  & \mathbf{o}_{14} & = (-0.125,\ \phantom{-}0.045,\ -0.054) \\
+\text{Marker 20 (right face)} & \mathbf{o}_{20} & = (\phantom{-}0.125,\ \phantom{-}0.045,\ -0.054)
+\end{array}
+\]
+
+\textbf{Sanity checks:}
+\begin{itemize}
+    \item All three offsets have the same $+\mathbf{Y}$ component ($\sim 0.045$ m), consistent with the grip lying $\sim 4.5$ cm above each side-face centre.
+    \item Marker 14 and Marker 20 offsets are mirror images about $\mathbf{X} = 0$, consistent with the device's left-right symmetry.
+    \item All $\mathbf{Z}$ components are negative ($\sim -0.05$ m), reflecting that the grip is behind each outward-facing marker.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\section{Smoothing filters}
+
+\begin{frame}{Motivation --- filtering the 3D position stream}
+\textbf{Source of noise:} \texttt{solvePnP} produces a slightly different pose every frame, even when the marker is physically still. Two contributions:
+\begin{itemize}
+    \item Sub-pixel corner refinement noise ($\sigma \approx 0.1$--$0.3$ px per corner).
+    \item Numerical conditioning of the PnP optimiser.
+\end{itemize}
+
+Translated through the rigid-body transform and the marker offsets, this produces a centroid that wiggles by a few millimetres frame-to-frame. The Godot cursor inherits the wiggle.
+
+\textbf{Filter design constraints:}
+\begin{itemize}
+    \item Heavy smoothing when the patient holds still (suppress jitter).
+    \item Minimal lag when the patient reaches (no perceived input delay).
+    \item Computable in real time on a Raspberry Pi 5.
+\end{itemize}
+
+Three filters were added as opt-in alternatives, selected via \texttt{settings.json[``filter\_type'']}.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Exponential moving average (EMA)}
+The original baseline filter. One smoothing parameter $\alpha \in [0, 1]$.
+
+\textbf{Update rule:}
+\[
+\mathbf{y}_n = \alpha \cdot \mathbf{x}_n + (1 - \alpha) \cdot \mathbf{y}_{n-1}
+\]
+
+\textbf{Behaviour:}
+\begin{itemize}
+    \item $\alpha = 1$: output equals input (no smoothing).
+    \item $\alpha = 0$: output equals previous output (input ignored).
+    \item $\alpha = 0.4$ (deployed value): moderate smoothing, finite memory of past samples that decays geometrically.
+\end{itemize}
+
+\textbf{Limitations:}
+\begin{itemize}
+    \item Single fixed parameter $\Rightarrow$ cannot smooth heavily during a hold while remaining responsive during a reach. Whichever value is chosen, one regime suffers.
+    \item No physical model of motion: treats velocity and acceleration as zero.
+\end{itemize}
+\end{frame}
+
+% ============================================================
+\begin{frame}{Kalman filter --- constant-velocity 3D}
+A 6-dimensional state Kalman filter modelling position and velocity in 3D.
+
+\textbf{State and measurement:}
+\[
+\mathbf{x} = \begin{bmatrix} x \\ y \\ z \\ \dot{x} \\ \dot{y} \\ \dot{z} \end{bmatrix} \in \mathbb{R}^6,
+\qquad
+\mathbf{z} = \begin{bmatrix} x \\ y \\ z \end{bmatrix} \in \mathbb{R}^3
+\]
+
+\textbf{Model matrices:}
+\[
+\mathbf{F}_n = \begin{bmatrix} \mathbf{I}_3 & \Delta t_n \cdot \mathbf{I}_3 \\ \mathbf{0} & \mathbf{I}_3 \end{bmatrix},
+\qquad
+\mathbf{H} = \begin{bmatrix} \mathbf{I}_3 & \mathbf{0} \end{bmatrix}
+\]
+\[
+\mathbf{Q} = q \cdot \mathbf{I}_6 \ (\text{process noise}),
+\qquad
+\mathbf{R} = r \cdot \mathbf{I}_3 \ (\text{measurement noise})
+\]
+
+$\Delta t_n$ is measured per update from \texttt{time.monotonic()} so the filter remains correct under frame-rate jitter. Defaults: $q = 0.01$, $r = 0.05$.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Kalman filter --- predict and update}
+\textbf{Predict step (every frame, using $\Delta t_n$):}
+\begin{align*}
+\hat{\mathbf{x}}_{n|n-1} &= \mathbf{F}_n \, \hat{\mathbf{x}}_{n-1|n-1} \\
+\mathbf{P}_{n|n-1} &= \mathbf{F}_n \, \mathbf{P}_{n-1|n-1} \, \mathbf{F}_n^\top + \mathbf{Q}
+\end{align*}
+
+\textbf{Update step (using new measurement $\mathbf{z}_n$):}
+\begin{align*}
+\mathbf{S}_n &= \mathbf{H} \, \mathbf{P}_{n|n-1} \, \mathbf{H}^\top + \mathbf{R} \\
+\mathbf{K}_n &= \mathbf{P}_{n|n-1} \, \mathbf{H}^\top \, \mathbf{S}_n^{-1} \\
+\hat{\mathbf{x}}_{n|n} &= \hat{\mathbf{x}}_{n|n-1} + \mathbf{K}_n \bigl(\mathbf{z}_n - \mathbf{H} \, \hat{\mathbf{x}}_{n|n-1}\bigr) \\
+\mathbf{P}_{n|n} &= (\mathbf{I} - \mathbf{K}_n \mathbf{H}) \, \mathbf{P}_{n|n-1}
+\end{align*}
+
+\textbf{Output:} the position components of $\hat{\mathbf{x}}_{n|n}$.
+
+\textbf{Trade-off:} the constant-velocity assumption is violated at reach endpoints (when the patient stops at a target). The filter briefly overshoots after each stop because it has predicted continuing motion.
+\end{frame}
+
+% ============================================================
+\begin{frame}{One Euro filter --- speed-adaptive smoothing}
+\textbf{Core idea:} use the EMA update rule, but make the smoothing factor $\alpha$ change with the speed of the signal.
+\begin{itemize}
+    \item When the patient is \emph{still} (low speed): use small $\alpha$ $\Rightarrow$ heavy smoothing $\Rightarrow$ kills jitter.
+    \item When the patient is \emph{reaching} (high speed): use large $\alpha$ $\Rightarrow$ light smoothing $\Rightarrow$ no perceived lag.
+\end{itemize}
+
+\textbf{Step 1 --- estimate the signal's speed.}
+Compute the per-frame change $\dot{\mathbf{x}}_n = (\mathbf{x}_n - \mathbf{x}_{n-1}) / \Delta t$, then smooth it with a small EMA to reject noise:
+\[
+\hat{\dot{\mathbf{x}}}_n = \alpha_d \cdot \dot{\mathbf{x}}_n + (1 - \alpha_d) \cdot \hat{\dot{\mathbf{x}}}_{n-1}
+\]
+
+\textbf{Step 2 --- pick $\alpha$ from the estimated speed.}
+\[
+\alpha_c \;\text{grows with}\; \|\hat{\dot{\mathbf{x}}}_n\|
+\quad\text{(slow $\Rightarrow$ small $\alpha$;\; fast $\Rightarrow$ large $\alpha$)}
+\]
+
+\textbf{Step 3 --- apply EMA to the position with the speed-dependent $\alpha$.}
+\[
+\hat{\mathbf{x}}_n = \alpha_c \cdot \mathbf{x}_n + (1 - \alpha_c) \cdot \hat{\mathbf{x}}_{n-1}
+\]
+
+The only difference from EMA: $\alpha_c$ is no longer fixed --- it adapts every frame based on how fast the cursor is moving. Reference: Casiez, Roussel \& Vogel, CHI 2012.
+\end{frame}
+
+% ============================================================
+\begin{frame}{Corner stability filter --- gating \texttt{solvePnP}}
+\textbf{Observation:} sub-pixel corner refinement noise produces frame-to-frame corner shifts of $\sim 0.1$--$0.3$ px even on a physically static marker. \texttt{solvePnP} amplifies this into millimetre-scale pose jitter via non-linear optimisation.
+
+\textbf{Strategy:} if no corner has moved more than a threshold $\tau$ pixels since the last frame, do not re-run \texttt{solvePnP} --- reuse the previously computed pose.
+
+\textbf{Stability check (every frame):}
+\begin{enumerate}
+    \item Detect markers and collect corners $\{\mathbf{c}_i^{(t)}\}$.
+    \item Verify the same marker IDs and corner counts as the previous frame.
+    \item Compute the maximum corner displacement:
+    \[
+    \Delta_{\max} = \max_i \, \bigl\| \mathbf{c}_i^{(t)} - \mathbf{c}_i^{(t-1)} \bigr\|
+    \]
+    \item If $\Delta_{\max} \le \tau$, mark as stable and reuse cached $(\mathbf{R}, \mathbf{t})$.
+    \item Otherwise, run \texttt{solvePnP} and update the cache.
+\end{enumerate}
+
+\textbf{Effect:} eliminates jitter caused by optimiser variance on near-identical inputs. Deployed $\tau = 2$ px.
+\end{frame}
+
+\end{document}

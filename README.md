@@ -1,56 +1,40 @@
 # NOARKGames
 
-A rehabilitation gaming platform designed for stroke patients, built with Godot 4.4. This project provides a collection of mini-games that help track patient progress and motor skills recovery.
+A rehabilitation gaming platform for stroke patients. The patient holds an instrumented device with ArUco markers; a fisheye camera tracks the markers; the resulting 3D position drives a reaching game on a Raspberry Pi. Game difficulty adapts trial by trial to maintain a per-patient target success rate.
 
-![alt text](image.png)
+Instrument for a PhD study on the causal relationship between success rate and adherence to therapy.
 
-## Features
+## Stack
 
-- **Multiple Mini-Games**: Flappy Bird, Ping Pong, Fruit Catcher, Jumpify, Random Reach, and Assessment modules
-- **Patient Management**: Registration system with detailed patient profiles
-- **Progress Tracking**: Comprehensive data logging and visualization of rehabilitation metrics
-- **Cross-Platform**: Supports Linux ARM64 and Android deployment
-- **Real-time Monitoring**: UDP networking for external device integration
+- **Game** — Godot 4.5, GDScript. All active code in `v2/`.
+- **Tracker** — Python 3.11+, OpenCV, picamera2. In `pyscripts/`.
+- **Hardware** — Raspberry Pi 5 (Linux ARM64), OV9281 monochrome fisheye camera (160° FOV).
 
-## Games Included
+## Quick start
 
-- **Flappy Bird**: Timing and coordination training
-- **Ping Pong**: Hand-eye coordination and reaction time
-- **Fruit Catcher**: Object tracking and movement precision  
-- **Jumpify**: Platform game for motor control
-- **Random Reach**: Target acquisition and reaching exercises
-- **Assessment**: Evaluation and testing modules
+```bash
+# Install Python deps
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
 
-## Getting Started
-
-### Prerequisites
-- Godot 4.4 or later
-- For deployment: Linux ARM64 system (e.g., Raspberry Pi)
-
-### Running the Project
-1. Open `project.godot` in Godot Editor
-2. Press F5 to run the project
-3. Register a patient or use debug mode for testing
-
-### Debug Mode
-Edit `debug.json` to enable debug mode:
-```json
-{"debug": true}
+# Run game (tracker auto-launched by Godot)
+godot --path . --main-scene res://v2/Scenes/main.tscn
 ```
 
-## Patient Data
+Main scene: `res://v2/Scenes/main.tscn`. Tracker reads `settings.json` for camera calibration file, filter type, UDP port, etc.
 
-- Patient information stored in `data.json`
-- Game sessions logged as CSV files with detailed metrics
-- Progress visualization through integrated charts
-- Data includes timing, accuracy, and motor control measurements
+## Documentation
 
-## Export Targets
+| Doc | Purpose |
+|---|---|
+| [docs/design.md](docs/design.md) | What the system is, architecture, current adaptive difficulty design (Fitts' Law), key conventions |
+| [docs/setup.md](docs/setup.md) | Hardware, calibration procedure, how to run on the Pi, common issues |
+| [docs/tracker-math.md](docs/tracker-math.md) | Deep math walkthrough of the tracker pipeline (pinhole, fisheye, PnP, refinement) |
+| [docs/todo.md](docs/todo.md) | Open TODOs and pre-deployment checklist |
+| [CLAUDE.md](CLAUDE.md) | Instructions for Claude Code / AI agents working in this repo |
 
-- **Linux ARM64**: Primary deployment platform
-- **Android**: Mobile platform support
-- SSH remote deployment configured for Raspberry Pi
+The `v2/` codebase replaced the original v1 mini-game collection (Flappy Bird, Ping Pong, etc.) in mid-2026. Only Random Reach ("Apple Catch") is currently active — it's the only game wired to the adaptive controller.
 
 ## License
 
-See LICENSE file for details.
+See [LICENSE](LICENSE).
