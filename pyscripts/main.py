@@ -44,9 +44,11 @@ class Config:
     # of face). Derived from the CAD model — markers are glued with +Y
     # (printed-up) aligned to device-up.
     MARKER_OFFSETS = {
-        12: np.array([ 0.001,  0.046, -0.059]),   # front face
-        14: np.array([-0.125,  0.045, -0.054]),   # left face
-        20: np.array([ 0.125,  0.045, -0.054]),   # right face
+        4:  np.array([-0.002, -0.016, -0.056]),   # front-right (angled 60° from +X, into -Y)
+        8:  np.array([ 0.002, -0.016, -0.056]),   # front-left  (angled 60° from +X, into +Y)
+        12: np.array([ 0.001, -0.016, -0.059]),   # front
+        14: np.array([ 0.000, -0.066, -0.065]),   # front-top   (angled 10° from +X toward +Z)
+        20: np.array([ 0.125, -0.017, -0.054]),   # back / -Y side
     }
 
 
