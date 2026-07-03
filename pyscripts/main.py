@@ -12,6 +12,8 @@ import cv2
 import numpy as np
 from cv2 import aruco
 
+import board as board_model
+from board import BoardGeometry, estimate_board_pose
 from filters import (
     CornerStabilityFilter,
     ExponentialMovingAverageFilter3D,
@@ -34,22 +36,14 @@ def _load_settings() -> dict:
 
 class Config:
     FRAME_SIZE = (1280, 800)        # OV9281 native resolution; matches camera_calib.toml
-    MARKER_LENGTH = 0.05
+    MARKER_LENGTH = board_model.MARKER_LENGTH
     UDP_IP = "localhost"
     ALPHA = 0.4
     ORIGIN_LOCK_FRAMES = 10         # consecutive stable frames required before locking the world origin
     ORIGIN_STABLE_PX   = 2.0        # max mean corner motion (px) between frames to count as stable
-    # Offsets from each marker's center to the handle grip point, expressed
-    # in the marker's own frame (+X = printed-right, +Y = printed-up, +Z = out
-    # of face). Derived from the CAD model — markers are glued with +Y
-    # (printed-up) aligned to device-up.
-    MARKER_OFFSETS = {
-        4:  np.array([-0.002, -0.016, -0.056]),   # front-right (angled 60° from +X, into -Y)
-        8:  np.array([ 0.002, -0.016, -0.056]),   # front-left  (angled 60° from +X, into +Y)
-        12: np.array([ 0.001, -0.016, -0.059]),   # front
-        14: np.array([ 0.000, -0.066, -0.065]),   # front-top   (angled 10° from +X toward +Z)
-        20: np.array([ 0.125, -0.017, -0.054]),   # back / -Y side
-    }
+    BOARD_MAX_REPROJ_PX = 3.0       # board solve worse than this -> re-initialise without the previous-frame guess
+    # Grip-point offsets now live in board.py (shared with calibrate_board.py).
+    MARKER_OFFSETS = board_model.MARKER_OFFSETS
 
 
 class MainClass:
@@ -112,6 +106,29 @@ class MainClass:
         self.corner_stability = CornerStabilityFilter(threshold=stability_threshold)
         self._cached_rvecs = None
         self._cached_tvecs = None
+
+        # Joint rigid-body solve: enabled when board_geometry.json exists
+        # (produced by calibrate_board.py). Falls back to per-marker PnP +
+        # weighted averaging otherwise.
+        self.board = None
+        self._board_rvec = None      # last good board pose — ITERATIVE guess for the next frame
+        self._board_tvec = None
+        self._cached_board_pose = None
+        self._origin_R    = None     # locked board orientation (world frame)
+        self._origin_grip = None     # locked grip position in camera frame
+        if settings.get("use_board_pnp", True):
+            board_name = settings.get("board_geometry_file", "board_geometry.json")
+            board_path = (
+                board_name if os.path.isabs(board_name)
+                else os.path.join(os.path.dirname(os.path.abspath(__file__)), board_name)
+            )
+            if os.path.exists(board_path):
+                self.board = BoardGeometry.load(board_path)
+                print(f"Joint rigid-body PnP enabled: {len(self.board.marker_poses)} "
+                      f"markers from {board_path}")
+            else:
+                print(f"No board geometry at {board_path} — using per-marker PnP. "
+                      f"Run calibrate_board.py to enable the joint solve.")
 
         self.picam2 = None                          # Pi camera object (set in _init_rpi_camera)
         self.video_frame  = None                    # latest captured image, refreshed every frame
@@ -340,6 +357,87 @@ class MainClass:
         ).T[0]
         return (_r.T @ (_local_camera_t - centroid).reshape(3, 1)).T[0]
 
+    # ── per-frame pose paths (return local coords, or None while origin unlocked) ──
+
+    def _process_per_marker(self, corners, ids):
+        """Legacy path: independent solvePnP per marker, weighted grip average."""
+        if self.corner_stability.is_stable(corners, ids) and self._cached_rvecs is not None:
+            rvecs, tvecs = self._cached_rvecs, self._cached_tvecs
+        else:
+            rvecs, tvecs = self.estimate_pose(corners)
+            self._cached_rvecs, self._cached_tvecs = rvecs, tvecs
+
+        if self.first_frame:
+            self._maybe_lock_origin(corners, ids, rvecs, tvecs)
+            return None
+
+        self._draw_axes(rvecs, tvecs)
+        centroid = self._get_centroid(corners, ids, rvecs, tvecs)
+        return self._get_local_coordinates(
+            self.first_id, self.first_rvec, self.first_tvec, centroid
+        )
+
+    def _process_board(self, corners, ids):
+        """Joint path: one rigid-body solvePnP over all visible known markers."""
+        if self.corner_stability.is_stable(corners, ids) and self._cached_board_pose is not None:
+            rvec, tvec = self._cached_board_pose
+        else:
+            guess = (
+                (self._board_rvec, self._board_tvec)
+                if self._board_rvec is not None else None
+            )
+            result = estimate_board_pose(self.board, corners, ids, self.camera_matrix, guess)
+            if result is None:
+                return None
+            rvec, tvec, reproj = result
+            # A stale guess (fast motion, re-entry after occlusion) can trap the
+            # iterative solver in a bad local minimum — re-initialise from scratch.
+            if guess is not None and reproj > Config.BOARD_MAX_REPROJ_PX:
+                fresh = estimate_board_pose(self.board, corners, ids, self.camera_matrix, None)
+                if fresh is not None and fresh[2] < reproj:
+                    rvec, tvec, reproj = fresh
+            self._cached_board_pose = (rvec, tvec)
+            self._board_rvec, self._board_tvec = rvec, tvec
+
+        if self.first_frame:
+            self._maybe_lock_origin_board(corners, ids, rvec, tvec)
+            return None
+
+        R = cv2.Rodrigues(rvec)[0]
+        grip = R @ self.board.grip_point + tvec
+        self._draw_board_overlay(rvec, tvec, grip)
+        return self._origin_R.T @ (self._origin_grip - grip)
+
+    def _maybe_lock_origin_board(self, corners, ids, rvec, tvec) -> None:
+        """Board-mode origin lock: same stability gate, stores the board pose."""
+        if self._detection_matches_prev(corners, ids):
+            self._origin_stable_count += 1
+        else:
+            self._origin_stable_count = 1
+        self._prev_corners = corners
+        self._prev_ids = ids
+
+        if self._origin_stable_count >= Config.ORIGIN_LOCK_FRAMES:
+            self._origin_R = cv2.Rodrigues(rvec)[0]
+            self._origin_grip = self._origin_R @ self.board.grip_point + tvec
+            self.first_frame = False
+            self._prev_corners = None
+            self._prev_ids = None
+            print(f"World origin locked after {self._origin_stable_count} stable frames (board mode).")
+
+    def _draw_board_overlay(self, rvec, tvec, grip) -> None:
+        zero_dist = np.zeros(5)
+        cv2.drawFrameAxes(
+            self.video_frame, self.camera_matrix, zero_dist, rvec, tvec, 0.05
+        )
+        if grip[2] > 0:
+            pix, _ = cv2.projectPoints(
+                grip.reshape(1, 3), np.zeros(3), np.zeros(3),
+                self.camera_matrix, zero_dist,
+            )
+            cv2.circle(self.video_frame,
+                       tuple(int(v) for v in pix.ravel()), 6, (0, 0, 255), -1)
+
     # ── CSV recording ─────────────────────────────────────────────────────────
 
     def _select_hospitalid(self) -> None:
@@ -391,24 +489,15 @@ class MainClass:
         # Detect markers
         corners, ids, _ = self.detector.detectMarkers(self.video_frame)
         t3 = time.perf_counter() if self.debug else 0.0
+        local_coords = None
         if ids is not None:
             self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners, ids)
-
-            if self.corner_stability.is_stable(corners, ids) and self._cached_rvecs is not None:
-                rvecs, tvecs = self._cached_rvecs, self._cached_tvecs
+            if self.board is not None:
+                local_coords = self._process_board(corners, ids)
             else:
-                rvecs, tvecs = self.estimate_pose(corners)
-                self._cached_rvecs, self._cached_tvecs = rvecs, tvecs
+                local_coords = self._process_per_marker(corners, ids)
 
-            if self.first_frame:
-                self._maybe_lock_origin(corners, ids, rvecs, tvecs)
-
-        if ids is not None and not self.first_frame:
-            self._draw_axes(rvecs, tvecs)
-            centroid    = self._get_centroid(corners, ids, rvecs, tvecs)
-            local_coords = self._get_local_coordinates(
-                self.first_id, self.first_rvec, self.first_tvec, centroid
-            )
+        if local_coords is not None:
             local_coords = self.filter.update(local_coords)
 
             # Dispatch command

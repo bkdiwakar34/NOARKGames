@@ -46,6 +46,26 @@ The script auto-captures frames when the board is held steady, runs `cv2.fisheye
 
 Recalibrate only if camera changes, lens changes, or resolution changes.
 
+### 3b. Calibrate the board geometry (one-time per device)
+
+Measures each marker's fixed 3D pose on the device so the tracker can run one
+joint rigid-body solvePnP over all visible markers (much less depth jitter
+than per-marker averaging).
+
+```bash
+python pyscripts/calibrate_board.py
+```
+
+Slowly rotate the device in front of the camera so every adjacent marker pair
+is seen together (the back marker links through the side views). When each
+pair counter shows ≥ 30 samples, press **S** to write
+`pyscripts/board_geometry.json`. The grip-point consistency report at the end
+flags any marker whose `MARKER_OFFSETS` entry disagrees by > 5 mm.
+
+`main.py` uses the joint solve automatically when the file exists; without it,
+it falls back to the old per-marker method. Redo only if a marker is re-glued.
+Disable via `"use_board_pnp": false` in settings.json.
+
 ### 4. Calibrate sensor-to-screen mapping (one-time per workspace setup)
 
 Run the game and use the workspace calibration overlay. The patient (or you) touches the four screen corners (TL → TR → BL → BR) with the device. The 6-parameter affine transform is fitted via OLS and written to `user://workspace_config.json`.
