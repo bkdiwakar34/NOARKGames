@@ -299,20 +299,33 @@ class MainClass:
                 self.video_frame, self.camera_matrix, zero_dist, rvec, tvec, 0.05
             )
 
-    def _get_centroid(self, ids, rvecs, tvecs) -> np.ndarray:
+    def _get_centroid(self, corners, ids, rvecs, tvecs) -> np.ndarray:
         ids   = np.array(ids).flatten()
         tvecs = np.array(tvecs).reshape(len(ids), 3)
         rvecs = np.array(rvecs).reshape(len(ids), 3)
 
-        transformed = np.full((len(ids), 3), np.nan)
+        grip_points = np.full((len(ids), 3), np.nan)
+        weights     = np.zeros(len(ids))
         for index, _id in enumerate(ids):
-            if _id in Config.MARKER_OFFSETS:
-                transformed[index] = (
-                    cv2.Rodrigues(rvecs[index])[0]
-                    @ Config.MARKER_OFFSETS[_id].reshape(3, 1)
-                    + tvecs[index].reshape(3, 1)
-                ).T[0]
-        return np.nanmean(transformed, axis=0).flatten()
+            if _id not in Config.MARKER_OFFSETS:
+                continue
+            grip_points[index] = (
+                cv2.Rodrigues(rvecs[index])[0]
+                @ Config.MARKER_OFFSETS[_id].reshape(3, 1)
+                + tvecs[index].reshape(3, 1)
+            ).T[0]
+            # Weight = projected pixel area of this marker (shoelace via diagonals).
+            # Bigger marker in the image => corners more precise => estimate more trustworthy.
+            c = np.asarray(corners[index]).reshape(4, 2)
+            d1 = c[2] - c[0]   # top-left → bottom-right
+            d2 = c[3] - c[1]   # top-right → bottom-left
+            weights[index] = 0.5 * abs(d1[0] * d2[1] - d1[1] * d2[0])
+
+        valid = ~np.isnan(grip_points[:, 0])
+        total_w = weights[valid].sum()
+        if not valid.any() or total_w == 0.0:
+            return np.nanmean(grip_points, axis=0).flatten()
+        return (grip_points[valid] * weights[valid, None]).sum(axis=0) / total_w
 
     def _get_local_coordinates(self, first_id, first_rvecs, first_tvecs, centroid) -> np.ndarray:
         first_id    = np.array(first_id).flatten()
@@ -392,7 +405,7 @@ class MainClass:
 
         if ids is not None and not self.first_frame:
             self._draw_axes(rvecs, tvecs)
-            centroid    = self._get_centroid(ids, rvecs, tvecs)
+            centroid    = self._get_centroid(corners, ids, rvecs, tvecs)
             local_coords = self._get_local_coordinates(
                 self.first_id, self.first_rvec, self.first_tvec, centroid
             )
