@@ -1,0 +1,144 @@
+% Formal methods report — adaptive-difficulty rehabilitation game
+% Paste into Overleaf. Compile with pdfLaTeX.
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue
+}
+
+\title{Methods: Adaptive-Difficulty Reaching Game for Stroke Rehabilitation}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent
+A reaching game is presented in which target-acquisition difficulty is adapted trial by trial to maintain a per-patient target success rate. Patient hand position is recovered from ArUco markers attached to a handheld device, tracked by a wide-field fisheye camera mounted at the screen. Difficulty is parameterised by Fitts' Law: per-session calibration fits intercept and slope parameters that relate movement time to the Index of Difficulty, and an online recursive least-squares update tracks within-session drift. This document describes the methods used in three parts: marker-based tracking, system calibration, and the Fitts'-Law adaptive controller.
+\end{abstract}
+
+\section{ArUco Marker Detection and Pose Estimation}
+
+The patient holds a rigid device on which several ArUco markers (AprilTag~36h11 dictionary) are mounted on different faces. The device is observed by a single OV9281 monochrome camera fitted with a 160$^\circ$ fisheye lens, capturing $1280 \times 800$ frames at up to 100 Hz on a Raspberry Pi 5.
+
+Each frame is first undistorted using a Kannala--Brandt fisheye model with intrinsic matrix $\mathbf{K}$ and four distortion coefficients $\mathbf{D} = [k_1, k_2, k_3, k_4]$ obtained from a one-time camera calibration (see \S\ref{sec:calibration}). Undistortion is performed by precomputed pixel-remap tables and bicubic interpolation, producing a pinhole-equivalent image on which subsequent detection can assume zero distortion.
+
+Marker detection then proceeds in two stages. Coarse quadrilateral candidates are extracted by adaptive thresholding and contour following. Each candidate's four corners are refined to sub-pixel accuracy by fitting straight lines to the local intensity gradient along each side and taking the line-intersection points as the corner positions. For each detected marker $m$, the perspective-n-point problem is solved using the planar-marker variant \texttt{SOLVEPNP\_IPPE\_SQUARE}, yielding a rotation matrix $\mathbf{R}_m$ and translation vector $\mathbf{t}_m$ that describe the marker's pose relative to the camera.
+
+The grip point of the device is then recovered per marker. For each marker $m$, a calibrated offset vector $\mathbf{o}_m$ is stored in the marker's own coordinate frame; these offsets are derived from the device CAD model by measuring the position of the grip point in each marker's local frame. The grip position implied by marker $m$ is
+\begin{equation}
+    \mathbf{p}_m = \mathbf{R}_m \mathbf{o}_m + \mathbf{t}_m,
+\end{equation}
+and the final reported grip position is the centroid across all markers visible in the current frame:
+\begin{equation}
+    \bar{\mathbf{p}} = \frac{1}{N} \sum_{m=1}^{N} \mathbf{p}_m.
+\end{equation}
+Averaging reduces the per-marker noise by a factor of approximately $\sqrt{N}$ and removes the planar-marker depth ambiguity that affects single-marker pose estimates.
+
+Two further measures suppress residual jitter. First, a corner-stability gate skips the \texttt{solvePnP} call entirely when no marker corner has moved more than $\tau = 2$~pixels since the previous frame, reusing the cached pose. This eliminates jitter caused by the non-linear pose optimiser producing slightly different solutions for near-identical inputs. Second, the position stream is smoothed temporally by a One Euro filter~\cite{casiez2012one}, whose adaptive cutoff frequency provides heavy smoothing during stationary holds and minimal lag during fast reaches.
+
+\section{Calibration}
+\label{sec:calibration}
+
+Three distinct calibrations are performed: camera intrinsic calibration (once per camera), sensor-to-screen mapping (once per workspace setup), and per-session calibration of the patient's reachable workspace and Fitts' parameters.
+
+\subsection{Camera intrinsic calibration}
+
+A $9 \times 6$ chessboard pattern with measured square side $24.35$~mm is held at varying poses in front of the camera. Frames are auto-captured when corner positions remain stable across several consecutive frames, rejecting motion blur. After collecting $N \geq 20$ valid captures spanning the field of view, \texttt{cv2.fisheye.calibrate} is used to estimate $\mathbf{K}$ and $\mathbf{D}$ under the Kannala--Brandt model. The result is verified by a multi-pose check that reports per-pose tilt-invariant edge-length accuracy, position precision across still frames, and the residual reprojection error in pixels. Typical reprojection error is below 1 pixel.
+
+\subsection{Sensor-to-screen mapping}
+
+The tracker reports the device's planar position in metres relative to a marker-anchored origin, while the game requires screen coordinates in pixels. A six-parameter affine transform absorbs the camera-to-screen tilt and unit conversion:
+\begin{equation}
+    \begin{pmatrix} s_x \\ s_y \end{pmatrix}
+    =
+    \begin{pmatrix} a_{11} & a_{12} \\ a_{21} & a_{22} \end{pmatrix}
+    \begin{pmatrix} r_x \\ r_z \end{pmatrix}
+    +
+    \begin{pmatrix} a_{13} \\ a_{23} \end{pmatrix}.
+\end{equation}
+The patient touches the four screen corners in fixed order (top-left, top-right, bottom-left, bottom-right) with the device, yielding four $(r_x, r_z) \to (s_x, s_y)$ correspondences. With six unknowns and eight equations, the system is over-determined; the coefficients are solved by ordinary least squares (normal equations $\mathbf{N}^\top \mathbf{N} \boldsymbol{\theta} = \mathbf{N}^\top \mathbf{b}$).
+
+\subsection{Per-session calibration}
+
+Two calibration phases run at the start of every session before normal play begins.
+
+\paragraph{Workspace scan.}
+The screen is tiled with a grid of cells $120 \times 120$~pixels in size (matching the largest Fitts target width). Cells are grouped into rings by their distance from the screen centre and presented one at a time as fixed-lifetime targets ($\ell = 6$~s), inner rings first. If no cell in a ring is hit, the scan terminates early under the assumption that outer rings are unreachable. The hit cells define the patient's reachable workspace, from which the workspace centre (centroid of hit cells), a comfortable reach radius $a_{\text{comfortable}}$ (median distance from workspace centre), and the maximum reach radius $R_{ws}$ (furthest hit cell) are derived.
+
+\paragraph{Fitts calibration.}
+Five amplitudes $A_1, \ldots, A_5$ spanning $0.20 R_{ws}$ to $0.85 R_{ws}$ are paired with three widths $W \in \{120, 60, 25\}$~pixels, producing fifteen $(A, W)$ pairs. Each pair is presented five times in randomised order; the time to acquire each target is recorded as the movement time $\text{MT}$. After all $75$ trials, the model parameters $(a, b)$ are fitted by ordinary least squares across the fifteen pair means, with per-pair residual variance $\sigma_k^2$ retained for subsequent lifetime selection. The smallest target width at which the patient catches at least $50\%$ of trials is also recorded as the patient's precision limit.
+
+\section{Fitts'-Law Adaptive Controller}
+
+\subsection{Model}
+
+Fitts' Law in the Shannon formulation~\cite{mackenzie1992fitts} relates the movement time required to acquire a target to the Index of Difficulty (ID):
+\begin{equation}
+    \text{MT} = a + b \cdot \text{ID}, \qquad \text{ID} = \log_2\!\left(\frac{A}{W} + 1\right),
+\end{equation}
+where $A$ is the amplitude (distance from start to target centre) and $W$ is the target width. The intercept $a$ (in seconds) captures reaction and initiation time, and the slope $b$ (in seconds per bit) captures motor-control cost per bit of difficulty. The parameters $(a, b)$ are patient-specific and are estimated by per-session calibration (\S\ref{sec:calibration}).
+
+\subsection{Per-target lifetime selection}
+
+During the live session, each target is sampled uniformly at random from the fifteen $(A, W)$ pairs used in calibration. Its lifetime $\ell$ is chosen so that the patient is expected to acquire it with probability equal to the day's target success rate $r$. Assuming movement times for a fixed $(A, W)$ are approximately normally distributed with mean $\widehat{\text{MT}} = a + b \cdot \text{ID}$ and per-pair standard deviation $\sigma_k$,
+\begin{equation}
+    \ell = \mathrm{clip}\bigl(\widehat{\text{MT}} + z(r) \cdot \sigma_k,\ \ell_{\min},\ \ell_{\max}\bigr),
+\end{equation}
+where $z(r) = \Phi^{-1}(r)$ is the standard-normal quantile (computed using the Abramowitz--Stegun rational approximation~\cite{abramowitz1964}). For example, $z(0.5) = 0$, $z(0.8) \approx 0.84$, and $z(0.9) \approx 1.28$.
+
+The daily target $r$ is itself drawn from a Gaussian centred on the patient's group mean $\mu \in \{0.70, 0.80, 0.90\}$ with standard deviation $0.05$; the fourteen daily targets are pre-sampled at the start of the study and assigned in order. The controller is blind to the group mean and sees only the current day's target.
+
+\subsection{Online adaptation}
+
+To accommodate within-session drift in motor performance (warm-up, fatigue, motor learning), the parameters $(a, b)$ are updated incrementally after every successful catch using recursive least squares (RLS)~\cite{ljung1999}. Let $\boldsymbol{\theta} = [a, b]^\top$, $\mathbf{x} = [1, \text{ID}]^\top$, and let $\mathbf{P}$ denote the $2 \times 2$ covariance, initialised at $\mathbf{P}_0 = 1000\,\mathbf{I}$. Given a new observation $(\text{MT}, \text{ID})$, the prediction error is $e = \text{MT} - \mathbf{x}^\top \boldsymbol{\theta}$, and the parameters update as
+\begin{equation}
+    \mathbf{g} = \frac{\mathbf{P}\mathbf{x}}{1 + \mathbf{x}^\top \mathbf{P} \mathbf{x}}, \qquad
+    \boldsymbol{\theta} \leftarrow \boldsymbol{\theta} + \mathbf{g}\,e, \qquad
+    \mathbf{P} \leftarrow \mathbf{P} - \mathbf{g}\,\mathbf{x}^\top \mathbf{P}.
+\end{equation}
+The update is computationally trivial (no matrix inversion past initialisation) and is mathematically equivalent to refitting the batch OLS solution on all observations to date.
+
+Per-pair residual standard deviation $\sigma_k$ is updated by Welford's online algorithm~\cite{welford1962}, which avoids the catastrophic cancellation of the naive $\sum x^2 - (\sum x)^2 / n$ formula:
+\begin{align}
+    n_k &\leftarrow n_k + 1, \\
+    \delta &= \varepsilon - \mu_k, \\
+    \mu_k &\leftarrow \mu_k + \delta / n_k, \\
+    M_k &\leftarrow M_k + \delta \,(\varepsilon - \mu_k),
+\end{align}
+where $\varepsilon = \text{MT} - (a + b \cdot \text{ID})$ is the current residual and $\sigma_k^2 = M_k / (n_k - 1)$.
+
+These two updates --- RLS for $(a, b)$, Welford for $\sigma_k$ --- run after every successful catch during the session, so the lifetime formula adapts continuously to the patient's current performance without requiring any post-hoc batch processing.
+
+% ============================================================
+\begin{thebibliography}{9}
+
+\bibitem{mackenzie1992fitts}
+MacKenzie, I.~S. (1992). Fitts' Law as a research and design tool in human--computer interaction. \emph{Human--Computer Interaction}, 7(1), 91--139.
+
+\bibitem{casiez2012one}
+Casiez, G., Roussel, N., \& Vogel, D. (2012). 1\,$\euro$ Filter: a simple speed-based low-pass filter for noisy input in interactive systems. In \emph{Proceedings of the SIGCHI Conference on Human Factors in Computing Systems (CHI '12)}, 2527--2530.
+
+\bibitem{ljung1999}
+Ljung, L. (1999). \emph{System Identification: Theory for the User} (2nd ed.). Prentice Hall.
+
+\bibitem{welford1962}
+Welford, B.~P. (1962). Note on a method for calculating corrected sums of squares and products. \emph{Technometrics}, 4(3), 419--420.
+
+\bibitem{abramowitz1964}
+Abramowitz, M., \& Stegun, I.~A. (Eds.) (1964). \emph{Handbook of Mathematical Functions}. National Bureau of Standards, Applied Mathematics Series 55, formula 26.2.23.
+
+\end{thebibliography}
+
+\end{document}

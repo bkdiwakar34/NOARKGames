@@ -1,0 +1,147 @@
+% Clinical Attachment Project Report 2026
+% Paste into Overleaf. Compile with pdfLaTeX.
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.6em}
+
+\begin{document}
+
+\begin{center}
+\Large\textbf{Clinical Attachment Project Report 2026}
+\end{center}
+
+\vspace{0.5em}
+
+\textbf{Student Name:} xxxxx \\
+\textbf{Roll No.:} xxxxx \\
+\textbf{Title of the project:} A Home-Based Sensor Integrated Rehabilitation System for Training the Arm and Hand Movements in Post-Stroke Individuals \\
+\textbf{Name of the guide(s):} xxxxx
+
+\vspace{1.5em}
+
+\section*{1. Objectives of the project}
+\begin{itemize}
+    \item To develop a Raspberry Pi-based embedded system for training arm and hand movements.
+    \item To implement games at fixed success rates to challenge the subjects at different levels.
+    \item To develop a real-time dashboard for remote monitoring of rehabilitation session data.
+\end{itemize}
+
+\section*{2. Summary of outcomes}
+
+A Raspberry Pi-based embedded system for training arm and hand movements had been previously developed and implemented. The scope of this work did not involve building the system from scratch; rather, it encompassed a thorough understanding of the existing hardware and software implementation, which was subsequently reproduced.
+
+An algorithm based on Fitts' Law was devised to standardise the success rate within a movement training game, independent of the patient's motor ability or prevailing environmental conditions. However, the algorithm could not be validated on any subjects. Furthermore, owing to time constraints, the development of a real-time dashboard for remote monitoring of rehabilitation session data --- the final objective of this work --- was not fulfilled.
+
+\section*{3. Methods}
+
+The work was carried out in two stages: understanding and implementation of the existing tracking subsystem, design and implementation of an adaptive-difficulty algorithm.
+
+\subsection*{3.1 Hardware and tracking subsystem}
+
+The hardware configuration comprises a Raspberry Pi 5 (Linux ARM64), an OV9281 monochrome camera fitted with a 160$^\circ$ fisheye lens, and a handheld device on which three ArUco markers from the AprilTag~36h11 dictionary are mounted on distinct faces. The Python tracking process captures grayscale frames at a resolution of $1280 \times 800$ and a rate of up to 60~Hz, processes each frame, and transmits the recovered three-dimensional position of the device to a Godot game running on the same host over UDP.
+
+Each frame is first undistorted using the Kannala--Brandt fisheye model. The camera intrinsic matrix is
+\begin{equation}
+    \mathbf{K} =
+    \begin{bmatrix}
+        f_x & 0   & c_x \\
+        0   & f_y & c_y \\
+        0   & 0   & 1
+    \end{bmatrix},
+\end{equation}
+together with four distortion coefficients $\mathbf{D} = [k_1, k_2, k_3, k_4]$. The values of $\mathbf{K}$ and $\mathbf{D}$ are obtained from a one-time calibration in which a $9 \times 6$ chessboard pattern with a measured square side of $24.35$~mm is presented at varying poses; frames are automatically captured once the detected corners remain stable across several consecutive frames, and \texttt{cv2.fisheye.calibrate} is then used to estimate the parameters. The residual reprojection error obtained typically lies below 1~pixel.
+
+Marker detection is performed on the undistorted image by adaptive thresholding followed by contour following. The four corners of each detected marker are refined to sub-pixel accuracy by fitting straight lines to the local intensity gradient along each side and taking the intersection of these lines as the corner positions. For each marker $m$, the perspective-$n$-point problem is solved using the planar-marker variant \texttt{SOLVEPNP\_IPPE\_SQUARE}, which yields a rotation matrix $\mathbf{R}_m \in SO(3)$ and a translation vector $\mathbf{t}_m \in \mathbb{R}^3$ describing the marker's pose with respect to the camera.
+
+The grip point of the device is then recovered per marker using a calibrated offset vector $\mathbf{o}_m$ expressed in the marker's own local frame. These offsets are derived from the device's CAD model. The grip position implied by marker $m$ is
+\begin{equation}
+    \mathbf{p}_m = \mathbf{R}_m\, \mathbf{o}_m + \mathbf{t}_m,
+\end{equation}
+and the final reported position is the centroid of the per-marker estimates,
+\begin{equation}
+    \bar{\mathbf{p}} = \frac{1}{N} \sum_{m=1}^{N} \mathbf{p}_m,
+\end{equation}
+where $N$ is the number of markers visible in the current frame. Averaging across visible markers reduces the per-frame noise by a factor of approximately $\sqrt{N}$ and resolves the depth ambiguity inherent in single planar-marker pose estimation.
+
+Two further measures are employed to suppress residual jitter. A corner-stability gate omits the \texttt{solvePnP} call when no marker corner has displaced by more than $4$~pixels since the previous frame, and the cached pose is reused; this eliminates jitter introduced by the non-linear pose optimiser yielding marginally different solutions for nearly identical inputs. The resulting position stream is subsequently smoothed by an exponential moving average filter with $\alpha = 0.4$, corresponding to the weight applied to the current observation.
+
+\subsection*{3.2 Adaptive-difficulty controller based on Fitts' Law}
+
+The reaching game requires a single, principled difficulty parameter that the controller may adjust in order to maintain the assigned success rate, independent of the patient's motor ability and the geometry of any individual target. Fitts' Law, in its Shannon formulation, provides such a parameter. For a target of width $W$ presented at distance $A$ from the current cursor position, the expected movement time is given by
+\begin{equation}
+    \text{MT} = a + b \cdot \text{ID}, \qquad \text{ID} = \log_2\!\left(\frac{A}{W} + 1\right),
+\end{equation}
+in which the patient-specific intercept $a$ (seconds) reflects reaction and initiation time, and the slope $b$ (seconds per bit) reflects the motor-control cost per bit of difficulty.
+
+The parameters $(a, b)$ are estimated at the start of every session by a two-phase calibration. In the first phase (workspace scan), the screen is tiled with a regular grid of cells, which are presented as targets ring by ring outward from the centre. The subset of cells that the patient successfully reaches is retained as the reachable workspace $\mathcal{S}$, which is in general an irregular shape rather than a disc; the scalar quantity $R_{ws}$, defined as the distance from the screen centre to the furthest cell in $\mathcal{S}$, is used only to scale the amplitude range of the subsequent Fitts calibration. In the second phase (Fitts calibration), fifteen amplitude--width pairs $(A, W)$ are constructed from five amplitudes spanning $0.20\,R_{ws}$ to $0.85\,R_{ws}$ and three widths $W \in \{120, 60, 25\}$~pixels, with each pair repeated five times. For every trial, the candidate target position is placed at distance $A$ from the patient's current cursor position in a random direction; the candidate is accepted only if it lies within a tolerance of one cell size of some cell in $\mathcal{S}$, ensuring that the target is physically reachable for the patient. From the resulting 75 trials, the parameters $(a, b)$ are estimated by ordinary least squares on the per-pair mean movement times. Denoting the mean movement time and the Index of Difficulty of pair $k$ by $\overline{\text{MT}}_k$ and $\text{ID}_k$ respectively, with $N = 15$,
+\begin{equation}
+    b = \frac{N \sum_k \text{ID}_k\, \overline{\text{MT}}_k - \sum_k \text{ID}_k\, \sum_k \overline{\text{MT}}_k}{N \sum_k \text{ID}_k^2 - \left(\sum_k \text{ID}_k\right)^2}, \qquad a = \frac{1}{N}\!\left(\sum_k \overline{\text{MT}}_k - b \sum_k \text{ID}_k\right).
+\end{equation}
+The per-pair residual variance $\sigma_k^2$ is also retained for use during the live session.
+
+During the session, each target is sampled uniformly at random from the fifteen calibrated $(A, W)$ pairs, and its lifetime is chosen such that the patient is expected to acquire the target with a probability equal to the day's assigned success rate $r$. Under the assumption that movement times for a fixed pair are approximately normally distributed with mean $\widehat{\text{MT}} = a + b \cdot \text{ID}$ and standard deviation $\sigma_k$, the lifetime is set to
+\begin{equation}
+    \ell = \mathrm{clip}\!\left( \widehat{\text{MT}} + z(r) \cdot \sigma_k,\ \ell_{\min},\ \ell_{\max} \right),
+\end{equation}
+in which $z(r) = \Phi^{-1}(r)$ denotes the standard-normal quantile corresponding to a catch probability of $r$. Representative values are $z(0.5) = 0$, $z(0.8) \approx 0.84$ and $z(0.9) \approx 1.28$, so that a higher assigned success rate corresponds to a greater margin above the predicted movement time.
+
+In order to accommodate within-session drift in motor performance arising from warm-up, fatigue or short-term motor learning, the parameters $(a, b)$ are updated incrementally after every successful catch using recursive least squares. With $\boldsymbol{\theta} = [a, b]^\top$, $\mathbf{x} = [1, \text{ID}]^\top$ and the covariance matrix $\mathbf{P} \in \mathbb{R}^{2\times 2}$ initialised at $\mathbf{P}_0 = 1000\,\mathbf{I}$, a new observation $(\text{MT}, \text{ID})$ produces the prediction error $e = \text{MT} - \mathbf{x}^\top \boldsymbol{\theta}$, and the parameters are updated as
+\begin{equation}
+    \mathbf{g} = \frac{\mathbf{P}\mathbf{x}}{1 + \mathbf{x}^\top \mathbf{P} \mathbf{x}}, \qquad
+    \boldsymbol{\theta} \leftarrow \boldsymbol{\theta} + \mathbf{g}\,e, \qquad
+    \mathbf{P} \leftarrow \mathbf{P} - \mathbf{g}\, \mathbf{x}^\top \mathbf{P}.
+\end{equation}
+This update is mathematically equivalent to refitting the batch ordinary-least-squares solution on all observations available to date, while requiring only constant computation per trial.
+
+The per-pair residual standard deviation $\sigma_k$ is updated by Welford's algorithm, which is numerically stable and avoids the cancellation errors of the direct sum-of-squares formulation. Given the current residual $\varepsilon = \text{MT} - (a + b \cdot \text{ID})$,
+\begin{align}
+    n_k         &\leftarrow n_k + 1, \\
+    \delta      &= \varepsilon - \mu_k, \\
+    \mu_k       &\leftarrow \mu_k + \delta / n_k, \\
+    M_k         &\leftarrow M_k + \delta\,(\varepsilon - \mu_k),
+\end{align}
+with the variance estimate $\sigma_k^2 = M_k / (n_k - 1)$. Both updates --- recursive least squares for $(a, b)$ and Welford for $\sigma_k$ --- are executed after every successful catch during the session, so that the lifetime formula adapts continuously to the patient's current performance.
+
+\subsection*{3.3 Per-day target rate sampling}
+
+Each patient is randomised to one of three study groups with target success rate means $\mu \in \{0.70,\ 0.80,\ 0.90\}$. Within each group, the day-to-day target is drawn from a Gaussian distribution with standard deviation $\sigma = 0.05$:
+\begin{equation}
+    r_d \sim \mathcal{N}(\mu, \sigma^2), \qquad d = 1, \ldots, 14.
+\end{equation}
+The fourteen daily targets are pre-sampled at the start of the study and assigned in order. The controller receives only the current day's $r_d$ and is blind to the group assignment, the mean and the variance.
+
+\subsection*{3.4 Validation in simulation}
+
+The stability and convergence behaviour of the controller were verified in an interactive Python simulator. A synthetic patient model with separate ``estimated'' and ``actual'' motor capabilities was used in order to evaluate the controller's behaviour under both calibration agreement and calibration mismatch. The simulator permitted parameter tuning and the identification of limiting cases prior to any hardware testing, thereby avoiding the lengthy iteration cycle that purely empirical tuning on hardware would have entailed.
+
+\section*{4. Potential future work}
+
+Residual jitter in the ArUco-based tracking subsystem continues to limit the user experience and constitutes the foremost area for further work. The addition of further markers to the device, arranged so as to increase the number of markers visible to the camera at any instant, is expected to reduce per-frame noise and thereby improve perceived stability. Alongside this, the most immediate requirement is clinical validation: the controller has been verified in simulation and on the developer alone, but not yet on stroke patients. A small pilot study confirming that the closed-loop catch rate converges to the assigned target across the intended patient population would establish that the controller operates correctly in its target setting.
+
+The third project objective --- a real-time remote monitoring dashboard --- remains to be implemented. The per-session log files produced by the system already contain the necessary information (per-trial outcomes, model parameters and movement times); the principal remaining requirements are a daily upload mechanism from the Raspberry Pi and a web-based interface through which the researcher may inspect session summaries and longitudinal progress trends.
+
+A number of further refinements to the tracking subsystem are also possible. The per-marker offset and centroid approach could be replaced by a multi-marker rigid-body pose estimator (OpenCV's \texttt{aruco.Board}), in which all visible marker corners are used as joint constraints in a single PnP call; this approach requires the full six-degree-of-freedom placement of each marker on the device. An infrared-illuminated marker setup --- retroreflective tape applied to the markers combined with an infrared LED ring mounted around the camera --- would decouple tracking accuracy from ambient lighting conditions and permit shorter exposures with higher frame rates.
+
+Methodologically, the controller currently resets the patient model at the start of every session. Carrying state across sessions would enable explicit modelling of inter-session motor learning and would yield a more informed prior on $(a, b)$ for subsequent sessions, thereby reducing the calibration burden on returning patients.
+
+\section*{5. What did you learn from working on this project?}
+
+This project provided practical experience in several areas previously studied only in theory.
+
+Working with a pre-existing codebase taught me how to read, debug and extend software that had been written by others. Tracing the data flow from the camera through the tracking subsystem and into the game required reasoning through several layers of software written in two different languages, and small mismatches between them --- such as a camera calibration file that was silently incorrect for the deployed hardware --- produced visible consequences that were easily mistaken for hardware faults.
+
+The adaptive-difficulty problem demonstrated the value of selecting a simple, principled model. An earlier implementation employed a proportional--integral controller acting upon apple lifetime alone, but that controller was blind to the geometry of each target, with the consequence that a single lifetime value corresponded to substantially different difficulties depending on the spawn distance. Its replacement by a Fitts'-Law model --- which combines distance and target width into a single dimensionless Index of Difficulty --- rendered the difficulty axis meaningful and the controller's behaviour predictable. The value of simulation prior to hardware testing was also evident throughout: it permitted controller stability to be evaluated and parameters to be tuned without committing to the slow iteration cycle of empirical tuning on hardware.
+
+Finally, the project emphasised the importance of being able to justify every design choice. Several decisions in the system appear arbitrary on initial inspection --- the choice of a $5\%$ dead band, the use of the $50\%$ point as the calibration anchor, the midpoint-of-extremes estimator --- and being required to defend them taught me to reason carefully about the assumptions underlying each step rather than to accept them as standard recipes.
+
+\vspace{2em}
+
+\noindent\textbf{Signature of the guide(s) with date:}
+
+\end{document}
