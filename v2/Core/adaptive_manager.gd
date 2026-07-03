@@ -55,7 +55,11 @@ var _prec_is_home:      bool    = true
 # (precision scan) is now skipped.
 const NUM_PAIRS:    int   = 15
 const CAL_PER_PAIR: int   = 5
-const CAL_W_VALUES: Array = [120.0, 60.0, 25.0]  # large, medium, small
+const CAL_W_VALUES: Array = [120.0, 80.0, 50.0]  # large, medium, small — spans SESSION_W_VALUES
+# Session target sizes (diameters, px). One size is fixed for a whole trial and
+# changes between trials, cycling through all 10 in a reshuffled order per block
+# so trial number and size don't confound.
+const SESSION_W_VALUES: Array = [50.0, 58.0, 66.0, 74.0, 81.0, 89.0, 97.0, 105.0, 112.0, 120.0]
 
 var aw_pairs:      Array = []  # [{A, W, cal_n, mt_sum, mt_sq}]
 var _cal_pair_idx: int   = 0
@@ -74,6 +78,8 @@ var _welford:   Dictionary = {}
 var _trial_caught:        int     = 0
 var _trial_spawned:       int     = 0
 var _trial_apple_start:   int     = 0
+var _trial_w_idx:         int     = 0   # index into SESSION_W_VALUES for the current trial
+var _trial_w_order:       Array   = []  # shuffled block of W indices, refilled every 10 trials
 var _current_pair_idx:    int     = -1
 var _spawn_time:          int     = 0     # ticks_msec at spawn
 var _last_spawn_pos:      Vector2 = Vector2.ZERO
@@ -126,6 +132,8 @@ func start_session(rate: float) -> void:
 	trial_log.clear()
 	_trial_caught     = 0;  _trial_spawned = 0
 	_current_pair_idx = -1
+	_trial_w_idx      = 0
+	_trial_w_order.clear()
 	_center           = _viewport_size * 0.5
 	_a_global_max     = 200.0
 	reachable_cells.clear()
@@ -294,7 +302,7 @@ func _finish_workspace_scan() -> void:
 	# Skip Phase 0b (precision scan). Phase 0c now spans a wider W range so
 	# the smallest reliably-hit width is measured at the end of 0c, not in a
 	# dedicated phase.
-	_build_aw_pairs()
+	_build_aw_pairs(CAL_W_VALUES)
 	_phase        = Phase.FITTS_CAL
 	_cal_pair_idx = 0;  _cal_rep = 0;  _cal_total = 0
 
@@ -368,19 +376,19 @@ func _on_prec_outcome(hit: bool) -> void:
 
 
 func _finish_precision_scan() -> void:
-	_build_aw_pairs()
+	_build_aw_pairs(CAL_W_VALUES)
 	_phase        = Phase.FITTS_CAL
 	_cal_pair_idx = 0;  _cal_rep = 0;  _cal_total = 0
 
 
-func _build_aw_pairs() -> void:
+func _build_aw_pairs(w_values: Array) -> void:
 	aw_pairs.clear()
 	_welford.clear()
 	var idx: int = 0
 	for i in 5:
 		var t: float = float(i) / 4.0
 		var a: float = lerp(_a_global_max * 0.20, _a_global_max * 0.85, t)
-		for w in CAL_W_VALUES:
+		for w in w_values:
 			aw_pairs.append({"A": a, "W": float(w), "cal_n": 0, "mt_sum": 0.0, "mt_sq": 0.0, "hits": 0})
 			_welford[idx] = {"n": 0, "mean": 0.0, "M2": 0.0}
 			idx += 1
@@ -422,6 +430,12 @@ func _advance_cal_pair() -> void:
 func _finish_fitts_cal() -> void:
 	_derive_w_min_from_cal()
 	_fit_fitts_batch()
+	# Rebuild pairs for the session: 5 A × SESSION_W_VALUES. The fitted (a, b)
+	# carry over via _rls_theta; per-pair Welford SDs restart at the 0.3 s
+	# default and re-learn online.
+	_build_aw_pairs(SESSION_W_VALUES)
+	_current_pair_idx  = -1
+	_trial_w_order.clear()
 	_phase             = Phase.SESSION
 	trial_number       = 0
 	_trial_caught      = 0
@@ -493,7 +507,9 @@ func _fit_fitts_batch() -> void:
 func _session_spawn(player_pos: Vector2) -> Vector2:
 	if aw_pairs.is_empty():
 		return _center
-	_current_pair_idx    = randi_range(0, aw_pairs.size() - 1)
+	# W is blocked per trial (_trial_w_idx); only the distance A varies apple-to-apple.
+	var a_idx: int       = randi_range(0, 4)
+	_current_pair_idx    = a_idx * SESSION_W_VALUES.size() + _trial_w_idx
 	var pair: Dictionary = aw_pairs[_current_pair_idx]
 	difficulty           = _fitts_id(pair["A"], pair["W"])
 	return _sample_reachable_spawn(player_pos, pair["A"])
@@ -638,6 +654,11 @@ func _start_trial() -> void:
 	_trial_caught       = 0
 	_trial_spawned      = 0
 	_trial_apple_start  = outcome_log.size()
+	if _trial_w_order.is_empty():
+		_trial_w_order = range(SESSION_W_VALUES.size())
+		_trial_w_order.shuffle()
+	_trial_w_idx = _trial_w_order.pop_front()
+	print("Trial %d: target diameter %.0f px" % [trial_number, SESSION_W_VALUES[_trial_w_idx]])
 	_trial_timer.start(trial_duration)
 	trial_started.emit(trial_number)
 
