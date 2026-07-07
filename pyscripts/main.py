@@ -85,7 +85,15 @@ class MainClass:
             self.camera_matrix, self.frame_size, cv2.CV_16SC2,
         )
 
+        # Leave cores free for Godot on the Pi — OpenCV otherwise parallelises
+        # detection across ALL cores and starves the game's render thread.
+        opencv_threads = int(settings.get("opencv_threads", 2))
+        if opencv_threads > 0:
+            cv2.setNumThreads(opencv_threads)
+            print(f"OpenCV limited to {opencv_threads} threads")
+
         self._corner_refine_name = str(settings.get("corner_refine", "contour")).lower()
+        self._thresh_win = int(settings.get("adaptive_thresh_win_size", 15))
         self.detector = self._init_detector()
 
         pnp_map = {
@@ -208,6 +216,14 @@ class MainClass:
         params = aruco.DetectorParameters()
         params.useAruco3Detection     = True
         params.cornerRefinementMethod = refine_flag
+        # Single adaptive-threshold pass instead of the default three (window
+        # sizes 3/13/23): our marker sizes are a known range, so one mid-size
+        # window finds them at ~1/3 the detection cost. 0 = OpenCV default.
+        if self._thresh_win > 0:
+            params.adaptiveThreshWinSizeMin  = self._thresh_win
+            params.adaptiveThreshWinSizeMax  = self._thresh_win
+            params.adaptiveThreshWinSizeStep = 1
+            print(f"Adaptive threshold: single {self._thresh_win} px window")
         dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
         print(f"Detector corner refinement: {self._corner_refine_name}")
         return aruco.ArucoDetector(dictionary, params)
