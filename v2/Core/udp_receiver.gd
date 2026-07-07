@@ -49,15 +49,23 @@ func _start_tracker() -> void:
 	)
 
 func _network_loop() -> void:
+	# Drain the queue every pass with a short poll. The old version slept
+	# 100 ms whenever the queue was empty, so tracker packets arrived in
+	# 100 ms bursts and screen_pos effectively updated at 10 Hz.
+	var last_send: int = 0
 	while _running:
-		if _udp.get_available_packet_count() > 0:
+		var got_any: bool = false
+		while _udp.get_available_packet_count() > 0:
 			var packet = _udp.get_packet()
 			var floats = PackedByteArray(packet).to_float32_array()
-			_udp.put_packet(_outgoing.to_utf8_buffer())
 			_apply_packet(floats)
-		else:
-			_udp.put_packet(_outgoing.to_utf8_buffer())
-			OS.delay_msec(100)
+			got_any = true
+		var now: int = Time.get_ticks_msec()
+		if now - last_send >= 100:
+			_udp.put_packet(_outgoing.to_utf8_buffer())   # keepalive / sticky command
+			last_send = now
+		if not got_any:
+			OS.delay_msec(2)
 
 func _apply_packet(f: PackedFloat32Array) -> void:
 	if f.size() < 4:
