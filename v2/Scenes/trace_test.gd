@@ -62,8 +62,9 @@ func _process(_dt: float) -> void:
 
 	var markers: String = "12+20" if UDPReceiver.setup_subset else "all markers"
 	var solver:  String = "rigid body" if UDPReceiver.setup_rigid else "per-marker"
-	_mode_lbl.text = "Tracker: %s  |  %s   |   rx: %d pkt/s   trail: %d pts (+%d/s)" % [
-		markers, solver, UDPReceiver.packets_per_sec, _trail.size(), _pts_per_sec]
+	_mode_lbl.text = "Tracker: %s  |  %s   |   rx: %d pkt/s   trail: %d pts (+%d/s)   fps: %d" % [
+		markers, solver, UDPReceiver.packets_per_sec, _trail.size(), _pts_per_sec,
+		int(Engine.get_frames_per_second())]
 	queue_redraw()
 
 
