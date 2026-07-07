@@ -363,6 +363,19 @@ func _add_tracker_section(card: Control, cw: float, y: float) -> void:
 		not UDPReceiver.setup_rigid,
 		func(first: bool): UDPReceiver.send_tracker_setup(UDPReceiver.setup_subset, not first))
 
+	# Trace-test launcher — right of the toggle rows
+	var trace_btn := Button.new()
+	trace_btn.text = "Trace test"
+	trace_btn.custom_minimum_size = Vector2(110.0, row_h)
+	trace_btn.size     = Vector2(110.0, row_h)
+	trace_btn.position = Vector2(row_x + lbl_w + 10.0 + btn_w * 2.0 + gap + 20.0, y + (row_h + 10.0) * 0.5)
+	trace_btn.add_theme_font_size_override("font_size", 13)
+	trace_btn.pressed.connect(func():
+		_settings_overlay.visible = false
+		add_child(load("res://v2/Scenes/trace_test.gd").new())
+	)
+	card.add_child(trace_btn)
+
 
 # Generic two-option toggle row. `a_selected` = whether the FIRST option is
 # active; the callback receives true when the first option is chosen.
