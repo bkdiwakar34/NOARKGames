@@ -10,6 +10,9 @@ const RECT_FRACTIONS: Array = [0.85, 0.55, 0.25]  # of the usable workspace rect
 var _trail: PackedVector2Array = PackedVector2Array()
 var _cursor: Vector2 = Vector2.ZERO
 var _mode_lbl: Label
+var _pts_last: int = 0        # trail size at last rate window
+var _pts_per_sec: int = 0
+var _pts_window_ms: int = 0
 
 
 func _ready() -> void:
@@ -51,9 +54,16 @@ func _process(_dt: float) -> void:
 		if _trail.size() > TRAIL_MAX:
 			_trail = _trail.slice(_trail.size() - TRAIL_MAX)
 
+	var now: int = Time.get_ticks_msec()
+	if now - _pts_window_ms >= 1000:
+		_pts_per_sec   = _trail.size() - _pts_last
+		_pts_last      = _trail.size()
+		_pts_window_ms = now
+
 	var markers: String = "12+20" if UDPReceiver.setup_subset else "all markers"
 	var solver:  String = "rigid body" if UDPReceiver.setup_rigid else "per-marker"
-	_mode_lbl.text = "Tracker: %s  |  %s        trail: %d pts" % [markers, solver, _trail.size()]
+	_mode_lbl.text = "Tracker: %s  |  %s   |   rx: %d pkt/s   trail: %d pts (+%d/s)" % [
+		markers, solver, UDPReceiver.packets_per_sec, _trail.size(), _pts_per_sec]
 	queue_redraw()
 
 

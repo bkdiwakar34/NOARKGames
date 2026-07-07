@@ -14,6 +14,10 @@ const SCALER_Z: int = 2000
 var setup_subset: bool = false   # true = old marker set only (settings.json demo_subset_ids)
 var setup_rigid:  bool = true    # true = joint rigid-body solve, false = per-marker
 
+var packets_per_sec: int = 0     # measured arrival rate, updated once a second
+var _pkt_count: int = 0
+var _pkt_window_ms: int = 0
+
 var _udp: PacketPeerUDP = PacketPeerUDP.new()
 var _thread: Thread = Thread.new()
 var _port: int = 12345
@@ -81,6 +85,13 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 			(raw_z - 0.2) * 1400.0 + 40.0
 		)
 	connected = true
+
+	_pkt_count += 1
+	var now: int = Time.get_ticks_msec()
+	if now - _pkt_window_ms >= 1000:
+		packets_per_sec = _pkt_count
+		_pkt_count      = 0
+		_pkt_window_ms  = now
 
 func send_tracker_setup(subset: bool, rigid: bool) -> void:
 	setup_subset = subset
