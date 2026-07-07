@@ -560,8 +560,10 @@ class MainClass:
                 return
         t1 = time.perf_counter() if self.debug else 0.0
 
+        # INTER_LINEAR: ~half the cost of INTER_CUBIC; corner sub-pixel accuracy
+        # comes from the detector's corner refinement, not the resampling kernel.
         self.video_frame = cv2.remap(
-            self.video_frame, self.map1, self.map2, interpolation=cv2.INTER_CUBIC
+            self.video_frame, self.map1, self.map2, interpolation=cv2.INTER_LINEAR
         )
         t2 = time.perf_counter() if self.debug else 0.0
 
