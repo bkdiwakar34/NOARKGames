@@ -183,7 +183,7 @@ func _build_settings_overlay(vp: Vector2) -> void:
 	_settings_overlay.add_child(dim)
 
 	var cw: float = 800.0
-	var ch: float = 260.0
+	var ch: float = 360.0
 	var cx: float = (vp.x - cw) * 0.5
 	var cy: float = (vp.y - ch) * 0.5
 
@@ -248,10 +248,14 @@ func _build_settings_overlay(vp: Vector2) -> void:
 	_add_section_label(card, "TESTING", cw, y);  y += 22.0
 	_add_testing_section(card, cw, y)
 
-	# Testing section ends at y ≈ 158; hardware section below
+	# Testing section ends at y ≈ 158; tracker demo toggles below
 	_add_sep(card, cw, 166.0)
-	_add_section_label(card, "HARDWARE", cw, 172.0)
-	_add_hardware_section(card, cw, 196.0)
+	_add_section_label(card, "TRACKER", cw, 172.0)
+	_add_tracker_section(card, cw, 196.0)
+
+	_add_sep(card, cw, 280.0)
+	_add_section_label(card, "HARDWARE", cw, 286.0)
+	_add_hardware_section(card, cw, 310.0)
 
 # ── Separator + section label ─────────────────────────────────────────────────
 
@@ -339,6 +343,65 @@ func _labeled_edit(parent: Control, lbl_text: String, x: float, y: float,
 	edit.position = Vector2(x + lbl_w, y)
 	parent.add_child(edit)
 	return edit
+
+# ── Tracker section (demo comparison toggles) ────────────────────────────────
+
+func _add_tracker_section(card: Control, cw: float, y: float) -> void:
+	var row_h: float = 32.0
+	var lbl_w: float = 84.0
+	var btn_w: float = 130.0
+	var gap:   float = 6.0
+	var row_x: float = cw * 0.5 - (lbl_w + 10.0 + btn_w * 2.0 + gap) * 0.5
+
+	_tracker_toggle_row(card, row_x, y, lbl_w, btn_w, row_h, gap,
+		"Markers", "Old (12+20)", "All",
+		UDPReceiver.setup_subset,
+		func(first: bool): UDPReceiver.send_tracker_setup(first, UDPReceiver.setup_rigid))
+
+	_tracker_toggle_row(card, row_x, y + row_h + 10.0, lbl_w, btn_w, row_h, gap,
+		"Solver", "Per-marker", "Rigid body",
+		not UDPReceiver.setup_rigid,
+		func(first: bool): UDPReceiver.send_tracker_setup(UDPReceiver.setup_subset, not first))
+
+
+# Generic two-option toggle row. `a_selected` = whether the FIRST option is
+# active; the callback receives true when the first option is chosen.
+func _tracker_toggle_row(parent: Control, x: float, y: float, lbl_w: float, btn_w: float,
+		h: float, gap: float, lbl_text: String, text_a: String, text_b: String,
+		a_selected: bool, on_select: Callable) -> void:
+	var lbl := Label.new()
+	lbl.text = lbl_text
+	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.add_theme_color_override("font_color", Color(0.20, 0.26, 0.50))
+	lbl.custom_minimum_size = Vector2(lbl_w, h)
+	lbl.position            = Vector2(x, y)
+	lbl.vertical_alignment  = VERTICAL_ALIGNMENT_CENTER
+	parent.add_child(lbl)
+
+	var btn_a := Button.new()
+	var btn_b := Button.new()
+	var texts: Array = [text_a, text_b]
+	var btns:  Array = [btn_a, btn_b]
+	for i in 2:
+		var b: Button = btns[i]
+		b.text = texts[i]
+		b.custom_minimum_size = Vector2(btn_w, h)
+		b.size     = Vector2(btn_w, h)
+		b.position = Vector2(x + lbl_w + 10.0 + i * (btn_w + gap), y)
+		b.add_theme_font_size_override("font_size", 13)
+		parent.add_child(b)
+	_style_rate_btn(btn_a, a_selected)
+	_style_rate_btn(btn_b, not a_selected)
+	btn_a.pressed.connect(func():
+		_style_rate_btn(btn_a, true)
+		_style_rate_btn(btn_b, false)
+		on_select.call(true)
+	)
+	btn_b.pressed.connect(func():
+		_style_rate_btn(btn_a, false)
+		_style_rate_btn(btn_b, true)
+		on_select.call(false)
+	)
 
 # ── Hardware section ─────────────────────────────────────────────────────────
 

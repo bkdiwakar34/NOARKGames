@@ -10,6 +10,10 @@ var _tracker_pid: int = -1
 const SCALER_X: int = 2000
 const SCALER_Z: int = 2000
 
+# Demo comparison toggles (set from the game_select settings menu)
+var setup_subset: bool = false   # true = old marker set only (settings.json demo_subset_ids)
+var setup_rigid:  bool = true    # true = joint rigid-body solve, false = per-marker
+
 var _udp: PacketPeerUDP = PacketPeerUDP.new()
 var _thread: Thread = Thread.new()
 var _port: int = 12345
@@ -69,6 +73,15 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 			(raw_z - 0.2) * 1400.0 + 40.0
 		)
 	connected = true
+
+func send_tracker_setup(subset: bool, rigid: bool) -> void:
+	setup_subset = subset
+	setup_rigid  = rigid
+	var markers: String = "subset" if subset else "all"
+	var algo:    String = "rigid" if rigid else "legacy"
+	# Sticky like every other outgoing command; tracker applies it once and
+	# ignores the repeats, re-locking its origin on each actual change.
+	_outgoing = "SETUP:%s,%s" % [markers, algo]
 
 func stop() -> void:
 	_running = false

@@ -130,6 +130,13 @@ class MainClass:
                 print(f"No board geometry at {board_path} — using per-marker PnP. "
                       f"Run calibrate_board.py to enable the joint solve.")
 
+        # Demo comparison mode, switched at runtime by a "SETUP:<markers>,<algo>"
+        # UDP command from Godot's settings menu (old vs new setup for demos).
+        self._demo_subset = set(int(i) for i in settings.get("demo_subset_ids", [12, 20]))
+        self._allowed_ids = None          # None = use all detected markers
+        self._use_rigid   = True          # joint solve when board geometry is loaded
+        self._setup_state = ("all", "rigid")
+
         self.picam2 = None                          # Pi camera object (set in _init_rpi_camera)
         self.video_frame  = None                    # latest captured image, refreshed every frame
         self.first_frame  = True                    # True until the world origin has been locked (see _maybe_lock_origin)
@@ -357,6 +364,46 @@ class MainClass:
         ).T[0]
         return (_r.T @ (_local_camera_t - centroid).reshape(3, 1)).T[0]
 
+    # ── demo comparison mode ──────────────────────────────────────────────────
+
+    def _apply_setup(self, cmd: bytes) -> None:
+        """Handle "SETUP:<subset|all>,<rigid|legacy>" from Godot's settings menu."""
+        try:
+            markers, algo = cmd.decode().split(":", 1)[1].strip().split(",")
+        except ValueError:
+            print(f"Malformed SETUP command: {cmd!r}")
+            return
+        if (markers, algo) == self._setup_state:
+            return  # Godot re-sends its sticky command every 100 ms
+        self._setup_state = (markers, algo)
+        self._allowed_ids = self._demo_subset if markers == "subset" else None
+        self._use_rigid   = (algo == "rigid")
+        self._reset_origin()
+        solver = "rigid body" if (self._use_rigid and self.board is not None) else "per-marker"
+        print(f"Setup changed: markers={sorted(self._allowed_ids) if self._allowed_ids else 'all'}, "
+              f"solver={solver} — re-locking origin")
+
+    def _filter_markers(self, corners, ids):
+        """Drop detections outside the allowed marker set (demo subset mode)."""
+        if ids is None or self._allowed_ids is None:
+            return corners, ids
+        keep = [k for k, _id in enumerate(ids.flatten()) if int(_id) in self._allowed_ids]
+        if not keep:
+            return (), None
+        return tuple(corners[k] for k in keep), ids[keep]
+
+    def _reset_origin(self) -> None:
+        """Force a fresh origin lock and clear pose caches (mode switch mid-run)."""
+        self.first_frame          = True
+        self._origin_stable_count = 0
+        self._prev_corners        = None
+        self._prev_ids            = None
+        self._cached_rvecs        = None
+        self._cached_tvecs        = None
+        self._cached_board_pose   = None
+        self._board_rvec          = None
+        self._board_tvec          = None
+
     # ── per-frame pose paths (return local coords, or None while origin unlocked) ──
 
     def _process_per_marker(self, corners, ids):
@@ -483,16 +530,19 @@ class MainClass:
 
         # Poll command from Godot
         cmd = self._recv_command()
-        if cmd:
+        if cmd.startswith(b"SETUP:"):
+            self._apply_setup(cmd)   # demo mode switch, not a dispatch command
+        elif cmd:
             self.received_message = cmd
 
         # Detect markers
         corners, ids, _ = self.detector.detectMarkers(self.video_frame)
+        corners, ids = self._filter_markers(corners, ids)
         t3 = time.perf_counter() if self.debug else 0.0
         local_coords = None
         if ids is not None:
             self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners, ids)
-            if self.board is not None:
+            if self.board is not None and self._use_rigid:
                 local_coords = self._process_board(corners, ids)
             else:
                 local_coords = self._process_per_marker(corners, ids)

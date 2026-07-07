@@ -7,6 +7,7 @@
 	"pnp_method": "square",
 	"use_board_pnp": true,
 	"board_geometry_file": "board_geometry.json",
+	"demo_subset_ids": [12, 20],
 	"framerate": 100,
 	"filter_type": "none",
 	"kalman_process_noise": 0.01,
