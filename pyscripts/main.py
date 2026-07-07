@@ -137,6 +137,15 @@ class MainClass:
         self._use_rigid   = True          # joint solve when board geometry is loaded
         self._setup_state = ("all", "rigid")
 
+        # Persisted world origin: the locked (R, grip) live in the CAMERA frame,
+        # so as long as the camera doesn't move they stay valid across restarts —
+        # the screen calibration in Godot then survives too. Delete the file
+        # (or set persist_origin false) after physically moving the camera.
+        self._persist_origin = bool(settings.get("persist_origin", True))
+        self._origin_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "origin_lock.json"
+        )
+
         self.picam2 = None                          # Pi camera object (set in _init_rpi_camera)
         self.video_frame  = None                    # latest captured image, refreshed every frame
         self.first_frame  = True                    # True until the world origin has been locked (see _maybe_lock_origin)
@@ -172,6 +181,11 @@ class MainClass:
         self._curr_session = os.path.join(
             "Session-" + datetime.today().strftime("%Y-%m-%d"), "MovementData"
         )
+
+        # Reuse the previous session's world origin (see _persist_origin above).
+        # Must run after first_frame is initialised.
+        if self._persist_origin and os.path.exists(self._origin_path):
+            self._load_origin()
 
         # Camera
         if platform.system() == "Linux":
@@ -308,12 +322,23 @@ class MainClass:
         self._prev_ids = ids
 
         if self._origin_stable_count >= Config.ORIGIN_LOCK_FRAMES:
-            self.first_id   = ids
-            self.first_rvec = rvecs
-            self.first_tvec = tvecs
+            # Anchor to the first detected marker with a known grip offset —
+            # stored in the shared camera-frame form used by both solver paths.
+            ids_flat = np.array(ids).flatten()
+            rvecs_a  = np.array(rvecs).reshape(len(ids_flat), 3)
+            tvecs_a  = np.array(tvecs).reshape(len(ids_flat), 3)
+            for k, _id in enumerate(ids_flat):
+                if int(_id) in Config.MARKER_OFFSETS:
+                    R = cv2.Rodrigues(rvecs_a[k])[0]
+                    self._origin_R    = R
+                    self._origin_grip = R @ Config.MARKER_OFFSETS[int(_id)] + tvecs_a[k]
+                    break
+            else:
+                return  # no known marker in view — keep waiting
             self.first_frame = False
             self._prev_corners = None
             self._prev_ids = None
+            self._save_origin()
             print(f"World origin locked after {self._origin_stable_count} stable frames.")
 
     def _draw_axes(self, rvecs, tvecs) -> None:
@@ -351,19 +376,6 @@ class MainClass:
             return np.nanmean(grip_points, axis=0).flatten()
         return (grip_points[valid] * weights[valid, None]).sum(axis=0) / total_w
 
-    def _get_local_coordinates(self, first_id, first_rvecs, first_tvecs, centroid) -> np.ndarray:
-        first_id    = np.array(first_id).flatten()
-        first_tvecs = np.array(first_tvecs).reshape(len(first_id), 3)
-        first_rvecs = np.array(first_rvecs).reshape(len(first_id), 3)
-
-        _id  = first_id[0]
-        _r   = cv2.Rodrigues(first_rvecs[0])[0]
-        _t   = first_tvecs[0]
-        _local_camera_t = (
-            _r @ Config.MARKER_OFFSETS[_id].reshape(3, 1) + _t.reshape(3, 1)
-        ).T[0]
-        return (_r.T @ (_local_camera_t - centroid).reshape(3, 1)).T[0]
-
     # ── demo comparison mode ──────────────────────────────────────────────────
 
     def _apply_setup(self, cmd: bytes) -> None:
@@ -393,8 +405,10 @@ class MainClass:
         return tuple(corners[k] for k in keep), ids[keep]
 
     def _reset_origin(self) -> None:
-        """Force a fresh origin lock and clear pose caches (mode switch mid-run)."""
-        self.first_frame          = True
+        """Clear pose caches on a mode switch. The origin lives in the camera
+        frame and is shared by both solver paths, so an existing lock is kept —
+        re-lock only happens when no origin exists yet."""
+        self.first_frame          = self._origin_R is None
         self._origin_stable_count = 0
         self._prev_corners        = None
         self._prev_ids            = None
@@ -403,6 +417,30 @@ class MainClass:
         self._cached_board_pose   = None
         self._board_rvec          = None
         self._board_tvec          = None
+
+    # ── origin persistence ────────────────────────────────────────────────────
+
+    def _save_origin(self) -> None:
+        if not self._persist_origin:
+            return
+        with open(self._origin_path, "w") as f:
+            json.dump({
+                "R":    np.asarray(self._origin_R).tolist(),
+                "grip": np.asarray(self._origin_grip).flatten().tolist(),
+            }, f)
+
+    def _load_origin(self) -> None:
+        try:
+            with open(self._origin_path) as f:
+                data = json.load(f)
+            self._origin_R    = np.array(data["R"], dtype=np.float64).reshape(3, 3)
+            self._origin_grip = np.array(data["grip"], dtype=np.float64).flatten()
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"Could not load {self._origin_path} ({exc}) — will re-lock.")
+            return
+        self.first_frame = False
+        print(f"World origin restored from {self._origin_path} "
+              f"(delete this file after moving the camera).")
 
     # ── per-frame pose paths (return local coords, or None while origin unlocked) ──
 
@@ -420,9 +458,7 @@ class MainClass:
 
         self._draw_axes(rvecs, tvecs)
         centroid = self._get_centroid(corners, ids, rvecs, tvecs)
-        return self._get_local_coordinates(
-            self.first_id, self.first_rvec, self.first_tvec, centroid
-        )
+        return self._origin_R.T @ (self._origin_grip - centroid)
 
     def _process_board(self, corners, ids):
         """Joint path: one rigid-body solvePnP over all visible known markers."""
@@ -470,6 +506,7 @@ class MainClass:
             self.first_frame = False
             self._prev_corners = None
             self._prev_ids = None
+            self._save_origin()
             print(f"World origin locked after {self._origin_stable_count} stable frames (board mode).")
 
     def _draw_board_overlay(self, rvec, tvec, grip) -> None:
