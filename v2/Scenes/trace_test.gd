@@ -14,11 +14,10 @@ var _mode_lbl: Label
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
-	var bg := ColorRect.new()
-	bg.color = Color(0.07, 0.09, 0.16)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
+	# Background is painted inside _draw(), NOT via a ColorRect child —
+	# children render on top of this node's own drawing and would hide the
+	# rectangles, trail and cursor.
+	mouse_filter = Control.MOUSE_FILTER_STOP  # keep clicks off game_select below
 
 	_mode_lbl = Label.new()
 	_mode_lbl.add_theme_font_size_override("font_size", 16)
@@ -72,6 +71,7 @@ func _clear_trail() -> void:
 
 func _draw() -> void:
 	var vp: Vector2 = get_viewport_rect().size
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.07, 0.09, 0.16), true)
 	var centre: Vector2 = vp * 0.5
 	var usable: Vector2 = vp * 0.86
 
