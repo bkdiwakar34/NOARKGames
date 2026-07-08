@@ -13,9 +13,13 @@ Procedure:
   3. Watch the pair counters in the preview; aim for >= 30 per pair.
   4. Press S to solve and save, Q/Esc to abort.
 
-Run: python pyscripts/calibrate_board.py
+Run on the Pi:   python pyscripts/calibrate_board.py
+Run on the Q6A:  python pyscripts/calibrate_board.py --backend rcam --cam-id CAM2
+                 (board geometry only needs one camera — either works, no
+                 need to repeat this per camera)
 """
 
+import argparse
 import json
 import os
 import platform
@@ -76,7 +80,17 @@ def init_detector() -> aruco.ArucoDetector:
     return aruco.ArucoDetector(dictionary, params)
 
 
-def init_camera(frame_size):
+def init_camera(frame_size, backend: str = "auto", cam_id: str = "CAM2"):
+    """backend: "auto" (picamera2 on Linux, cv2 webcam fallback elsewhere,
+    same as before) or "rcam" (Dragon Q6A, explicit cam_id e.g. "CAM2"/"CAM3")."""
+    if backend == "rcam":
+        from rcam import Camera
+
+        cam = Camera(cam_id)
+        cam.configure(size=frame_size, bit_depth=8)
+        cam.set_controls({"ExposureTime": 5000, "AnalogueGain": 4.0})
+        cam.start()
+        return ("rcam", cam)
     if platform.system() == "Linux":
         from picamera2 import Picamera2
         picam2 = Picamera2()
@@ -94,6 +108,8 @@ def init_camera(frame_size):
 
 def grab_gray(cam, frame_size):
     kind, src = cam
+    if kind == "rcam":
+        return src.capture_array()   # already mono uint8 at bit_depth=8
     if kind == "pi":
         frame = src.capture_array()
         return frame[:frame_size[1], :frame_size[0]] if frame.ndim == 2 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -105,7 +121,7 @@ def grab_gray(cam, frame_size):
 
 def release_camera(cam):
     kind, src = cam
-    if kind == "pi":
+    if kind in ("pi", "rcam"):
         src.stop()
     else:
         src.release()
@@ -173,12 +189,20 @@ def solve_board_frame(edges):
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--backend", choices=["auto", "rcam"], default="auto",
+                        help="'auto' = picamera2 on Linux / cv2 webcam elsewhere (default). "
+                             "'rcam' = Dragon Q6A OV9281 via rcam (requires --cam-id).")
+    parser.add_argument("--cam-id", default="CAM2",
+                        help="rcam camera label, e.g. CAM2 or CAM3 (only used with --backend rcam)")
+    args = parser.parse_args()
+
     K, D, frame_size = load_calibration()
     map1, map2 = cv2.fisheye.initUndistortRectifyMap(
         K, D, np.eye(3), K, frame_size, cv2.CV_16SC2
     )
     detector = init_detector()
-    cam = init_camera(frame_size)
+    cam = init_camera(frame_size, backend=args.backend, cam_id=args.cam_id)
 
     device_ids = set(MARKER_OFFSETS)
     pair_samples: dict = {}
