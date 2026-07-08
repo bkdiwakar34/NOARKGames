@@ -8,7 +8,4 @@ dependencies = [
 	"opencv-contrib-python>=4.13.0.92",
 	"scipy>=1.17.1",
 	"toml>=0.10.2",
-	"bless>=0.1.7",
-	"bleak>=3.0.1",
-	"simplepyble>=0.12.1",
 ]
