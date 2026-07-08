@@ -10,9 +10,12 @@ After saving, a verify step reports three quality numbers:
   - precision (mm)  — std of position across still frames
   - fit       (px)  — reprojection error on the verify frames
 
-Run on the Pi:  python pyscripts/calibrate_camera.py
+Run on the Pi:        python pyscripts/calibrate_camera.py
+Run on the Q6A:       python pyscripts/calibrate_camera.py --backend rcam --cam-id CAM2
+                      python pyscripts/calibrate_camera.py --backend rcam --cam-id CAM3 --output camera_calib_1.toml
 """
 
+import argparse
 import os
 import platform
 import time
@@ -33,12 +36,21 @@ STABLE_FRAMES       = 15         # how many frames the board must barely move
 STABLE_PX_THRESHOLD = 2.0        # max mean corner motion (px) to count as still
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_PATH = os.path.join(_SCRIPT_DIR, "camera_calib.toml")
 
 
 # ── camera ───────────────────────────────────────────────────────────────────
 
-def init_camera():
+def init_camera(backend: str = "auto", cam_id: str = "CAM2"):
+    """backend: "auto" (picamera2 on Linux, cv2 webcam fallback elsewhere,
+    same as before) or "rcam" (Dragon Q6A, explicit cam_id e.g. "CAM2"/"CAM3")."""
+    if backend == "rcam":
+        from rcam import Camera
+
+        cam = Camera(cam_id)
+        cam.configure(size=FRAME_SIZE, bit_depth=8)
+        cam.set_controls({"ExposureTime": 5000, "AnalogueGain": 4.0})
+        cam.start()
+        return ("rcam", cam)
     if platform.system() == "Linux":
         from picamera2 import Picamera2
 
@@ -59,6 +71,8 @@ def init_camera():
 
 def capture_gray(cam):
     kind, src = cam
+    if kind == "rcam":
+        return src.capture_array()   # already mono uint8 at bit_depth=8
     if kind == "pi":
         frame = src.capture_array()
         # YUV420: Y plane (grayscale) is the first FRAME_SIZE[1] rows.
@@ -329,7 +343,19 @@ def countdown(cam, seconds, message):
 
 
 def main():
-    cam = init_camera()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--backend", choices=["auto", "rcam"], default="auto",
+                        help="'auto' = picamera2 on Linux / cv2 webcam elsewhere (default). "
+                             "'rcam' = Dragon Q6A OV9281 via rcam (requires --cam-id).")
+    parser.add_argument("--cam-id", default="CAM2",
+                        help="rcam camera label, e.g. CAM2 or CAM3 (only used with --backend rcam)")
+    parser.add_argument("--output", default="camera_calib.toml",
+                        help="output .toml filename, written next to this script "
+                             "(use camera_calib_1.toml for the second Q6A camera)")
+    args = parser.parse_args()
+    output_path = os.path.join(_SCRIPT_DIR, args.output)
+
+    cam = init_camera(backend=args.backend, cam_id=args.cam_id)
     imgpoints = []
     tracker = StabilityTracker()
     last_capture = 0.0
@@ -426,20 +452,20 @@ def main():
                 "board_inner_corners": list(BOARD_INNER_CORNERS),
             }
         }
-        with open(OUTPUT_PATH, "w") as f:
+        with open(output_path, "w") as f:
             toml.dump(data, f)
-        print(f"Saved to {OUTPUT_PATH}")
+        print(f"Saved to {output_path}")
 
         verify(cam, K, D)
 
-        overlay = draw_banner(to_bgr(capture_gray(cam)), f"Done — saved {os.path.basename(OUTPUT_PATH)}")
+        overlay = draw_banner(to_bgr(capture_gray(cam)), f"Done — saved {os.path.basename(output_path)}")
         cv2.imshow("calibrate", overlay)
         cv2.waitKey(3000)
 
     finally:
         cv2.destroyAllWindows()
         kind, src = cam
-        if kind == "pi":
+        if kind in ("pi", "rcam"):
             src.stop()
         else:
             src.release()
