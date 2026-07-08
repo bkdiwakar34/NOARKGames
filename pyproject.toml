@@ -9,3 +9,14 @@ dependencies = [
 	"scipy>=1.17.1",
 	"toml>=0.10.2",
 ]
+
+# This is a Godot project, not a Python package — pyproject.toml exists only
+# to declare pyscripts/'s dependencies. Without this, setuptools' automatic
+# package discovery finds every top-level folder (v2/, rcam/, Games/, ...)
+# and refuses to build.
+[tool.setuptools]
+packages = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
