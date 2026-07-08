@@ -15,6 +15,11 @@ How to set up the hardware and run the system on a Raspberry Pi. For what the sy
 | Repo on Pi | `/home/sujith/Documents/NOARKGames/` |
 | Godot binary | `/home/sujith/Downloads/Godot_v4.5-stable_linux.arm64` |
 
+A Radxa Dragon Q6A with two OV9281 cameras (via the `rcam` package, see below)
+is also supported, as an alternative to the Pi 5 — same repo, a
+`camera_backend` switch in `settings.json` picks which one runs. The Pi setup
+above is unaffected either way.
+
 ---
 
 ## First-time setup on a fresh Pi
@@ -65,6 +70,25 @@ flags any marker whose `MARKER_OFFSETS` entry disagrees by > 5 mm.
 `main.py` uses the joint solve automatically when the file exists; without it,
 it falls back to the old per-marker method. Redo only if a marker is re-glued.
 Disable via `"use_board_pnp": false` in settings.json.
+
+### 3c. Dragon Q6A dual-camera setup (optional, instead of the Pi's single OV9281)
+
+Requires Python ≥3.13 and a Rust toolchain on the Q6A for `uv sync` to build `rcam._native` — see [`rcam/README.md`](../rcam/README.md). `main.py` imports `rcam` directly into its own process (not a subprocess), so **the main project's own venv** (step 2 above), not just `rcam/`'s, must be created with Python ≥3.13 — check with `python3 --version` before `python -m venv .venv` on the Q6A.
+
+```bash
+sudo modprobe ov9282        # out-of-tree driver; once per boot unless persisted
+                             # (see rcam/ov9281/README.md for a persistent option)
+cd rcam && uv sync           # builds rcam._native for this machine
+```
+
+Then, from the repo root:
+
+1. Run `calibrate_camera.py` once per camera — the default `camera_calib.toml` for cam0 (`CAM2`), and again with `"calibration_file"` overridden (or renamed after) to produce `camera_calib_1.toml` for cam1 (`CAM3`).
+2. Run `calibrate_board.py` as usual (one board, either camera) if `board_geometry.json` doesn't exist yet.
+3. Run `python pyscripts/calibrate_stereo.py` — solves the fixed rigid transform between the two cameras by watching both independently track the same board simultaneously (no separate checkerboard needed). Move the device around until the sample counter passes 60, press **S** to save `pyscripts/stereo_extrinsics.json`.
+4. Set `"camera_backend": "rcam_dual"` in `settings.json` (leave it `"auto"` to keep using the Pi/picamera2 path unchanged).
+
+If one camera loses its feed mid-session (occlusion, disconnect), the tracker automatically falls back to tracking with the surviving camera rather than stopping.
 
 ### 4. Calibrate sensor-to-screen mapping (one-time per workspace setup)
 

@@ -33,6 +33,7 @@ from board import (
     MARKER_OFFSETS,
     marker_object_points,
 )
+from pose_averaging import robust_average_transform
 
 MIN_PAIR_SAMPLES = 30
 MAX_REPROJ_PX    = 1.0    # reject poorly-fitting single-marker solves
@@ -47,12 +48,15 @@ OUTPUT_PATH = os.path.join(_SCRIPT_DIR, "board_geometry.json")
 
 # ── setup (mirrors diagnose_jitter.py) ───────────────────────────────────────
 
-def load_calibration():
+def load_calibration(settings_key: str = "calibration_file", default_name: str = "camera_calib.toml"):
+    """settings_key/default_name let calibrate_stereo.py call this a second
+    time for cam1's own intrinsics (settings_key="camera_calib_file_1"),
+    without duplicating the path-resolution/loading logic."""
     settings_path = os.path.join(_SCRIPT_DIR, "..", "settings.json")
-    calib_name = "camera_calib.toml"
+    calib_name = default_name
     if os.path.exists(settings_path):
         with open(settings_path) as f:
-            calib_name = json.load(f).get("calibration_file", calib_name)
+            calib_name = json.load(f).get(settings_key, calib_name)
     path = calib_name if os.path.isabs(calib_name) else os.path.join(_SCRIPT_DIR, calib_name)
     if not os.path.exists(path):
         sys.exit(f"Calibration file not found: {path}. Run calibrate_camera.py first.")
@@ -127,47 +131,6 @@ def robust_marker_pose(corner, K):
         return None  # near-frontal view: the mirrored tilt fits almost as well
     R = cv2.Rodrigues(rvecs[0])[0]
     return R, np.asarray(tvecs[0]).flatten()
-
-
-# ── averaging ────────────────────────────────────────────────────────────────
-
-def mean_rotation(Rs):
-    """Chordal mean: average the matrices, project back onto SO(3) via SVD."""
-    U, _, Vt = np.linalg.svd(np.mean(Rs, axis=0))
-    if np.linalg.det(U @ Vt) < 0:
-        U[:, -1] *= -1
-    return U @ Vt
-
-
-def rotation_angle(R):
-    return float(np.arccos(np.clip((np.trace(R) - 1) / 2, -1.0, 1.0)))
-
-
-def robust_average_transform(samples):
-    """Trimmed average of relative transforms. Returns (R, t, stats)."""
-    Rs = np.array([s[0] for s in samples])
-    ts = np.array([s[1] for s in samples])
-    keep = np.ones(len(samples), dtype=bool)
-    for _ in range(2):
-        R_bar = mean_rotation(Rs[keep])
-        t_bar = np.median(ts[keep], axis=0)
-        ang = np.array([rotation_angle(R @ R_bar.T) for R in Rs])
-        dt  = np.linalg.norm(ts - t_bar, axis=1)
-        new_keep = (ang < ROT_TOL_RAD) & (dt < TRANS_TOL_M)
-        if new_keep.sum() < max(10, 0.2 * len(samples)):
-            print("    [warn] outlier trim too aggressive — keeping all samples")
-            new_keep = np.ones(len(samples), dtype=bool)
-        keep = new_keep
-    R_bar = mean_rotation(Rs[keep])
-    t_bar = ts[keep].mean(axis=0)
-    stats = {
-        "n_used": int(keep.sum()),
-        "n_total": len(samples),
-        "rot_residual_deg": float(np.rad2deg(
-            np.mean([rotation_angle(R @ R_bar.T) for R in Rs[keep]]))),
-        "trans_residual_mm": float(np.linalg.norm(ts[keep] - t_bar, axis=1).mean() * 1000),
-    }
-    return R_bar, t_bar, stats
 
 
 # ── graph: chain pairwise transforms to the reference marker ─────────────────
@@ -283,7 +246,7 @@ def main():
         if len(samples) < MIN_PAIR_SAMPLES:
             print(f"  {pair[0]}-{pair[1]}: only {len(samples)} samples — skipped")
             continue
-        R, t, stats = robust_average_transform(samples)
+        R, t, stats = robust_average_transform(samples, ROT_TOL_RAD, TRANS_TOL_M)
         edges[pair] = (R, t)
         edge_stats[f"{pair[0]}-{pair[1]}"] = stats
         print(f"  {pair[0]}-{pair[1]}: {stats['n_used']}/{stats['n_total']} used, "

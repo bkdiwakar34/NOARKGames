@@ -4,6 +4,7 @@ import os
 import platform
 import socket
 import struct
+import threading
 import time
 from datetime import datetime
 from typing import Optional
@@ -11,6 +12,7 @@ from typing import Optional
 import cv2
 import numpy as np
 from cv2 import aruco
+from scipy.spatial.transform import Rotation as ScipyRotation
 
 import board as board_model
 from board import BoardGeometry, estimate_board_pose
@@ -21,6 +23,42 @@ from filters import (
     NoOpFilter3D,
     OneEuroFilter3D,
 )
+from pose_averaging import rotation_angle
+
+
+class _LatestFrameSlot:
+    """Lock-guarded single-slot frame holder for a capture thread — always
+    exposes the newest frame, overwriting the previous one rather than
+    queuing (a queue.Queue's FIFO/blocking semantics are the wrong fit when
+    all a reader ever wants is "whatever's newest")."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._frame = None
+        self._ts = None
+
+    def put(self, frame, ts: float) -> None:
+        with self._lock:
+            self._frame, self._ts = frame, ts
+
+    def get_latest(self):
+        with self._lock:
+            return self._frame, self._ts
+
+
+def _weighted_quaternion_average(Ra: np.ndarray, Rb: np.ndarray,
+                                  wa: float, wb: float) -> np.ndarray:
+    """Two-rotation weighted average: flip to the same quaternion
+    hemisphere, weighted-sum, renormalize. Sufficient for N=2 with an
+    upstream disagreement gate already rejecting cases (large-angle
+    disagreement) where full Markley-style averaging would matter."""
+    qa = ScipyRotation.from_matrix(Ra).as_quat()
+    qb = ScipyRotation.from_matrix(Rb).as_quat()
+    if np.dot(qa, qb) < 0:
+        qb = -qb
+    q = wa * qa + wb * qb
+    q /= np.linalg.norm(q)
+    return ScipyRotation.from_quat(q).as_matrix()
 
 
 def _load_settings() -> dict:
@@ -112,6 +150,7 @@ class MainClass:
         # answers on near-identical inputs.
         stability_threshold = float(settings.get("corner_stability_threshold", 2.0))
         self.corner_stability = CornerStabilityFilter(threshold=stability_threshold)
+        self.corner_stability_1 = CornerStabilityFilter(threshold=stability_threshold)  # cam1, dual-camera mode only
         self._cached_rvecs = None
         self._cached_tvecs = None
 
@@ -122,6 +161,9 @@ class MainClass:
         self._board_rvec = None      # last good board pose — ITERATIVE guess for the next frame
         self._board_tvec = None
         self._cached_board_pose = None
+        self._board_rvec_1 = None    # cam1's own guess cache, dual-camera mode only
+        self._board_tvec_1 = None
+        self._cached_board_pose_1 = None
         self._origin_R    = None     # locked board orientation (world frame)
         self._origin_grip = None     # locked grip position in camera frame
         if settings.get("use_board_pnp", True):
@@ -195,11 +237,27 @@ class MainClass:
         if self._persist_origin and os.path.exists(self._origin_path):
             self._load_origin()
 
+        # Dual-camera (rcam / Dragon Q6A) fusion state — only exercised when
+        # camera_backend == "rcam_dual"; harmless to set up unconditionally.
+        self.camera_matrix_1 = None
+        self.map1_1 = None
+        self.map2_1 = None
+        self._stereo_Rx = None                # cam1 -> cam0 rotation, from stereo_extrinsics.json
+        self._stereo_tx = None                # cam1 -> cam0 translation
+        self._stereo_max_reproj_px      = float(settings.get("stereo_max_reproj_px", 4.0))
+        self._stereo_disagree_rot_rad   = np.deg2rad(float(settings.get("stereo_disagree_rot_deg", 6.0)))
+        self._stereo_disagree_trans_m   = float(settings.get("stereo_disagree_trans_mm", 20.0)) / 1000.0
+        self._stereo_max_frame_skew_s   = float(settings.get("stereo_max_frame_skew_ms", 20.0)) / 1000.0
+        self._origin_stable_m           = float(settings.get("origin_stable_m", 0.002))
+        self._origin_stable_rad         = float(settings.get("origin_stable_rad", 0.0175))
+        self._disagree_count  = 0             # consecutive frames cam0/cam1 poses disagreed too much
+        self._disagree_warned = False
+        self._prev_fused_pose = None          # pose-space stability gate for dual-camera origin lock
+
         # Camera
-        if platform.system() == "Linux":
-            self._init_rpi_camera()
-        else:
-            self._init_camera()
+        self._camera_backend = str(settings.get("camera_backend", "auto")).lower()
+        self._dual_camera = self._camera_backend == "rcam_dual"
+        self._init_camera_backend(settings)
 
         self._init_udp_socket()
 
@@ -264,6 +322,177 @@ class MainClass:
         self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         self.camera.set(cv2.CAP_PROP_FPS, 30)
 
+    def _init_camera_backend(self, settings: dict) -> None:
+        """Dispatches to legacy picamera2, the new rcam backend (single or
+        dual OV9281), or the Windows cv2.VideoCapture dev fallback.
+
+        "auto" reproduces today's exact platform.system()=="Linux" -> picamera2
+        behavior — existing Pi deployments need no settings.json changes at
+        all. Dragon Q6A deployments opt in explicitly via camera_backend."""
+        if self._camera_backend == "rcam_dual":
+            self._init_rcam_dual(settings)
+        elif self._camera_backend == "rcam_single":
+            self._init_rcam_single(settings)
+        elif platform.system() == "Linux":
+            self._init_rpi_camera()
+        else:
+            self._init_camera()
+
+    def _rcam_controls(self, settings: dict) -> dict:
+        """Exposure/gain/framerate controls for an rcam Camera — mirrors the
+        fixed 5 ms exposure / locked auto-exposure / target framerate used
+        for the picamera2 path."""
+        return {
+            "ExposureTime": int(settings.get("rcam_exposure_us", 5000)),
+            "AnalogueGain": float(settings.get("rcam_gain", 4.0)),
+            "FrameRate": self._framerate,
+        }
+
+    def _start_capture_thread(self, cam_index: int) -> None:
+        self._cam_threads[cam_index] = threading.Thread(
+            target=self._capture_loop, args=(cam_index,), daemon=True
+        )
+        self._cam_threads[cam_index].start()
+
+    def _init_rcam_single(self, settings: dict) -> None:
+        """One rcam camera (Dragon Q6A, single-camera mode) — same shape as
+        _init_rpi_camera but for the new V4L2-direct backend."""
+        from rcam import Camera
+
+        cam_id = settings.get("rcam_id_0", "CAM2")
+        cam = Camera(cam_id)
+        cam.configure(size=self.frame_size, bit_depth=8)
+        cam.set_controls(self._rcam_controls(settings))
+        cam.start()
+
+        self._rcam         = [cam]
+        self._frame_slots   = [_LatestFrameSlot()]
+        self._cam_errors    = [None]
+        self._cam_error_logged = [False]
+        self._cam_threads   = [None]
+        self._stop_capture  = threading.Event()
+        self._start_capture_thread(0)
+
+    def _init_rcam_dual(self, settings: dict) -> None:
+        """Two rcam cameras (Dragon Q6A dual-camera mode), each with its own
+        capture thread, intrinsics/undistort map, and pose-solve state."""
+        from rcam import Camera
+
+        cam_ids = [settings.get("rcam_id_0", "CAM2"), settings.get("rcam_id_1", "CAM3")]
+        controls = self._rcam_controls(settings)
+        self._rcam = []
+        for cam_id in cam_ids:
+            cam = Camera(cam_id)
+            cam.configure(size=self.frame_size, bit_depth=8)
+            cam.set_controls(controls)
+            cam.start()
+            self._rcam.append(cam)
+
+        self._frame_slots      = [_LatestFrameSlot(), _LatestFrameSlot()]
+        self._cam_errors       = [None, None]
+        self._cam_error_logged = [False, False]
+        self._cam_threads      = [None, None]
+        self._stop_capture     = threading.Event()
+        self._start_capture_thread(0)
+        self._start_capture_thread(1)
+
+        self._load_second_intrinsics(settings)
+        self._load_stereo_extrinsics(settings)
+
+    def _load_second_intrinsics(self, settings: dict) -> None:
+        """Cam1's own fisheye intrinsics — each OV9281 needs its own
+        calibration file, same shape as the one MainClass.__init__ already
+        loaded for cam0 via cam_calib_path."""
+        import toml
+
+        _pyscripts_dir = os.path.dirname(os.path.abspath(__file__))
+        calib_name = settings.get("camera_calib_file_1", "camera_calib_1.toml")
+        path = calib_name if os.path.isabs(calib_name) else os.path.join(_pyscripts_dir, calib_name)
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"Dual-camera mode needs cam1's own intrinsics — not found at {path}. "
+                f"Run calibrate_camera.py for the second OV9281 first."
+            )
+        calib_data = toml.load(path)
+        self.camera_matrix_1 = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
+        dist_coeffs_1 = np.array(calib_data["calibration"]["dist_coeffs"])
+        self.map1_1, self.map2_1 = cv2.fisheye.initUndistortRectifyMap(
+            self.camera_matrix_1, dist_coeffs_1, np.eye(3),
+            self.camera_matrix_1, self.frame_size, cv2.CV_16SC2,
+        )
+        print(f"Loaded cam1 calibration from {path}")
+
+    def _load_stereo_extrinsics(self, settings: dict) -> None:
+        """(Rx, tx): cam1 -> cam0 rigid transform, produced by calibrate_stereo.py."""
+        _pyscripts_dir = os.path.dirname(os.path.abspath(__file__))
+        name = settings.get("stereo_extrinsics_file", "stereo_extrinsics.json")
+        path = name if os.path.isabs(name) else os.path.join(_pyscripts_dir, name)
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"Dual-camera mode needs the cam-to-cam extrinsic calibration — not found "
+                f"at {path}. Run calibrate_stereo.py first."
+            )
+        with open(path) as f:
+            data = json.load(f)
+        self._stereo_Rx = np.array(data["Rx"], dtype=np.float64).reshape(3, 3)
+        self._stereo_tx = np.array(data["tx"], dtype=np.float64).flatten()
+        print(f"Loaded stereo extrinsics from {path}")
+
+    def _capture_loop(self, cam_index: int) -> None:
+        """Runs in a daemon thread: writes (frame, timestamp) into this
+        camera's slot every time a new frame is ready. capture_array() is
+        blocking with no timeout; on stream-end it raises, which we record
+        as this camera's error rather than letting it cross the thread
+        boundary and kill the process silently."""
+        try:
+            while not self._stop_capture.is_set():
+                frame = self._rcam[cam_index].capture_array()
+                self._frame_slots[cam_index].put(frame, time.monotonic())
+        except Exception as exc:
+            self._cam_errors[cam_index] = exc
+
+    def _capture_single_frame(self):
+        """One frame from whichever single-camera backend is active. Returns
+        None if a frame isn't available this iteration (dev cv2 fallback, or
+        an rcam capture thread that hasn't produced a frame yet)."""
+        if self._camera_backend == "rcam_single":
+            frame, _ts = self._frame_slots[0].get_latest()
+            if self._cam_errors[0] is not None:
+                raise self._cam_errors[0]
+            return frame
+        if platform.system() == "Linux":
+            return self.picam2.capture_array()
+        ret, frame = self.camera.read()
+        if not ret or frame is None:
+            return None
+        return frame
+
+    def _capture_dual_frames(self):
+        """Latest frame from each capture thread's slot. A dead camera
+        (thread raised, e.g. on stream end) reports None here from then on —
+        _fuse_board_poses already falls back to the surviving camera's solo
+        pose, so no separate "degrade to single camera" path is needed.
+        Raises only when both cameras have died (nothing left to track,
+        mirroring run()'s existing "no fresh UDP for 3s" exit)."""
+        if self._cam_errors[0] is not None and self._cam_errors[1] is not None:
+            raise RuntimeError(
+                f"Both camera threads died (cam0: {self._cam_errors[0]!r}, "
+                f"cam1: {self._cam_errors[1]!r})"
+            )
+        for i in (0, 1):
+            if self._cam_errors[i] is not None and not self._cam_error_logged[i]:
+                print(f"[warn] camera {i} capture thread died ({self._cam_errors[i]!r}) "
+                      f"— continuing tracking on the surviving camera.")
+                self._cam_error_logged[i] = True
+
+        frame0, ts0 = (None, None) if self._cam_errors[0] is not None else self._frame_slots[0].get_latest()
+        frame1, ts1 = (None, None) if self._cam_errors[1] is not None else self._frame_slots[1].get_latest()
+        if frame0 is not None and frame1 is not None and abs(ts0 - ts1) > self._stereo_max_frame_skew_s:
+            # Stale pairing during fast motion — treat cam1 as "not ready yet"
+            # rather than fusing a mismatched pair; usually re-syncs next frame.
+            frame1 = None
+        return frame0, frame1
+
     # ── transport init ────────────────────────────────────────────────────────
 
     def _init_udp_socket(self) -> None:
@@ -316,6 +545,128 @@ class MainClass:
                 rvecs.append(rvec.flatten())
                 tvecs.append(tvec.flatten())
         return np.array(rvecs), np.array(tvecs)
+
+    def _solve_camera_pose(self, cam_index: int, corners, ids):
+        """Board-pose solve for one camera, using its own camera_matrix,
+        stability filter, and ITERATIVE-guess cache. Returns (rvec, tvec,
+        reproj), or None if no known marker is visible, the solve fails, or
+        (dual-camera mode only) reproj exceeds stereo_max_reproj_px — a bad
+        solve here must be hard-rejected before it reaches the fusion
+        weighting, since inverse-variance weighting only *down*-weights a
+        bad estimate, it doesn't reject one.
+
+        cam_index 0 is also how the single-camera path solves its pose now
+        (this is the same guess-cache/BOARD_MAX_REPROJ_PX-reinit logic that
+        used to live inline in _process_board, just parameterized so cam1
+        can reuse it with its own state)."""
+        if cam_index == 0:
+            camera_matrix = self.camera_matrix
+            stability     = self.corner_stability
+            cached        = self._cached_board_pose
+            guess_rvec    = self._board_rvec
+            guess_tvec    = self._board_tvec
+        else:
+            camera_matrix = self.camera_matrix_1
+            stability     = self.corner_stability_1
+            cached        = self._cached_board_pose_1
+            guess_rvec    = self._board_rvec_1
+            guess_tvec    = self._board_tvec_1
+
+        if stability.is_stable(corners, ids) and cached is not None:
+            rvec, tvec, reproj = cached
+        else:
+            guess = (guess_rvec, guess_tvec) if guess_rvec is not None else None
+            result = estimate_board_pose(self.board, corners, ids, camera_matrix, guess)
+            if result is None:
+                return None
+            rvec, tvec, reproj = result
+            # A stale guess (fast motion, re-entry after occlusion) can trap the
+            # iterative solver in a bad local minimum — re-initialise from scratch.
+            if guess is not None and reproj > Config.BOARD_MAX_REPROJ_PX:
+                fresh = estimate_board_pose(self.board, corners, ids, camera_matrix, None)
+                if fresh is not None and fresh[2] < reproj:
+                    rvec, tvec, reproj = fresh
+            cached = (rvec, tvec, reproj)
+            if cam_index == 0:
+                self._cached_board_pose = cached
+                self._board_rvec, self._board_tvec = rvec, tvec
+            else:
+                self._cached_board_pose_1 = cached
+                self._board_rvec_1, self._board_tvec_1 = rvec, tvec
+
+        if self._dual_camera and reproj > self._stereo_max_reproj_px:
+            return None
+        return rvec, tvec, reproj
+
+    def _transform_pose_to_cam0(self, pose1):
+        """cam1's (rvec, tvec, reproj) -> (R, t, reproj) expressed in cam0's
+        frame, via the calibrated extrinsic self._stereo_Rx/self._stereo_tx."""
+        rvec1, tvec1, reproj1 = pose1
+        R1 = cv2.Rodrigues(rvec1)[0]
+        R1p = self._stereo_Rx @ R1
+        t1p = self._stereo_Rx @ tvec1 + self._stereo_tx
+        return R1p, t1p, reproj1
+
+    def _fuse_board_poses(self, pose0, pose1):
+        """Combines cam0's and cam1's independent board-pose solves into one
+        pose in cam0's frame.
+
+        If only one camera saw the board, its pose is used directly
+        (transformed into cam0's frame first if it's cam1) — this is also
+        how a dead or occluded camera degrades gracefully to single-camera
+        tracking; no separate fallback path is needed.
+
+        If both saw it but disagree by more than the configured tolerance
+        (stale stereo calibration, or a transient bad solve in one camera),
+        falls back to the lower-reprojection-error camera for this frame and
+        logs a one-time warning after the disagreement persists — never
+        fuses garbage, never crashes.
+
+        Otherwise fuses via inverse-reprojection-error-squared-weighted
+        translation mean and a simple weighted quaternion average for
+        rotation (full Markley-style averaging is unnecessary for N=2 with
+        this disagreement gate already in place)."""
+        if pose0 is None and pose1 is None:
+            return None
+        if pose1 is None:
+            return pose0
+        R1p, t1p, e1 = self._transform_pose_to_cam0(pose1)
+        if pose0 is None:
+            return cv2.Rodrigues(R1p)[0].flatten(), t1p, e1
+
+        rvec0, tvec0, e0 = pose0
+        R0 = cv2.Rodrigues(rvec0)[0]
+
+        ang  = rotation_angle(R0 @ R1p.T)
+        dist = float(np.linalg.norm(tvec0 - t1p))
+        if ang > self._stereo_disagree_rot_rad or dist > self._stereo_disagree_trans_m:
+            self._disagree_count += 1
+            if self._disagree_count >= 30 and not self._disagree_warned:
+                print("[warn] cam0/cam1 board poses disagree persistently — "
+                      "stereo extrinsic calibration may be stale; re-run calibrate_stereo.py.")
+                self._disagree_warned = True
+            return pose0 if e0 <= e1 else (cv2.Rodrigues(R1p)[0].flatten(), t1p, e1)
+        self._disagree_count  = 0
+        self._disagree_warned = False
+
+        w0, w1  = 1.0 / max(e0, 1e-3) ** 2, 1.0 / max(e1, 1e-3) ** 2
+        t_fused = (w0 * tvec0 + w1 * t1p) / (w0 + w1)
+        R_fused = _weighted_quaternion_average(R0, R1p, w0, w1)
+        reproj_fused = (w0 * e0 + w1 * e1) / (w0 + w1)
+        return cv2.Rodrigues(R_fused)[0].flatten(), t_fused, reproj_fused
+
+    def _pose_is_stable(self, rvec, tvec) -> bool:
+        """Dual-camera origin-lock stability gate: True if translation/
+        rotation delta from the previous frame's fused pose is below
+        origin_stable_m/origin_stable_rad. Replaces the pixel-based
+        _detection_matches_prev for this path, since two cameras' pixel
+        spaces aren't directly comparable."""
+        if self._prev_fused_pose is None:
+            return False
+        prev_rvec, prev_tvec = self._prev_fused_pose
+        dt = float(np.linalg.norm(tvec - prev_tvec))
+        dr = rotation_angle(cv2.Rodrigues(rvec)[0] @ cv2.Rodrigues(prev_rvec)[0].T)
+        return dt < self._origin_stable_m and dr < self._origin_stable_rad
 
     def _detection_matches_prev(self, corners, ids) -> bool:
         """True if the current detection has the same marker IDs and barely moved since the previous frame."""
@@ -428,11 +779,17 @@ class MainClass:
         self._origin_stable_count = 0
         self._prev_corners        = None
         self._prev_ids            = None
+        self._prev_fused_pose     = None
         self._cached_rvecs        = None
         self._cached_tvecs        = None
         self._cached_board_pose   = None
         self._board_rvec          = None
         self._board_tvec          = None
+        self._cached_board_pose_1 = None
+        self._board_rvec_1        = None
+        self._board_tvec_1        = None
+        self._disagree_count      = 0
+        self._disagree_warned     = False
 
     # ── origin persistence ────────────────────────────────────────────────────
 
@@ -476,30 +833,21 @@ class MainClass:
         centroid = self._get_centroid(corners, ids, rvecs, tvecs)
         return self._origin_R.T @ (self._origin_grip - centroid)
 
-    def _process_board(self, corners, ids):
-        """Joint path: one rigid-body solvePnP over all visible known markers."""
-        if self.corner_stability.is_stable(corners, ids) and self._cached_board_pose is not None:
-            rvec, tvec = self._cached_board_pose
-        else:
-            guess = (
-                (self._board_rvec, self._board_tvec)
-                if self._board_rvec is not None else None
-            )
-            result = estimate_board_pose(self.board, corners, ids, self.camera_matrix, guess)
-            if result is None:
-                return None
-            rvec, tvec, reproj = result
-            # A stale guess (fast motion, re-entry after occlusion) can trap the
-            # iterative solver in a bad local minimum — re-initialise from scratch.
-            if guess is not None and reproj > Config.BOARD_MAX_REPROJ_PX:
-                fresh = estimate_board_pose(self.board, corners, ids, self.camera_matrix, None)
-                if fresh is not None and fresh[2] < reproj:
-                    rvec, tvec, reproj = fresh
-            self._cached_board_pose = (rvec, tvec)
-            self._board_rvec, self._board_tvec = rvec, tvec
+    def _process_board(self, rvec, tvec, corners=None, ids=None):
+        """Joint path: takes an already-solved rigid-body pose — either a
+        lone camera's solve (single-camera mode) or the fused pose from both
+        cameras (dual-camera mode) — so both paths share all downstream
+        logic (origin lock, grip point, overlay) unchanged. The actual
+        solvePnP call now lives in _solve_camera_pose (and, in dual mode,
+        _fuse_board_poses combines the two cameras' solves before this is
+        called).
 
+        corners/ids are optional and only meaningful for the single-camera
+        origin-lock stability gate (pixel-motion based) — dual-camera mode
+        passes None and uses a pose-space stability gate instead, since two
+        cameras' pixel spaces aren't directly comparable."""
         if self.first_frame:
-            self._maybe_lock_origin_board(corners, ids, rvec, tvec)
+            self._maybe_lock_origin_board(rvec, tvec, corners, ids)
             return None
 
         R = cv2.Rodrigues(rvec)[0]
@@ -507,14 +855,24 @@ class MainClass:
         self._draw_board_overlay(rvec, tvec, grip)
         return self._origin_R.T @ (self._origin_grip - grip)
 
-    def _maybe_lock_origin_board(self, corners, ids, rvec, tvec) -> None:
-        """Board-mode origin lock: same stability gate, stores the board pose."""
-        if self._detection_matches_prev(corners, ids):
+    def _maybe_lock_origin_board(self, rvec, tvec, corners=None, ids=None) -> None:
+        """Board-mode origin lock. Single-camera: pixel-space stability via
+        corners/ids (_detection_matches_prev), matching the legacy behavior
+        exactly. Dual-camera (corners is None): pose-space stability via
+        translation/rotation delta from the previous frame's fused pose
+        (_pose_is_stable), since pixel motion isn't comparable across two
+        different cameras."""
+        if self._dual_camera:
+            stable = self._pose_is_stable(rvec, tvec)
+            self._prev_fused_pose = (rvec, tvec)
+        else:
+            stable = self._detection_matches_prev(corners, ids)
+            self._prev_corners, self._prev_ids = corners, ids
+
+        if stable:
             self._origin_stable_count += 1
         else:
             self._origin_stable_count = 1
-        self._prev_corners = corners
-        self._prev_ids = ids
 
         if self._origin_stable_count >= Config.ORIGIN_LOCK_FRAMES:
             self._origin_R = cv2.Rodrigues(rvec)[0]
@@ -522,6 +880,7 @@ class MainClass:
             self.first_frame = False
             self._prev_corners = None
             self._prev_ids = None
+            self._prev_fused_pose = None
             self._save_origin()
             print(f"World origin locked after {self._origin_stable_count} stable frames (board mode).")
 
@@ -567,20 +926,25 @@ class MainClass:
     def process_frame(self) -> None:
         t0 = time.perf_counter() if self.debug else 0.0
 
-        # Capture frame
-        if platform.system() == "Linux":
-            self.video_frame = self.picam2.capture_array()
+        # Capture frame(s)
+        if self._dual_camera:
+            frame0, frame1 = self._capture_dual_frames()
+            if frame0 is None and frame1 is None:
+                return
         else:
-            ret, self.video_frame = self.camera.read()
-            if not ret or self.video_frame is None:
+            frame0 = self._capture_single_frame()
+            frame1 = None
+            if frame0 is None:
                 return
         t1 = time.perf_counter() if self.debug else 0.0
 
         # INTER_LINEAR: ~half the cost of INTER_CUBIC; corner sub-pixel accuracy
         # comes from the detector's corner refinement, not the resampling kernel.
-        self.video_frame = cv2.remap(
-            self.video_frame, self.map1, self.map2, interpolation=cv2.INTER_LINEAR
-        )
+        if frame0 is not None:
+            frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
+            self.video_frame = frame0
+        if self._dual_camera and frame1 is not None:
+            frame1 = cv2.remap(frame1, self.map1_1, self.map2_1, interpolation=cv2.INTER_LINEAR)
         t2 = time.perf_counter() if self.debug else 0.0
 
         # Poll command from Godot
@@ -591,16 +955,40 @@ class MainClass:
             self.received_message = cmd
 
         # Detect markers
-        corners, ids, _ = self.detector.detectMarkers(self.video_frame)
-        corners, ids = self._filter_markers(corners, ids)
+        corners0 = ids0 = None
+        if frame0 is not None:
+            corners0, ids0, _ = self.detector.detectMarkers(frame0)
+            corners0, ids0 = self._filter_markers(corners0, ids0)
+        corners1 = ids1 = None
+        if self._dual_camera and frame1 is not None:
+            corners1, ids1, _ = self.detector.detectMarkers(frame1)
+            corners1, ids1 = self._filter_markers(corners1, ids1)
         t3 = time.perf_counter() if self.debug else 0.0
+
         local_coords = None
-        if ids is not None:
-            self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners, ids)
+        if self._dual_camera and self.board is not None and self._use_rigid:
+            # Joint fusion path: each camera solves independently, cam1's pose
+            # gets transformed into cam0's frame, then combined — see
+            # _fuse_board_poses for the disagreement/fallback handling that
+            # keeps a dead or occluded camera from breaking tracking.
+            if ids0 is not None:
+                self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners0, ids0)
+            pose0 = self._solve_camera_pose(0, corners0, ids0) if ids0 is not None else None
+            pose1 = self._solve_camera_pose(1, corners1, ids1) if ids1 is not None else None
+            fused = self._fuse_board_poses(pose0, pose1)
+            if fused is not None:
+                local_coords = self._process_board(fused[0], fused[1])
+        elif ids0 is not None:
+            # Single-camera path (also used when dual-camera mode has no board
+            # geometry loaded, or the demo SETUP toggle selected the legacy
+            # per-marker solver — cam1 is simply not consulted in that case).
+            self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners0, ids0)
             if self.board is not None and self._use_rigid:
-                local_coords = self._process_board(corners, ids)
+                pose0 = self._solve_camera_pose(0, corners0, ids0)
+                if pose0 is not None:
+                    local_coords = self._process_board(pose0[0], pose0[1], corners0, ids0)
             else:
-                local_coords = self._process_per_marker(corners, ids)
+                local_coords = self._process_per_marker(corners0, ids0)
 
         if local_coords is not None:
             local_coords = self.filter.update(local_coords)
@@ -645,9 +1033,9 @@ class MainClass:
 
             now = time.time()
             if now - self._dbg_last_print > 1.0:
-                if ids is not None:
+                if ids0 is not None:
                     sides = [np.linalg.norm(c[0][i] - c[0][(i + 1) % 4])
-                             for c in corners for i in range(4)]
+                             for c in corners0 for i in range(4)]
                     print(f"marker side: avg {np.mean(sides):.1f} px  (n={len(sides)//4} markers)")
                 if self._stage_times:
                     arr = np.array(self._stage_times)
@@ -685,6 +1073,16 @@ class MainClass:
                 if self.debug and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
+            if self._camera_backend in ("rcam_single", "rcam_dual"):
+                self._stop_capture.set()
+                for t in self._cam_threads:
+                    if t is not None:
+                        t.join(timeout=1.0)
+                for cam in self._rcam:
+                    try:
+                        cam.stop()
+                    except Exception:
+                        pass
             if self._csv_file is not None:
                 self._csv_file.close()
             if self._timing_log is not None:
