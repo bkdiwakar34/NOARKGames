@@ -71,6 +71,7 @@ func _network_loop() -> void:
 		var now: int = Time.get_ticks_msec()
 		if now - last_send >= 100:
 			_udp.put_packet(_outgoing.to_utf8_buffer())   # keepalive / sticky command
+			print("Godot sent packet at ", now, " ms, outgoing=", _outgoing)   # temporary debug
 			last_send = now
 		if not got_any:
 			OS.delay_msec(2)
