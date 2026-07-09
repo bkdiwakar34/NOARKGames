@@ -444,11 +444,17 @@ class MainClass:
         camera's slot every time a new frame is ready. capture_array() is
         blocking with no timeout; on stream-end it raises, which we record
         as this camera's error rather than letting it cross the thread
-        boundary and kill the process silently."""
+        boundary and kill the process silently.
+
+        time.sleep(0) after each frame is a cooperative yield — same "leave
+        room for other threads" principle as opencv_threads, in case this
+        loop ever gets more CPU-greedy than intended (e.g. frames arriving
+        faster than expected) and starves Godot's own background thread."""
         try:
             while not self._stop_capture.is_set():
                 frame = self._rcam[cam_index].capture_array()
                 self._frame_slots[cam_index].put(frame, time.monotonic())
+                time.sleep(0)
         except Exception as exc:
             self._cam_errors[cam_index] = exc
 
