@@ -43,7 +43,9 @@ STEREO_MAX_REPROJ_PX = 3.0
 ROT_TOL_RAD          = np.deg2rad(2.0)   # tighter than calibrate_board's marker-pair tolerance —
 TRANS_TOL_M          = 0.003             # camera-to-camera rigidity should exceed marker-gluing precision
 MAX_FRAME_SKEW_S     = 0.02
-STABLE_FRAMES        = 15    # consecutive stable frames (both cameras) before a pose counts
+STABLE_FRAMES        = 6     # consecutive stable frames (both cameras) before a pose counts — lower than
+                              # calibrate_camera.py's 15 since requiring BOTH cameras stable at once for N
+                              # frames compounds (P(both) = P(cam0) * P(cam1)), so a long run is much rarer here
 STABLE_PX_THRESHOLD  = 2.0   # max mean corner motion (px) to count as still
 COOLDOWN_S           = 2.0   # min seconds between accepted samples — forces a genuine move to the next pose
 
