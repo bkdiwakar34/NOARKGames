@@ -12,8 +12,10 @@ Procedure:
   1. Run calibrate_camera.py for BOTH OV9281s first (two intrinsics files).
   2. Run calibrate_board.py once, if not already done (board_geometry.json).
   3. Mount both cameras in their final rigid position. Hold the device where
-     BOTH cameras can see it and move it around so many poses are sampled.
-  4. Watch the sample counter; aim for >= 60.
+     BOTH cameras can see it, pause for a moment (auto-captures once held
+     stable), then move to a clearly different pose and pause again —
+     "hold-move-hold" through ~15-20 distinct poses, not one continuous pan.
+  4. Watch the sample counter; aim for >= 20.
   5. Press S to solve and save, Q/Esc to abort.
 
 Run: python pyscripts/calibrate_stereo.py
@@ -32,14 +34,18 @@ from cv2 import aruco
 
 from board import BoardGeometry, estimate_board_pose
 from calibrate_board import init_detector, load_calibration
+from filters import CornerStabilityFilter
 from main import _LatestFrameSlot
 from pose_averaging import robust_average_transform
 
-MIN_SAMPLES          = 60
+MIN_SAMPLES          = 20
 STEREO_MAX_REPROJ_PX = 3.0
 ROT_TOL_RAD          = np.deg2rad(2.0)   # tighter than calibrate_board's marker-pair tolerance —
 TRANS_TOL_M          = 0.003             # camera-to-camera rigidity should exceed marker-gluing precision
-MAX_FRAME_SKEW_S      = 0.02
+MAX_FRAME_SKEW_S     = 0.02
+STABLE_FRAMES        = 15    # consecutive stable frames (both cameras) before a pose counts
+STABLE_PX_THRESHOLD  = 2.0   # max mean corner motion (px) to count as still
+COOLDOWN_S           = 2.0   # min seconds between accepted samples — forces a genuine move to the next pose
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _SETTINGS_PATH = os.path.join(_SCRIPT_DIR, "..", "settings.json")
@@ -112,7 +118,13 @@ def main():
     cam0, cam1, slots, stop, threads = init_dual_camera(frame_size)
 
     samples = []
-    print("\nHold the device where BOTH cameras can see it and move it around.")
+    stability0 = CornerStabilityFilter(threshold=STABLE_PX_THRESHOLD)
+    stability1 = CornerStabilityFilter(threshold=STABLE_PX_THRESHOLD)
+    stable_count = 0
+    last_capture = 0.0
+    flash_until = 0.0
+    print("\nHold the device where BOTH cameras can see it, pause until it captures,")
+    print("then move to a clearly different pose and pause again.")
     print("S = solve & save   Q/Esc = abort\n")
 
     aborted = False
@@ -135,11 +147,24 @@ def main():
             if ids0 is not None:
                 vis = aruco.drawDetectedMarkers(vis, corners0, ids0)
 
+            now = time.time()
+            both_stable = False
             if ids0 is not None and ids1 is not None:
-                # Fresh solves every frame — no ITERATIVE-guess reuse, so
-                # consecutive samples aren't correlated (a stale guess would
-                # bias them toward each other and undermine the trimming in
-                # robust_average_transform).
+                both_stable = (stability0.is_stable(corners0, ids0)
+                                and stability1.is_stable(corners1, ids1))
+            else:
+                stability0.reset()
+                stability1.reset()
+
+            if both_stable:
+                stable_count += 1
+            else:
+                stable_count = 0
+
+            if (both_stable and stable_count >= STABLE_FRAMES
+                    and now - last_capture > COOLDOWN_S):
+                # Fresh solves (no ITERATIVE-guess reuse) so this sample isn't
+                # biased toward the previous one.
                 result0 = estimate_board_pose(board, corners0, ids0, K0, guess=None)
                 result1 = estimate_board_pose(board, corners1, ids1, K1, guess=None)
                 if result0 is not None and result1 is not None:
@@ -151,9 +176,24 @@ def main():
                         Rx_i = R0 @ R1.T
                         tx_i = tvec0 - Rx_i @ tvec1
                         samples.append((Rx_i, tx_i))
+                        last_capture = now
+                        flash_until = now + 0.5
+                        stable_count = 0   # require a fresh hold before the next sample
+
+            if now < flash_until:
+                green = np.full_like(vis, (0, 255, 0))
+                vis = cv2.addWeighted(vis, 0.5, green, 0.5, 0)
 
             colour = (0, 255, 0) if len(samples) >= MIN_SAMPLES else (0, 165, 255)
-            cv2.putText(vis, f"samples: {len(samples)}", (10, 30),
+            if ids0 is None or ids1 is None:
+                status = "Show device to both cameras"
+            elif not both_stable:
+                status = "Hold still..."
+            elif last_capture > 0 and now - last_capture <= COOLDOWN_S:
+                status = "Move to a new pose"
+            else:
+                status = "..."
+            cv2.putText(vis, f"samples: {len(samples)}  ({status})", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, colour, 2)
             cv2.imshow("stereo calibration  [S=save  Q=abort]", cv2.resize(vis, (960, 600)))
 

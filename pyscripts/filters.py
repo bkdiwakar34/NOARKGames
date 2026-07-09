@@ -49,6 +49,11 @@ class CornerStabilityFilter:
         self._prev_corners = [c.copy() for c in corners]
         self._prev_ids = ids_flat.copy()
 
+    def reset(self) -> None:
+        """Force the next is_stable() call to return False and re-arm from scratch."""
+        self._prev_corners = None
+        self._prev_ids = None
+
 
 class ExponentialMovingAverageFilter3D:
     def __init__(self, alpha):
