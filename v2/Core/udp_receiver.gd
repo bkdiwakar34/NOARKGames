@@ -48,8 +48,12 @@ func _start_tracker() -> void:
 	var pyscripts_dir: String = ProjectSettings.globalize_path("res://pyscripts")
 	if not DirAccess.dir_exists_absolute(pyscripts_dir):
 		return
+	# Derived from the running project's own location rather than hardcoded to
+	# one machine's home directory/username — the Pi and Q6A have different
+	# users (sujith vs. radxa) but both keep .venv/ at the project root.
+	var python_bin: String = ProjectSettings.globalize_path("res://.venv/bin/python3")
 	_tracker_pid = OS.create_process(
-		"bash", ["-c", "cd '" + pyscripts_dir + "' && /home/sujith/Documents/NOARKGames/.venv/bin/python3 main.py"]
+		"bash", ["-c", "cd '" + pyscripts_dir + "' && '" + python_bin + "' main.py"]
 	)
 
 func _network_loop() -> void:
