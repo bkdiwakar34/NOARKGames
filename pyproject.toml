@@ -5,7 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-	"opencv-contrib-python>=4.13.0.92",
+	# <5: the tracker's fisheye calibration code (cv2.fisheye.CALIB_* flags)
+	# targets OpenCV 4.x's API; OpenCV 5.0 restructured/removed these.
+	"opencv-contrib-python>=4.13.0.92,<5",
 	"scipy>=1.17.1",
 	"toml>=0.10.2",
 ]
