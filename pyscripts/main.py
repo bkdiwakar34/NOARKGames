@@ -211,7 +211,6 @@ class MainClass:
         # Per-stage timing buffer (filled by process_frame, drained by the debug print
         # once a second). Each entry is [capture_ms, remap_ms, detect_ms, pose_send_ms].
         self._stage_times = []
-        self._packet_count = 0   # temporary: UDP packets received, drained by the debug print once a second
         # Tracker timing log — opened only when debug is on. Plays nice with
         # `tail -f` from another terminal even when Godot launches main.py.
         self._timing_log = open("/tmp/tracker_timing.log", "a", buffering=1) if self.debug else None
@@ -513,11 +512,7 @@ class MainClass:
     def _recv_command(self) -> bytes:
         """Return the latest command from Godot, or b'' if none."""
         try:
-            first_packet = self.addr is None
             data, self.addr = self.udp_socket.recvfrom(30)
-            if first_packet:
-                print(f"First packet received from Godot at {self.addr}: {data!r}")
-            self._packet_count += 1
             self._last_msg_time = time.time()
             return data
         except socket.error:
@@ -1044,8 +1039,6 @@ class MainClass:
 
             now = time.time()
             if now - self._dbg_last_print > 1.0:
-                print(f"UDP packets received in last ~1s: {self._packet_count}")
-                self._packet_count = 0
                 if ids0 is not None:
                     sides = [np.linalg.norm(c[0][i] - c[0][(i + 1) % 4])
                              for c in corners0 for i in range(4)]
