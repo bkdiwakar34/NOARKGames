@@ -39,12 +39,12 @@ func _ready() -> void:
 	if settings:
 		_port = settings.get("udp_port", 12345)
 
-	_start_tracker()
+	_start_tracker(settings)
 	_udp.connect_to_host("127.0.0.1", _port)
 	_thread.start(_network_loop)
 
 
-func _start_tracker() -> void:
+func _start_tracker(settings) -> void:
 	var pyscripts_dir: String = ProjectSettings.globalize_path("res://pyscripts")
 	if not DirAccess.dir_exists_absolute(pyscripts_dir):
 		return
@@ -52,9 +52,16 @@ func _start_tracker() -> void:
 	# one machine's home directory/username — the Pi and Q6A have different
 	# users (sujith vs. radxa) but both keep .venv/ at the project root.
 	var python_bin: String = ProjectSettings.globalize_path("res://.venv/bin/python3")
-	_tracker_pid = OS.create_process(
-		"bash", ["-c", "cd '" + pyscripts_dir + "' && '" + python_bin + "' main.py"]
-	)
+	var cmd: String = "cd '" + pyscripts_dir + "' && '" + python_bin + "' main.py"
+	# Optional CPU-affinity pinning (e.g. "4-7") for boards with asymmetric
+	# big.LITTLE cores (like the Q6A's 4xA78/4xA55) where the vision-heavy
+	# tracker and Godot's own thread can otherwise get scheduled onto the
+	# same physical cores and starve each other. Empty/unset on the Pi
+	# (identical cores, no need) -- set locally per-deployment, not shared.
+	var affinity: String = settings.get("tracker_cpu_affinity", "") if settings else ""
+	if affinity != "":
+		cmd = "taskset -c " + affinity + " bash -c \"" + cmd.replace("\"", "\\\"") + "\""
+	_tracker_pid = OS.create_process("bash", ["-c", cmd])
 
 func _network_loop() -> void:
 	# Drain the queue every pass with a short poll. The old version slept
