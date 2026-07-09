@@ -506,7 +506,10 @@ class MainClass:
     def _recv_command(self) -> bytes:
         """Return the latest command from Godot, or b'' if none."""
         try:
+            first_packet = self.addr is None
             data, self.addr = self.udp_socket.recvfrom(30)
+            if first_packet:
+                print(f"First packet received from Godot at {self.addr}: {data!r}")
             self._last_msg_time = time.time()
             return data
         except socket.error:
