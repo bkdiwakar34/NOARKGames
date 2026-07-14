@@ -24,11 +24,14 @@ MARKER_LENGTH = 0.05
 # of face). Derived from the CAD model — markers are glued with +Y
 # (printed-up) aligned to device-up.
 MARKER_OFFSETS = {
-    4:  np.array([-0.002, -0.016, -0.056]),   # front-right (angled 60° from +X, into -Y)
-    8:  np.array([ 0.002, -0.016, -0.056]),   # front-left  (angled 60° from +X, into +Y)
+    4:  np.array([-0.002, -0.016, -0.056]),   # front-right    (angled 60° from +X, into -Y)
+    8:  np.array([ 0.002, -0.016, -0.056]),   # front-left     (angled 60° from +X, into +Y)
     12: np.array([ 0.001, -0.016, -0.059]),   # front
-    14: np.array([ 0.000, -0.066, -0.065]),   # front-top   (angled 10° from +X toward +Z)
-    20: np.array([ 0.125, -0.017, -0.054]),   # back / -Y side
+    14: np.array([ 0.000, -0.066, -0.065]),   # front-top      (angled 10° from +X toward +Z)
+    20: np.array([ 0.125, -0.017, -0.054]),   # back-right     (-Y side)
+    24: np.array([-0.125, -0.017, -0.054]),   # back-left      (+Y side, mirror of 20)
+    28: np.array([-0.016, -0.017, -0.188]),   # back-far-left  (wing outer face, 120° dihedral with 24)
+    32: np.array([ 0.016, -0.017, -0.188]),   # back-far-right (wing outer face, mirror of 28)
 }
 
 
