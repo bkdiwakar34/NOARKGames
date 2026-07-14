@@ -30,8 +30,8 @@ MARKER_OFFSETS = {
     14: np.array([ 0.000, -0.066, -0.065]),   # front-top      (angled 10° from +X toward +Z)
     20: np.array([ 0.125, -0.017, -0.054]),   # back-right     (-Y side)
     24: np.array([-0.125, -0.017, -0.054]),   # back-left      (+Y side, mirror of 20)
-    28: np.array([-0.108, -0.017, -0.155]),   # back-far-left  (wing outer face, normal 30° from +Y toward -X)
-    32: np.array([ 0.108, -0.017, -0.155]),   # back-far-right (wing outer face, mirror of 28)
+    28: np.array([-0.161, -0.019,  0.104]),   # back-far-left  wing (empirical, via derive_offsets.py)
+    32: np.array([ 0.157, -0.017,  0.115]),   # back-far-right wing (empirical, via derive_offsets.py)
 }
 
 
