@@ -1,5 +1,7 @@
 extends Node2D
 
+const UITheme := preload("res://app/ui/ui_theme.gd")
+
 signal apple_eaten
 signal apple_missed
 
@@ -9,6 +11,9 @@ var balloon_color:   Color = Color(0.12, 0.42, 0.42)
 var _lifetime:       float = 0.0
 var _catch_progress: float = 0.0
 var _eaten:          bool  = false
+var _missed:         bool  = false
+var _deflate:        float = 0.0
+const DEFLATE_TIME:  float = 0.35  # miss animation: soft, brief, downward
 
 
 func set_catch_progress(p: float) -> void:
@@ -27,16 +32,30 @@ func eat() -> void:
 func _process(delta: float) -> void:
 	if _eaten:
 		return
+	if _missed:
+		_deflate += delta
+		if _deflate >= DEFLATE_TIME:
+			queue_free()
+		queue_redraw()
+		return
 	if _catch_progress == 0.0:
 		_lifetime += delta
 	if _lifetime >= lifetime:
-		apple_missed.emit()
-		queue_free()
+		_missed = true
+		apple_missed.emit()  # game logic proceeds now; the deflate is only visual
 		return
 	queue_redraw()
 
 
 func _draw() -> void:
+	if _missed:
+		var p := _deflate / DEFLATE_TIME
+		var r_d := target_radius * (1.0 - 0.55 * p)
+		var col := balloon_color.lerp(UITheme.MISS, 0.7)
+		col.a = 1.0 - p
+		draw_circle(Vector2(0.0, 34.0 * p), r_d, col)  # shrink, grey, sink
+		return
+
 	var r := target_radius
 	var fill := balloon_color
 

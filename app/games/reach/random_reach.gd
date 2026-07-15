@@ -39,6 +39,7 @@ func _ready() -> void:
 	_build_ui()
 	_connect_signals()
 	_start_logging()
+	AudioManager.start_music()
 
 func _build_ui() -> void:
 	var vp := get_viewport_rect().size
@@ -388,6 +389,7 @@ func _check_catch(delta: float) -> void:
 		_current_apple.set_catch_progress(0.0)
 
 func _on_apple_eaten() -> void:
+	AudioManager.play_catch()
 	_log_target("caught")
 	var lt: float = _current_apple.lifetime if is_instance_valid(_current_apple) else 0.0
 	AdaptiveManager.record_catch(lt)
@@ -399,6 +401,7 @@ func _on_apple_eaten() -> void:
 	_catch_timer = 0.0
 
 func _on_apple_missed() -> void:
+	AudioManager.play_miss()
 	_log_target("expired")
 	var lt: float = _current_apple.lifetime if is_instance_valid(_current_apple) else 0.0
 	AdaptiveManager.record_miss(lt)
@@ -420,14 +423,14 @@ func _spawn_catch_burst(pos: Vector2) -> void:
 		tween.tween_property(star, "modulate:a", 0.0, 0.45)
 		tween.chain().tween_callback(func(): star.queue_free())
 
-func _on_trial_ended(_trial_num: int, caught: int, _spawned: int) -> void:
+func _on_trial_ended(_trial_num: int, caught: int, spawned: int) -> void:
 	_is_between_trial = true
 	_catch_timer = 0.0
 	_log_target("aborted")  # unresolved target at trial end
 	if is_instance_valid(_current_apple):
 		_current_apple.queue_free()
 	_current_apple = null
-	_between_trial.show_result(caught)
+	_between_trial.show_result(caught, spawned)
 	_between_trial.visible = true
 
 func _on_trial_started(_trial_num: int) -> void:
@@ -453,6 +456,7 @@ func _on_graph_closed() -> void:
 	get_tree().change_scene_to_file("res://app/ui/game_select.tscn")
 
 func _exit_tree() -> void:
+	AudioManager.stop_music()
 	if AdaptiveManager.trial_ended.is_connected(_on_trial_ended):
 		AdaptiveManager.trial_ended.disconnect(_on_trial_ended)
 	if AdaptiveManager.trial_started.is_connected(_on_trial_started):

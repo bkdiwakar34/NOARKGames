@@ -31,6 +31,7 @@ UDPReceiver="*res://app/platform/udp_receiver.gd"
 SessionManager="*res://app/platform/session_manager.gd"
 AdaptiveManager="*res://app/platform/adaptive_manager.gd"
 WorkspaceConfig="*res://app/platform/workspace_config.gd"
+AudioManager="*res://app/platform/audio_manager.gd"
 
 [display]
 
