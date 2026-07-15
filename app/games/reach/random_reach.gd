@@ -137,14 +137,11 @@ func _draw() -> void:
 		var shade := Color(0.30, 0.60, 0.35, 0.16)
 		var edge := Color(0.30, 0.60, 0.35, 0.35)
 		var step: Vector2 = AdaptiveManager.scan_step
-		var tol: float = AdaptiveManager.SCAN_CELL_SIZE + step.length() * 0.5
-		for cell in AdaptiveManager._scan_cells:
-			for rc in AdaptiveManager.reachable_cells:
-				if cell["pos"].distance_to(rc["pos"]) <= tol:
-					var rect := Rect2(cell["pos"] - step * 0.5, step)
-					draw_rect(rect, shade, true)
-					draw_rect(rect, edge, false, 1.0)
-					break
+		# Exactly the hit tiles — the same test _is_position_reachable uses.
+		for rc in AdaptiveManager.reachable_cells:
+			var rect := Rect2(rc["pos"] - step * 0.5, step)
+			draw_rect(rect, shade, true)
+			draw_rect(rect, edge, false, 1.0)
 
 	# Grid workspace scan overlay (visible during scan and until Phase 0b ends)
 	var scan_cells: Array = AdaptiveManager._scan_cells

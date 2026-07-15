@@ -538,9 +538,12 @@ func _sample_reachable_spawn(player_pos: Vector2, a: float) -> Vector2:
 func _is_position_reachable(pos: Vector2) -> bool:
 	if reachable_cells.is_empty():
 		return true  # workspace not yet known; allow anywhere
-	var tol: float = SCAN_CELL_SIZE  # within one scan cell of any reachable cell
+	# Inside the tile of any hit scan cell — the exact same geometry the
+	# game's shade overlay draws, so the two can never disagree.
+	var half: Vector2 = scan_step * 0.5
 	for cell in reachable_cells:
-		if pos.distance_to(cell["pos"]) <= tol:
+		var d: Vector2 = (pos - cell["pos"]).abs()
+		if d.x <= half.x and d.y <= half.y:
 			return true
 	return false
 
