@@ -7,4 +7,4 @@ func _ready() -> void:
 	else:
 		PatientDB.current_patient_id = patients[0]["hospital_id"]
 		GlobalSignals.current_patient_id = patients[0]["hospital_id"]
-		get_tree().change_scene_to_file("res://app/ui/game_select.tscn")
+		get_tree().change_scene_to_file("res://app/ui/chooser.tscn")

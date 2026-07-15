@@ -29,7 +29,7 @@ func _input(event: InputEvent) -> void:
 	# F10 toggles installer mode: it got you in, it gets you out.
 	if event is InputEventKey and event.pressed and not event.echo \
 			and event.keycode == KEY_F10:
-		get_tree().change_scene_to_file("res://app/ui/game_select.tscn")
+		get_tree().change_scene_to_file("res://app/ui/chooser.tscn")
 
 
 func _ready() -> void:
@@ -113,9 +113,12 @@ func _build_checklist_page() -> void:
 	dbg.toggled.connect(func(on: bool): GlobalSignals.show_debug_overlays = on)
 	box.add_child(dbg)
 
+	_add_button(box, "Session settings (researcher game screen)", func():
+		get_tree().change_scene_to_file("res://app/ui/game_select.tscn"))
+
 	box.add_child(HSeparator.new())
 	_add_button(box, "Exit installer", func():
-		get_tree().change_scene_to_file("res://app/ui/game_select.tscn"))
+		get_tree().change_scene_to_file("res://app/ui/chooser.tscn"))
 
 
 func _refresh_status() -> void:

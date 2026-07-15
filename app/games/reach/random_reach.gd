@@ -28,6 +28,15 @@ var _stop_btn: Button = null
 var _pause_layer: CanvasLayer = null
 var _is_paused: bool = false  # tracker-lost pause (docs/v1_plan.md §3 system state)
 
+func _input(event: InputEvent) -> void:
+	# Keyboard stand-in for the future hold-play-button exit (package 4):
+	# ESC ends the session and returns to the chooser.
+	if event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode == KEY_ESCAPE:
+		AdaptiveManager.stop_session()
+		get_tree().change_scene_to_file("res://app/ui/chooser.tscn")
+
+
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var vp := get_viewport_rect().size
