@@ -4,6 +4,8 @@ A rehabilitation gaming platform for stroke patients. The patient holds an instr
 
 This is the instrument for a PhD study on the causal relationship between success rate and adherence to therapy.
 
+The product plan for the home-deployable version (kiosk experience, UI system, installer mode, build order) is in [v1_plan.md](v1_plan.md).
+
 ---
 
 ## 1. PhD Study Context

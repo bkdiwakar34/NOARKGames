@@ -1,6 +1,8 @@
 # NOARKGames — Open TODOs
 
 Active work-in-progress and known issues. Completed items live in git history, not here.
+The v1 product build order (logging, game feel, kiosk, installer mode, upload) is tracked in
+[v1_plan.md §7](v1_plan.md), not duplicated here.
 
 ---
 
