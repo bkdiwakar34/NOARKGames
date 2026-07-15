@@ -108,6 +108,21 @@ func get_todays_rate(hospital_id: String) -> float:
 	day_idx = clamp(day_idx, 0, sched.size() - 1)
 	return float(sched[day_idx])
 
+func update_patient(hospital_id: String, fields: Dictionary) -> bool:
+	if not hospital_id in patient_register:
+		push_error("Cannot update unknown patient: ", hospital_id)
+		return false
+	var rec: Dictionary = patient_register[hospital_id]
+	# A changed schedule restarts the study clock (new day 1); any other edit
+	# must not shift which day's rate get_todays_rate() picks.
+	if fields.has("rate_schedule") and fields["rate_schedule"] != rec.get("rate_schedule", []):
+		rec["start_date"] = Time.get_date_string_from_system()
+	for k in fields:
+		rec[k] = fields[k]
+	save_database()
+	return true
+
+
 func remove_patient(hospital_id: String) -> bool:
 	if hospital_id in patient_register:
 		patient_register.erase(hospital_id)

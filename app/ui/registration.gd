@@ -7,6 +7,8 @@ var _stroke_time_input: SpinBox
 var _comments_input: LineEdit
 var _schedule_input: LineEdit
 var _error_label: Label
+var _submit_btn: Button
+var _edit_mode: bool = false
 
 var _gender_group: ButtonGroup
 var _dominant_hand_group: ButtonGroup
@@ -18,6 +20,9 @@ const SUCCESS_RATE_MAP = {"70%": 0.7, "80%": 0.8, "90%": 0.9}
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_build_ui()
+	if GlobalSignals.edit_patient_id != "":
+		_edit_mode = true
+		_prefill(GlobalSignals.edit_patient_id)
 
 func _build_ui() -> void:
 	var margin = MarginContainer.new()
@@ -91,11 +96,11 @@ func _build_ui() -> void:
 	_error_label.visible = false
 	vbox.add_child(_error_label)
 
-	var submit_btn = Button.new()
-	submit_btn.text = "Register Patient"
-	submit_btn.custom_minimum_size = Vector2(0, 60)
-	submit_btn.pressed.connect(_on_register_pressed)
-	vbox.add_child(submit_btn)
+	_submit_btn = Button.new()
+	_submit_btn.text = "Register Patient"
+	_submit_btn.custom_minimum_size = Vector2(0, 60)
+	_submit_btn.pressed.connect(_on_register_pressed)
+	vbox.add_child(_submit_btn)
 
 func _add_text_field(parent: Node, label_text: String, placeholder: String) -> LineEdit:
 	parent.add_child(_make_label(label_text))
@@ -174,22 +179,69 @@ func _on_register_pressed() -> void:
 		_show_error("Schedule needs exactly 14 values — press Generate.")
 		return
 
-	var ok = PatientDB.add_patient(
-		id, name_text, int(_age_input.value), gender_btn.text,
-		int(_stroke_time_input.value), dom_btn.text, aff_btn.text,
-		rate, _comments_input.text.strip_edges(), schedule
-	)
-
-	if not ok:
-		_show_error("A patient with this ID already exists.")
-		return
+	var ok: bool
+	if _edit_mode:
+		ok = PatientDB.update_patient(id, {
+			"name": name_text,
+			"age": int(_age_input.value),
+			"gender": gender_btn.text,
+			"stroke_time": int(_stroke_time_input.value),
+			"dominant_hand": dom_btn.text,
+			"affected_hand": aff_btn.text,
+			"target_success_rate": rate,
+			"comments": _comments_input.text.strip_edges(),
+			"rate_schedule": schedule,
+		})
+		if not ok:
+			_show_error("Update failed — patient no longer exists.")
+			return
+	else:
+		ok = PatientDB.add_patient(
+			id, name_text, int(_age_input.value), gender_btn.text,
+			int(_stroke_time_input.value), dom_btn.text, aff_btn.text,
+			rate, _comments_input.text.strip_edges(), schedule
+		)
+		if not ok:
+			_show_error("A patient with this ID already exists.")
+			return
 
 	PatientDB.current_patient_id = id
 	GlobalSignals.current_patient_id = id
+	GlobalSignals.edit_patient_id = ""
 	if GlobalSignals.return_to_installer:
 		get_tree().change_scene_to_file("res://app/installer/installer.tscn")
 	else:
 		get_tree().change_scene_to_file("res://app/ui/game_select.tscn")
+
+
+func _prefill(id: String) -> void:
+	var p: Dictionary = PatientDB.get_patient(id)
+	if p.is_empty():
+		return
+	_hospital_id_input.text = id
+	_hospital_id_input.editable = false  # the ID is the record's identity
+	_name_input.text = p.get("name", "")
+	_age_input.value = p.get("age", 60)
+	_stroke_time_input.value = p.get("stroke_time", 6)
+	_comments_input.text = p.get("comments", "")
+	_press_matching(_gender_group, p.get("gender", ""))
+	_press_matching(_dominant_hand_group, p.get("dominant_hand", ""))
+	_press_matching(_affected_hand_group, p.get("affected_hand", ""))
+	for key in SUCCESS_RATE_MAP:
+		if absf(SUCCESS_RATE_MAP[key] - float(p.get("target_success_rate", -1.0))) < 0.001:
+			_press_matching(_success_rate_group, key)
+	var parts: PackedStringArray = []
+	for v in p.get("rate_schedule", []):
+		parts.append("%.3f" % float(v))
+	_schedule_input.text = ", ".join(parts)
+	_submit_btn.text = "Save Changes"
+
+
+func _press_matching(group: ButtonGroup, text: String) -> void:
+	for btn in group.get_buttons():
+		if btn.text == text:
+			btn.button_pressed = true
+			return
 
 
 func _on_generate_schedule() -> void:

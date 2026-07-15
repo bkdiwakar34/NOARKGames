@@ -8,6 +8,7 @@ const SETTINGS_PATH := "res://settings.json"
 var _pages: Dictionary = {}          # name -> VBoxContainer
 var _check_labels: Dictionary = {}   # check name -> Label
 var _origin_status: Label
+var _edit_btn: Button
 var _test_info: Label
 var _relock_waiting: bool = false
 var _refresh_timer: Timer
@@ -27,6 +28,7 @@ const CHECKS: Array = [
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	GlobalSignals.return_to_installer = false
+	GlobalSignals.edit_patient_id = ""  # clear a stale edit flag from an abandoned edit
 	_build_checklist_page()
 	_build_origin_page()
 	_build_test_page()
@@ -86,7 +88,8 @@ func _build_checklist_page() -> void:
 		_check_labels[check] = row
 	box.add_child(HSeparator.new())
 
-	_add_button(box, "Register patient", _on_register_patient)
+	_add_button(box, "Register new patient", _on_register_patient)
+	_edit_btn = _add_button(box, "Edit current patient", _on_edit_patient)
 	_add_button(box, "Origin ritual", func(): _show_page("origin"))
 	_add_button(box, "Workspace calibration (4 corners)", _on_workspace_cal)
 	_add_button(box, "Test drive", _on_test_drive)
@@ -122,6 +125,10 @@ func _refresh_status() -> void:
 	_check_labels["Upload configured"].text = "—  Upload configured (v1: later)"
 	_check_labels["Upload configured"].add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
 
+	_edit_btn.visible = patient_ok
+	if patient_ok:
+		_edit_btn.text = "Edit patient %s" % PatientDB.current_patient_id
+
 	if _pages["origin"].visible:
 		_refresh_origin_page(origin_ok)
 
@@ -146,6 +153,12 @@ func _pyscripts_path(settings_key: String, default_name: String) -> String:
 
 func _on_register_patient() -> void:
 	GlobalSignals.return_to_installer = true
+	get_tree().change_scene_to_file("res://app/ui/registration.tscn")
+
+
+func _on_edit_patient() -> void:
+	GlobalSignals.return_to_installer = true
+	GlobalSignals.edit_patient_id = PatientDB.current_patient_id
 	get_tree().change_scene_to_file("res://app/ui/registration.tscn")
 
 

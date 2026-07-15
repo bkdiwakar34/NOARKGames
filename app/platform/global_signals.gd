@@ -5,6 +5,7 @@ var selected_game_mode: String = "2D"
 
 # Installer mode (see docs/v1_plan.md §4)
 var return_to_installer: bool = false   # registration returns to the installer checklist when set
+var edit_patient_id: String = ""        # registration opens pre-filled in edit mode when set
 var show_debug_overlays: bool = true    # researcher overlays; game screens honor this from package 3 on
 
 var data_path: String = (
