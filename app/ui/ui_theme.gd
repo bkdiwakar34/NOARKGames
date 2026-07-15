@@ -20,6 +20,7 @@ const LEAF        := Color("5FA052")   # success: bright, fast, upward
 const GOLD        := Color("F2B33D")   # stars + time ring
 const MISS        := Color("9A938B")   # miss: soft, brief, downward
 const CARD        := Color("FFFDF7")   # cream cards
+const LASER       := Color(0.95, 0.15, 0.10)   # striker + trail: hot laser red (GoodNotes-style)
 const PAPER       := Color("F6EFE4")   # installer workbench background
 
 # Aliases kept for existing call sites

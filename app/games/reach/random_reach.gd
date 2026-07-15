@@ -216,18 +216,24 @@ func _draw() -> void:
 			else:
 				draw_rect(rect, Color(0.70, 0.70, 0.70, 0.20), false, 1.0)
 
-	# Laser trail: newest segments thick and bright, fading tail-first
+	# Laser trail, GoodNotes-style: two passes — a soft wide red glow, then a
+	# bright hot core line running through it. Fades tail-first.
 	var now: int = Time.get_ticks_msec()
 	for i in range(1, _trail.size()):
 		var age: float = float(now - _trail[i]["t"]) / float(TRAIL_LIFE_MS)
 		draw_line(_trail[i - 1]["pos"], _trail[i]["pos"],
-			Color(UITheme.LEAF, (1.0 - age) * 0.40),
-			lerpf(7.0, 2.0, age), true)
+			Color(UITheme.LASER, (1.0 - age) * 0.20),
+			lerpf(14.0, 4.0, age), true)
+	for i in range(1, _trail.size()):
+		var age: float = float(now - _trail[i]["t"]) / float(TRAIL_LIFE_MS)
+		draw_line(_trail[i - 1]["pos"], _trail[i]["pos"],
+			Color(1.0, 0.75, 0.70, (1.0 - age) * 0.85),
+			lerpf(4.0, 1.5, age), true)
 
-	# Striker — green comet head with white core ("you" is green throughout)
-	draw_circle(_player_pos, 16.0, Color(UITheme.LEAF, 0.35))
-	draw_circle(_player_pos, 11.0, UITheme.LEAF)
-	draw_circle(_player_pos, 4.5, Color(1.0, 1.0, 1.0, 0.95))
+	# Striker — laser dot: red glow, red body, white-hot center
+	draw_circle(_player_pos, 18.0, Color(UITheme.LASER, 0.28))
+	draw_circle(_player_pos, 10.0, UITheme.LASER)
+	draw_circle(_player_pos, 4.0, Color(1.0, 0.95, 0.92, 0.98))
 
 	# Fitts fit overlay (bottom-right) — live scatter of (ID, MT) points and
 	# the current a + b·ID line. Visible during Phase 0c and the live session.
