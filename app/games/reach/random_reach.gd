@@ -39,7 +39,9 @@ func _ready() -> void:
 	_build_ui()
 	_connect_signals()
 	_start_logging()
-	AudioManager.start_music()
+	# Background music disabled by design decision 2026-07-15 (patient found
+	# it annoying; effect sounds carry the feedback). To restore once a real
+	# track exists in app/assets/audio/music.ogg: AudioManager.start_music()
 
 func _build_ui() -> void:
 	var vp := get_viewport_rect().size
@@ -456,7 +458,6 @@ func _on_graph_closed() -> void:
 	get_tree().change_scene_to_file("res://app/ui/game_select.tscn")
 
 func _exit_tree() -> void:
-	AudioManager.stop_music()
 	if AdaptiveManager.trial_ended.is_connected(_on_trial_ended):
 		AdaptiveManager.trial_ended.disconnect(_on_trial_ended)
 	if AdaptiveManager.trial_started.is_connected(_on_trial_started):
