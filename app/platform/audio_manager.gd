@@ -24,7 +24,7 @@ var _star_stream:  AudioStream
 
 func _ready() -> void:
 	_music_player = AudioStreamPlayer.new()
-	_music_player.volume_db = -4.0
+	_music_player.volume_db = -1.0
 	add_child(_music_player)
 	_sfx_player = AudioStreamPlayer.new()
 	_sfx_player.volume_db = 2.0
@@ -65,10 +65,19 @@ func play_star(index: int) -> void:
 # ── File override ─────────────────────────────────────────────────────────────
 
 func _load_or(sound_name: String, fallback: AudioStream) -> AudioStream:
-	for ext in ["ogg", "wav"]:
-		var path := "res://app/assets/audio/%s.%s" % [sound_name, ext]
-		if ResourceLoader.exists(path):
-			return load(path)
+	# Runtime loading (not `load()`): works without the editor import step,
+	# so dropped-in files take effect on next launch even on a CLI-only Pi.
+	var base := "res://app/assets/audio/" + sound_name
+	if FileAccess.file_exists(base + ".ogg"):
+		var ogg := AudioStreamOggVorbis.load_from_file(base + ".ogg")
+		if ogg:
+			if sound_name == "music":
+				ogg.loop = true
+			return ogg
+	if FileAccess.file_exists(base + ".wav"):
+		var wav := AudioStreamWAV.load_from_file(base + ".wav")
+		if wav:
+			return wav
 	return fallback
 
 
@@ -115,10 +124,12 @@ func _make_miss() -> AudioStreamWAV:
 	var phase := 0.0
 	for i in n:
 		var t := float(i) / SAMPLE_RATE
-		var f := lerpf(320.0, 170.0, t / dur)
+		# Falling glide kept above ~330 Hz: small monitor speakers can't
+		# reproduce quiet sines much below that.
+		var f := lerpf(620.0, 340.0, t / dur)
 		phase += f / SAMPLE_RATE
 		var env := minf(t * 25.0, 1.0) * exp(-t * 6.0)
-		s[i] = sin(TAU * phase) * 0.45 * env
+		s[i] = (sin(TAU * phase) + 0.25 * sin(TAU * 2.0 * phase)) * 0.55 * env
 	return _wav_from_samples(s, SAMPLE_RATE, false)
 
 
