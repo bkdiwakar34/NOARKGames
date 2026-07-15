@@ -37,9 +37,9 @@ func _ready() -> void:
 	title.position = Vector2(0.0, vp.y * 0.10)
 	add_child(title)
 
-	# Game cards, centered row
-	var card_size := Vector2(360.0, 420.0)
-	var gap := 48.0
+	# Game cards, centered row — sized so several games fit on one screen
+	var card_size := Vector2(280.0, 330.0)
+	var gap := 44.0
 	var row_w := GAMES.size() * card_size.x + (GAMES.size() - 1) * gap
 	for i in GAMES.size():
 		var card := Panel.new()
@@ -50,29 +50,24 @@ func _ready() -> void:
 		add_child(card)
 		_cards.append(card)
 
-		# Code-drawn game icon (an apple), per the no-sprite rule
+		# Code-drawn game icon — the same minimal dot-with-leaf as in play
 		var icon := Control.new()
-		icon.position = Vector2(card_size.x * 0.5, 150.0)
+		icon.position = Vector2(card_size.x * 0.5, 118.0)
 		card.add_child(icon)
 		icon.draw.connect(func():
-			icon.draw_circle(Vector2.ZERO, 95.0, UITheme.APPLE_DARK)
-			icon.draw_circle(Vector2(-8.0, -10.0), 88.0, UITheme.APPLE_RED)
-			icon.draw_circle(Vector2(-28.0, -30.0), 42.0, UITheme.APPLE_LIGHT)
-			icon.draw_circle(Vector2(-30.0, -34.0), 15.0, Color(1.0, 1.0, 1.0, 0.35))
-			icon.draw_set_transform(Vector2(2.0, -96.0), 0.12, Vector2.ONE)
-			icon.draw_rect(Rect2(-5.0, -26.0, 10.0, 30.0), Color(0.42, 0.29, 0.17))
-			icon.draw_set_transform(Vector2(30.0, -100.0), -0.5, Vector2(1.0, 0.45))
-			icon.draw_circle(Vector2.ZERO, 21.0, UITheme.LEAF)
+			icon.draw_circle(Vector2.ZERO, 65.0, UITheme.APPLE_RED)
+			icon.draw_set_transform(Vector2(28.0, -54.0), -0.6, Vector2(1.0, 0.5))
+			icon.draw_circle(Vector2.ZERO, 17.0, UITheme.LEAF)
 			icon.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE))
 
 		var name_lbl := Label.new()
 		name_lbl.text = GAMES[i]["name"]
-		name_lbl.add_theme_font_size_override("font_size", 40)
+		name_lbl.add_theme_font_size_override("font_size", 30)
 		name_lbl.add_theme_color_override("font_color", UITheme.TEXT_DARK)
 		UITheme.make_bold(name_lbl)
 		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		name_lbl.custom_minimum_size = Vector2(card_size.x, 60.0)
-		name_lbl.position = Vector2(0.0, 290.0)
+		name_lbl.custom_minimum_size = Vector2(card_size.x, 50.0)
+		name_lbl.position = Vector2(0.0, 225.0)
 		card.add_child(name_lbl)
 
 	# Hint bar: the two future physical buttons as colored circles — the same

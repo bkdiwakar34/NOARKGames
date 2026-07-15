@@ -27,6 +27,8 @@ var _graph_overlay: Control = null
 var _stop_btn: Button = null
 var _pause_layer: CanvasLayer = null
 var _is_paused: bool = false  # tracker-lost pause (docs/v1_plan.md §3 system state)
+var _trail: Array = []        # laser-pointer trail: [{pos, t}] fading over TRAIL_LIFE_MS
+const TRAIL_LIFE_MS: int = 600
 
 func _input(event: InputEvent) -> void:
 	# Keyboard stand-in for the future hold-play-button exit (package 4):
@@ -214,10 +216,18 @@ func _draw() -> void:
 			else:
 				draw_rect(rect, Color(0.70, 0.70, 0.70, 0.20), false, 1.0)
 
-	# Cursor — thin warm-ink ring with small centre dot
-	var cursor_col := Color(UITheme.INK.r, UITheme.INK.g, UITheme.INK.b, 0.80)
-	draw_arc(_player_pos, 13.0, 0.0, TAU, 48, cursor_col, 2.0)
-	draw_circle(_player_pos, 2.5, cursor_col)
+	# Laser trail: newest segments thick and bright, fading tail-first
+	var now: int = Time.get_ticks_msec()
+	for i in range(1, _trail.size()):
+		var age: float = float(now - _trail[i]["t"]) / float(TRAIL_LIFE_MS)
+		draw_line(_trail[i - 1]["pos"], _trail[i]["pos"],
+			Color(UITheme.LEAF, (1.0 - age) * 0.40),
+			lerpf(7.0, 2.0, age), true)
+
+	# Striker — green comet head with white core ("you" is green throughout)
+	draw_circle(_player_pos, 16.0, Color(UITheme.LEAF, 0.35))
+	draw_circle(_player_pos, 11.0, UITheme.LEAF)
+	draw_circle(_player_pos, 4.5, Color(1.0, 1.0, 1.0, 0.95))
 
 	# Fitts fit overlay (bottom-right) — live scatter of (ID, MT) points and
 	# the current a + b·ID line. Visible during Phase 0c and the live session.
@@ -369,6 +379,13 @@ func _process(delta: float) -> void:
 	_update_player_pos()
 	AdaptiveManager.update_workspace(_player_pos)
 	_drain_hand_samples()
+
+	# Laser trail bookkeeping (drawn in _draw)
+	var now: int = Time.get_ticks_msec()
+	if _trail.is_empty() or _trail[-1]["pos"].distance_to(_player_pos) > 3.0:
+		_trail.append({"pos": _player_pos, "t": now})
+	while _trail.size() > 0 and now - _trail[0]["t"] > TRAIL_LIFE_MS:
+		_trail.pop_front()
 
 	var dbg: bool = GlobalSignals.show_debug_overlays
 	_debug_label.visible = dbg
