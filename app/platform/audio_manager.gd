@@ -100,49 +100,58 @@ func _wav_from_samples(samples: PackedFloat32Array, rate: int, loop: bool) -> Au
 	return wav
 
 
-# Catch: two quick ascending notes, bright, fast decay — "upward" feel.
+# Catch: bubble pop (fast upward sweep, snappy decay) + high sparkle tail.
 func _make_catch() -> AudioStreamWAV:
 	var dur := 0.30
-	var n := int(SAMPLE_RATE * dur)
-	var s := PackedFloat32Array()
-	s.resize(n)
-	for i in n:
-		var t := float(i) / SAMPLE_RATE
-		var f := 660.0 if t < 0.12 else 990.0
-		var t0 := t if t < 0.12 else t - 0.12
-		var env := exp(-t0 * 13.0)
-		s[i] = (sin(TAU * f * t) + 0.30 * sin(TAU * 2.0 * f * t)) * 0.70 * env
-	return _wav_from_samples(s, SAMPLE_RATE, false)
-
-
-# Miss: soft falling glide, gentle attack, quiet — noticeable, never punishing.
-func _make_miss() -> AudioStreamWAV:
-	var dur := 0.45
 	var n := int(SAMPLE_RATE * dur)
 	var s := PackedFloat32Array()
 	s.resize(n)
 	var phase := 0.0
 	for i in n:
 		var t := float(i) / SAMPLE_RATE
-		# Falling glide kept above ~330 Hz: small monitor speakers can't
-		# reproduce quiet sines much below that.
-		var f := lerpf(620.0, 340.0, t / dur)
+		var f := 380.0 * pow(950.0 / 380.0, minf(t / 0.07, 1.0))
 		phase += f / SAMPLE_RATE
-		var env := minf(t * 25.0, 1.0) * exp(-t * 6.0)
-		s[i] = (sin(TAU * phase) + 0.25 * sin(TAU * 2.0 * phase)) * 0.55 * env
+		var pop := sin(TAU * phase) * exp(-t * 26.0)
+		var t2 := t - 0.05
+		var spark := 0.0
+		if t2 > 0.0:
+			spark = (sin(TAU * 1568.0 * t2) + 0.4 * sin(TAU * 2349.0 * t2)) \
+				* exp(-t2 * 16.0) * 0.45
+		s[i] = (pop * 0.85 + spark) * 0.75
 	return _wav_from_samples(s, SAMPLE_RATE, false)
 
 
-# Star: small bell with one inharmonic partial; pitch rises via play_star().
-func _make_star() -> AudioStreamWAV:
+# Miss: soft descending two-note mallet ("duh-dum") — gentle, never punishing.
+# Kept above ~250 Hz so small monitor speakers can render it.
+func _make_miss() -> AudioStreamWAV:
 	var dur := 0.5
+	var n := int(SAMPLE_RATE * dur)
+	var s := PackedFloat32Array()
+	s.resize(n)
+	var note_split := 0.16
+	for i in n:
+		var t := float(i) / SAMPLE_RATE
+		var f := 392.0 if t < note_split else 293.7
+		var tn := t if t < note_split else t - note_split
+		var env := minf(tn * 90.0, 1.0) * exp(-tn * 9.0)
+		s[i] = (sin(TAU * f * tn) + 0.22 * sin(TAU * f * 4.0 * tn)) * 0.55 * env
+	return _wav_from_samples(s, SAMPLE_RATE, false)
+
+
+# Star: glockenspiel-like bell — inharmonic partials with staggered decays
+# give the metallic shimmer; pitch rises per star via play_star().
+func _make_star() -> AudioStreamWAV:
+	var dur := 0.7
 	var n := int(SAMPLE_RATE * dur)
 	var s := PackedFloat32Array()
 	s.resize(n)
 	for i in n:
 		var t := float(i) / SAMPLE_RATE
-		var env := exp(-t * 7.0)
-		s[i] = (sin(TAU * 784.0 * t) + 0.35 * sin(TAU * 2117.0 * t)) * 0.60 * env
+		var body := sin(TAU * 1046.5 * t) * exp(-t * 5.0)
+		var p2 := 0.45 * sin(TAU * 1046.5 * 2.76 * t) * exp(-t * 9.0)
+		var p3 := 0.18 * sin(TAU * 1046.5 * 5.40 * t) * exp(-t * 14.0)
+		var attack := minf(t * 400.0, 1.0)
+		s[i] = (body + p2 + p3) * 0.50 * attack
 	return _wav_from_samples(s, SAMPLE_RATE, false)
 
 
