@@ -15,7 +15,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="NOARKGames"
-run/main_scene="res://v2/Scenes/main.tscn"
+run/main_scene="res://app/ui/main.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 boot_splash/bg_color=Color(1, 1, 1, 1)
 boot_splash/stretch_mode=0
@@ -25,12 +25,12 @@ boot_splash/minimum_display_time=2000
 
 [autoload]
 
-PatientDB="*res://v2/Core/patient_db.gd"
-GlobalSignals="*res://v2/Core/global_signals.gd"
-UDPReceiver="*res://v2/Core/udp_receiver.gd"
-SessionManager="*res://v2/Core/session_manager.gd"
-AdaptiveManager="*res://v2/Core/adaptive_manager.gd"
-WorkspaceConfig="*res://v2/Core/workspace_config.gd"
+PatientDB="*res://app/platform/patient_db.gd"
+GlobalSignals="*res://app/platform/global_signals.gd"
+UDPReceiver="*res://app/platform/udp_receiver.gd"
+SessionManager="*res://app/platform/session_manager.gd"
+AdaptiveManager="*res://app/platform/adaptive_manager.gd"
+WorkspaceConfig="*res://app/platform/workspace_config.gd"
 
 [display]
 

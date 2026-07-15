@@ -1,8 +1,11 @@
 # CLAUDE.md
 
 **NOARKGames** — Godot 4.5 rehabilitation gaming platform for stroke patients.
-All active development is in `v2/`. The old codebase (`Main_screen/`, `Games/`) is untouched.
+All active development is in `app/` (platform/games/ui/installer split). `v2/` is the frozen
+fallback it was copied from (launchable via `--main-scene res://v2/Scenes/main.tscn`); the
+old codebase (`Main_screen/`, `Games/`) is untouched.
 Read [docs/design.md](docs/design.md) for the architecture + current Fitts'-Law adaptive design.
+Read [docs/v1_plan.md](docs/v1_plan.md) for the v1 product plan and build order.
 Read [docs/setup.md](docs/setup.md) for hardware and how to run.
 Read [docs/todo.md](docs/todo.md) for open work.
 
@@ -12,10 +15,10 @@ Read [docs/todo.md](docs/todo.md) for open work.
 
 ```bash
 godot project.godot                        # open in editor
-godot --path . --main-scene res://v2/Scenes/main.tscn   # run from CLI
+godot --path . --main-scene res://app/ui/main.tscn   # run from CLI
 ```
 
-Main scene: `res://v2/Scenes/main.tscn`
+Main scene: `res://app/ui/main.tscn`
 Display: fullscreen, canvas_items stretch, OpenGL compatibility (Raspberry Pi).
 
 ---
@@ -32,19 +35,19 @@ python pyscripts/main.py                          # streams to 127.0.0.1:12345
 
 ---
 
-## v2 Autoloads (project.godot order matters)
+## Autoloads (project.godot order matters)
 
 | # | Name | Script | Purpose |
 |---|------|--------|---------|
-| 1 | PatientDB | `v2/Core/patient_db.gd` | Patient JSON, target_success_rate |
-| 2 | GlobalSignals | `v2/Core/global_signals.gd` | Signal bus, current_patient_id |
-| 3 | UDPReceiver | `v2/Core/udp_receiver.gd` | UDP:12345, screen_pos |
-| 4 | SessionManager | `v2/Core/session_manager.gd` | Session/trial IDs, CSV logs |
-| 5 | AdaptiveManager | `v2/Core/adaptive_manager.gd` | Trial timer, difficulty controller |
+| 1 | PatientDB | `app/platform/patient_db.gd` | Patient JSON, target_success_rate |
+| 2 | GlobalSignals | `app/platform/global_signals.gd` | Signal bus, current_patient_id |
+| 3 | UDPReceiver | `app/platform/udp_receiver.gd` | UDP:12345, screen_pos |
+| 4 | SessionManager | `app/platform/session_manager.gd` | Session/trial IDs, CSV logs |
+| 5 | AdaptiveManager | `app/platform/adaptive_manager.gd` | Trial timer, difficulty controller |
 
 ---
 
-## Critical v2 Notes
+## Critical Notes
 
 - All UI is programmatic GDScript — no `.tscn` files for game scenes
 - Apple MUST be code-drawn — sprite approach caused a multi-apple bug (never diagnosed)

@@ -133,14 +133,14 @@ source .venv/bin/activate
 python pyscripts/main.py
 
 # Terminal 2 — game
-~/Downloads/Godot_v4.5-stable_linux.arm64 --path . --main-scene res://v2/Scenes/main.tscn
+~/Downloads/Godot_v4.5-stable_linux.arm64 --path . --main-scene res://app/ui/main.tscn
 ```
 
 Or open `project.godot` in the Godot editor and press F5.
 
 ### Main scene
 
-`res://v2/Scenes/main.tscn`. Display: fullscreen, `canvas_items` stretch mode, OpenGL compatibility renderer (Raspberry Pi requirement).
+`res://app/ui/main.tscn`. Display: fullscreen, `canvas_items` stretch mode, OpenGL compatibility renderer (Raspberry Pi requirement). (`res://v2/Scenes/main.tscn` still launches the frozen pre-v1 build.)
 
 ### Game flow
 

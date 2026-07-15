@@ -18,10 +18,10 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .
 
 # Run game (tracker auto-launched by Godot)
-godot --path . --main-scene res://v2/Scenes/main.tscn
+godot --path . --main-scene res://app/ui/main.tscn
 ```
 
-Main scene: `res://v2/Scenes/main.tscn`. Tracker reads `settings.json` for camera calibration file, filter type, UDP port, etc.
+Main scene: `res://app/ui/main.tscn`. Tracker reads `settings.json` for camera calibration file, filter type, UDP port, etc.
 
 ## Documentation
 
