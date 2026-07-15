@@ -33,6 +33,7 @@ var _scan_current_ring: int   = 0
 var _scan_ring_had_hit: bool  = false
 var _a_global_max:      float = 200.0
 var reachable_cells:    Array = []   # public output: [{pos}]
+var scan_step:          Vector2 = Vector2(SCAN_CELL_SIZE, SCAN_CELL_SIZE)  # grid tile size, for the workspace shade overlay
 
 # ── Phase 0b: Precision scan ──────────────────────────────────────────────────
 # Alternating home/measurement pairs; 5 decreasing W values × 3 repeats = 15 measurements
@@ -322,6 +323,7 @@ func _build_scan_grid() -> void:
 	var rows: int     = max(1, int(usable_h / SCAN_CELL_SIZE))
 	var step_x: float = usable_w / cols
 	var step_y: float = usable_h / rows
+	scan_step = Vector2(step_x, step_y)
 	var ox:     float = gmin.x + step_x * 0.5
 	var oy:     float = gmin.y + step_y * 0.5
 	var by_ring: Dictionary = {}

@@ -128,6 +128,18 @@ func _draw() -> void:
 		if is_instance_valid(_current_apple):
 			draw_line(center, _current_apple.position, Color(1, 1, 1, 0.2), 1.0)
 
+	# Reachable-region shade: one continuous faint fill over every grid tile
+	# within spawn tolerance of a reached cell — valid spawns land inside it.
+	if AdaptiveManager._phase >= AdaptiveManager.Phase.FITTS_CAL:
+		var shade := Color(0.30, 0.60, 0.35, 0.07)
+		var step: Vector2 = AdaptiveManager.scan_step
+		var tol: float = AdaptiveManager.SCAN_CELL_SIZE + step.length() * 0.5
+		for cell in AdaptiveManager._scan_cells:
+			for rc in AdaptiveManager.reachable_cells:
+				if cell["pos"].distance_to(rc["pos"]) <= tol:
+					draw_rect(Rect2(cell["pos"] - step * 0.5, step), shade, true)
+					break
+
 	# Grid workspace scan overlay (visible during scan and until Phase 0b ends)
 	var scan_cells: Array = AdaptiveManager._scan_cells
 	if not scan_cells.is_empty() and AdaptiveManager._phase <= AdaptiveManager.Phase.PRECISION_SCAN:
