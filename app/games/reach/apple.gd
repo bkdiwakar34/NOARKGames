@@ -13,7 +13,7 @@ var _catch_progress: float = 0.0
 var _eaten:          bool  = false
 var _missed:         bool  = false
 var _deflate:        float = 0.0
-const DEFLATE_TIME:  float = 0.35  # miss animation: soft, brief, downward
+const DEFLATE_TIME:  float = 0.45  # miss animation: soft, brief, downward
 
 
 func set_catch_progress(p: float) -> void:
@@ -49,11 +49,21 @@ func _process(delta: float) -> void:
 
 func _draw() -> void:
 	if _missed:
-		var p := _deflate / DEFLATE_TIME
-		var r_d := target_radius * (1.0 - 0.55 * p)
-		var col := balloon_color.lerp(UITheme.MISS, 0.7)
-		col.a = 1.0 - p
-		draw_circle(Vector2(0.0, 34.0 * p), r_d, col)  # shrink, grey, sink
+		# Eased two-element dissolve: body shrinks/sinks with accelerating
+		# ease while an expanding thin ring "releases" outward and fades.
+		var p := clampf(_deflate / DEFLATE_TIME, 0.0, 1.0)
+		var ease_in := p * p                      # slow start, fast finish
+		var ease_out := 1.0 - (1.0 - p) * (1.0 - p)  # fast start, soft landing
+
+		var ring_col := balloon_color.lerp(UITheme.MISS, 0.5)
+		ring_col.a = 0.55 * (1.0 - p)
+		draw_arc(Vector2.ZERO, target_radius * (1.0 + 0.65 * ease_out),
+			0.0, TAU, 64, ring_col, 2.0)
+
+		var body_col := balloon_color.lerp(UITheme.MISS, 0.4 + 0.5 * p)
+		body_col.a = pow(1.0 - p, 1.4)
+		var r_d := target_radius * (1.0 - 0.8 * ease_in)
+		draw_circle(Vector2(0.0, 22.0 * ease_in), r_d, body_col)
 		return
 
 	var r := target_radius
