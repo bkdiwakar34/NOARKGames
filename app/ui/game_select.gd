@@ -9,8 +9,20 @@ var _cal_status_lbl: Label = null
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var patient := PatientDB.get_patient(PatientDB.current_patient_id)
-	_override_rate = patient.get("target_success_rate", 0.8)
+	# Today's rate from the pre-sampled 14-day schedule when one exists
+	# (falls back to the fixed target_success_rate inside get_todays_rate);
+	# the gear menu still overrides for researcher testing.
+	var todays: float = PatientDB.get_todays_rate(PatientDB.current_patient_id)
+	_override_rate = todays if todays > 0.0 else 0.8
 	_build_ui(patient.get("name", "Patient"))
+
+
+func _input(event: InputEvent) -> void:
+	# Researcher-only entry to installer mode: needs a physical keyboard,
+	# which patients don't have (docs/v1_plan.md §4).
+	if event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode == KEY_F10:
+		get_tree().change_scene_to_file("res://app/installer/installer.tscn")
 
 func _build_ui(patient_name: String) -> void:
 	var vp := get_viewport_rect().size

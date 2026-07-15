@@ -66,7 +66,8 @@ func save_database() -> bool:
 
 func add_patient(hospital_id: String, patient_name: String, age: int, gender: String,
 		stroke_time: int, dominant_hand: String, affected_hand: String,
-		target_success_rate: float, comments: String = "") -> bool:
+		target_success_rate: float, comments: String = "",
+		rate_schedule: Array = []) -> bool:
 	if hospital_id in patient_register:
 		push_error("Patient ID already exists: ", hospital_id)
 		return false
@@ -79,10 +80,33 @@ func add_patient(hospital_id: String, patient_name: String, age: int, gender: St
 		"dominant_hand": dominant_hand,
 		"affected_hand": affected_hand,
 		"target_success_rate": target_success_rate,
-		"comments": comments
+		"comments": comments,
+		"rate_schedule": rate_schedule,          # 14 pre-sampled daily target rates
+		"start_date": Time.get_date_string_from_system()  # day 1 of the schedule
 	}
 	save_database()
 	return true
+
+
+# Day's assigned rate from the pre-sampled schedule (day 1 = start_date).
+# Falls back to the fixed target_success_rate when no schedule exists, and
+# holds the last scheduled value once the study window has passed.
+func get_todays_rate(hospital_id: String) -> float:
+	var p: Dictionary = get_patient(hospital_id)
+	if p.is_empty():
+		return -1.0
+	var sched: Array = p.get("rate_schedule", [])
+	if sched.is_empty():
+		return p.get("target_success_rate", -1.0)
+	var day_idx: int = 0
+	var start_str: String = p.get("start_date", "")
+	if start_str != "":
+		var start_unix: int = Time.get_unix_time_from_datetime_string(start_str + "T00:00:00")
+		var today_unix: int = Time.get_unix_time_from_datetime_string(
+			Time.get_date_string_from_system() + "T00:00:00")
+		day_idx = int(round(float(today_unix - start_unix) / 86400.0))
+	day_idx = clamp(day_idx, 0, sched.size() - 1)
+	return float(sched[day_idx])
 
 func remove_patient(hospital_id: String) -> bool:
 	if hospital_id in patient_register:

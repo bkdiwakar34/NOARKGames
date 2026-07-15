@@ -118,6 +118,13 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 		_pkt_count      = 0
 		_pkt_window_ms  = now
 
+# One-shot (deliberately not sticky like _outgoing): ask the tracker to discard
+# its world origin and re-lock from the next stable detection. Used by the
+# installer's origin ritual with the device parked at the marked pose.
+func request_origin_relock() -> void:
+	_udp.put_packet("RELOCK".to_utf8_buffer())
+
+
 # Hand the buffered packet samples to the caller and clear the buffer.
 # Called once per frame by the game scene while logging.
 func take_samples() -> Array:

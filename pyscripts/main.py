@@ -797,6 +797,21 @@ class MainClass:
         self._disagree_count      = 0
         self._disagree_warned     = False
 
+    def _relock_origin(self) -> None:
+        """RELOCK command from the Godot installer: discard the world origin
+        (memory + persisted file) and re-lock from the next stable detection.
+        Meant to be triggered with the device parked at the marked pose, so
+        re-locked frames are physically repeatable across installations."""
+        self._origin_R    = None
+        self._origin_grip = None
+        self._reset_origin()   # first_frame becomes True since no origin exists now
+        if os.path.exists(self._origin_path):
+            try:
+                os.remove(self._origin_path)
+            except OSError as exc:
+                print(f"Could not delete {self._origin_path}: {exc}")
+        print("RELOCK: origin cleared — waiting for a stable detection to re-lock.")
+
     # ── origin persistence ────────────────────────────────────────────────────
 
     def _save_origin(self) -> None:
@@ -957,6 +972,8 @@ class MainClass:
         cmd = self._recv_command()
         if cmd.startswith(b"SETUP:"):
             self._apply_setup(cmd)   # demo mode switch, not a dispatch command
+        elif cmd == b"RELOCK":
+            self._relock_origin()    # installer origin ritual, not a dispatch command
         elif cmd:
             self.received_message = cmd
 

@@ -134,7 +134,8 @@ trial changes nothing (misses carry no movement time). See todo.md pre-clinical 
 ## 7. Build order
 
 Each package independently testable on the Pi; none of 2–7 touches the adaptive algorithm
-or the data schema.
+or the data schema. (Order revised 2026-07-15: package 6 pulled forward, before 2 — setup
+flow needed before piloting. Package 0 — scaffold `app/` from v2 — done and Pi-verified.)
 
 - [ ] **1. Data logging** — the two-CSV schema above + origin stamp + per-row flush.
       (In progress: udp_receiver packet buffer partially in as of 2026-07-15.)

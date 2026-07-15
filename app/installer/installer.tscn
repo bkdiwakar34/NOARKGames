@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://app/installer/installer.gd" id="1_inst"]
+
+[node name="Installer" type="Control"]
+script = ExtResource("1_inst")

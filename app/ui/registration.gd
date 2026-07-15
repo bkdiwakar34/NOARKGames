@@ -5,6 +5,7 @@ var _name_input: LineEdit
 var _age_input: SpinBox
 var _stroke_time_input: SpinBox
 var _comments_input: LineEdit
+var _schedule_input: LineEdit
 var _error_label: Label
 
 var _gender_group: ButtonGroup
@@ -64,6 +65,23 @@ func _build_ui() -> void:
 
 	_add_separator(vbox)
 	_success_rate_group = _add_toggle_row(vbox, "Therapy Group (assigned by therapist)", ["70%", "80%", "90%"])
+
+	# 14 daily target rates sampled around the group mean (design.md §1);
+	# shown editable so they can be inspected or hand-corrected before saving.
+	vbox.add_child(_make_label("14-day target-rate schedule (Generate after picking the group; editable)"))
+	var sched_row = HBoxContainer.new()
+	sched_row.add_theme_constant_override("separation", 8)
+	var gen_btn = Button.new()
+	gen_btn.text = "Generate"
+	gen_btn.custom_minimum_size = Vector2(120, 44)
+	gen_btn.pressed.connect(_on_generate_schedule)
+	sched_row.add_child(gen_btn)
+	_schedule_input = LineEdit.new()
+	_schedule_input.placeholder_text = "14 comma-separated rates"
+	_schedule_input.custom_minimum_size = Vector2(0, 44)
+	_schedule_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sched_row.add_child(_schedule_input)
+	vbox.add_child(sched_row)
 	_add_separator(vbox)
 
 	_comments_input = _add_text_field(vbox, "Comments (optional)", "")
@@ -145,10 +163,21 @@ func _on_register_pressed() -> void:
 
 	var rate = SUCCESS_RATE_MAP.get(rate_btn.text, -1.0)
 
+	var schedule: Array = []
+	for part in _schedule_input.text.split(",", false):
+		var v: float = part.strip_edges().to_float()
+		if v <= 0.0 or v >= 1.0:
+			_show_error("Schedule values must be between 0 and 1.")
+			return
+		schedule.append(v)
+	if schedule.size() != 14:
+		_show_error("Schedule needs exactly 14 values — press Generate.")
+		return
+
 	var ok = PatientDB.add_patient(
 		id, name_text, int(_age_input.value), gender_btn.text,
 		int(_stroke_time_input.value), dom_btn.text, aff_btn.text,
-		rate, _comments_input.text.strip_edges()
+		rate, _comments_input.text.strip_edges(), schedule
 	)
 
 	if not ok:
@@ -157,7 +186,23 @@ func _on_register_pressed() -> void:
 
 	PatientDB.current_patient_id = id
 	GlobalSignals.current_patient_id = id
-	get_tree().change_scene_to_file("res://app/ui/game_select.tscn")
+	if GlobalSignals.return_to_installer:
+		get_tree().change_scene_to_file("res://app/installer/installer.tscn")
+	else:
+		get_tree().change_scene_to_file("res://app/ui/game_select.tscn")
+
+
+func _on_generate_schedule() -> void:
+	var rate_btn = _success_rate_group.get_pressed_button()
+	if not rate_btn:
+		_show_error("Pick the therapy group first, then press Generate.")
+		return
+	var mean: float = SUCCESS_RATE_MAP.get(rate_btn.text, 0.8)
+	var vals: PackedStringArray = []
+	for i in 14:
+		vals.append("%.3f" % clampf(randfn(mean, 0.05), 0.4, 0.95))
+	_schedule_input.text = ", ".join(vals)
+	_error_label.visible = false
 
 func _show_error(msg: String) -> void:
 	_error_label.text = msg
