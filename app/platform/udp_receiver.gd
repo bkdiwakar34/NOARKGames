@@ -118,6 +118,15 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 		_pkt_count      = 0
 		_pkt_window_ms  = now
 
+# Hand the buffered packet samples to the caller and clear the buffer.
+# Called once per frame by the game scene while logging.
+func take_samples() -> Array:
+	_log_mutex.lock()
+	var out: Array = _log_buffer
+	_log_buffer = []
+	_log_mutex.unlock()
+	return out
+
 func send_tracker_setup(subset: bool, rigid: bool) -> void:
 	setup_subset = subset
 	setup_rigid  = rigid

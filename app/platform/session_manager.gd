@@ -28,7 +28,7 @@ func get_next_trial_id(game_name: String) -> int:
 	_save()
 	return trial_counts[game_name]
 
-func create_log_file(game_name: String, patient_id: String) -> FileAccess:
+func create_log_file(game_name: String, patient_id: String, extra_header: Array = []) -> FileAccess:
 	var base_path = GlobalSignals.data_path + "/" + patient_id + "/GameData"
 	if not DirAccess.dir_exists_absolute(base_path):
 		DirAccess.make_dir_recursive_absolute(base_path)
@@ -41,12 +41,14 @@ func create_log_file(game_name: String, patient_id: String) -> FileAccess:
 		push_error("Could not create log file: ", filename)
 		return null
 
-	file.store_line("headerrows,7")
+	file.store_line("headerrows,%d" % (7 + extra_header.size()))
 	file.store_line("game_name,%s" % game_name)
 	file.store_line("h_id,%s" % patient_id)
 	file.store_line("device_location,PMR")
 	file.store_line("device_version,NOARK-0.1.0")
-	file.store_line("protocol_version,0.2.0")
+	file.store_line("protocol_version,0.3.0")
+	for line in extra_header:
+		file.store_line(line)
 	file.store_line("start_time,%s" % Time.get_datetime_string_from_system())
 	return file
 

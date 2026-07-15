@@ -6,7 +6,6 @@ const GRAPH_OVERLAY_SCRIPT := preload("res://app/games/reach/graph_overlay.gd")
 
 var _catch_radius:    float = 60.0  # set per-apple from AdaptiveManager
 var _catch_hold_time: float = 1.0
-const LOG_INTERVAL := 0.02
 
 var SCREEN_MIN: Vector2
 var SCREEN_MAX: Vector2
@@ -16,8 +15,9 @@ var _current_apple: Node2D = null
 var _catch_timer: float = 0.0
 var _trial_caught: int = 0
 var _between_trial: CanvasLayer = null
-var _log_file: FileAccess = null
-var _log_timer: Timer = null
+var _hand_file: FileAccess = null     # ~100 Hz hand samples, one row per tracker packet
+var _targets_file: FileAccess = null  # one row per target
+var _apple_spawn_time: float = 0.0
 var _score_label: Label = null
 var _debug_label: Label = null
 var _calib_label: Label = null
@@ -259,21 +259,63 @@ func _connect_signals() -> void:
 	AdaptiveManager.trial_started.connect(_on_trial_started)
 
 func _start_logging() -> void:
-	_log_file = SessionManager.create_log_file("RandomReach", PatientDB.current_patient_id)
-	if _log_file:
-		_log_file.store_csv_line(PackedStringArray([
-			"epochtime", "trial", "difficulty",
-			"player_x", "player_y", "apple_x", "apple_y", "status"
+	# Origin stamp: records which tracker frame this data was captured in, so
+	# sessions can be converted to the shared camera frame post-hoc
+	# (docs/v1_plan.md §5). Commas/newlines replaced to keep the CSV parseable.
+	var origin_line := "origin_lock,absent"
+	var origin_raw := FileAccess.get_file_as_string("res://pyscripts/origin_lock.json")
+	if origin_raw != "":
+		origin_line = "origin_lock," + origin_raw.replace(",", ";").replace("\n", " ").strip_edges()
+
+	_hand_file = SessionManager.create_log_file(
+		"RandomReachHand", PatientDB.current_patient_id, [origin_line])
+	if _hand_file:
+		_hand_file.store_csv_line(PackedStringArray([
+			"epochtime", "trial", "screen_x", "screen_y",
+			"tracker_x", "tracker_y", "tracker_z"
 		]))
-	_log_timer = Timer.new()
-	_log_timer.wait_time = LOG_INTERVAL
-	_log_timer.autostart = true
-	_log_timer.timeout.connect(_on_log_tick)
-	add_child(_log_timer)
+	_targets_file = SessionManager.create_log_file(
+		"RandomReachTargets", PatientDB.current_patient_id)
+	if _targets_file:
+		_targets_file.store_csv_line(PackedStringArray([
+			"trial", "spawn_time", "target_x", "target_y",
+			"diameter_px", "outcome", "outcome_time"
+		]))
+	UDPReceiver.log_enabled = true
+
+
+# Write all tracker packets buffered since last frame. Flushed per batch so an
+# abrupt power-off (patients may just switch off) loses at most one frame.
+func _drain_hand_samples() -> void:
+	if _hand_file == null:
+		return
+	var samples: Array = UDPReceiver.take_samples()
+	if samples.is_empty():
+		return
+	var trial := str(AdaptiveManager.trial_number)
+	for s in samples:
+		_hand_file.store_csv_line(PackedStringArray([
+			str(s[0]), trial, str(s[1]), str(s[2]),
+			str(s[3]), str(s[4]), str(s[5])
+		]))
+	_hand_file.flush()
+
+
+func _log_target(outcome: String) -> void:
+	if _targets_file == null or not is_instance_valid(_current_apple):
+		return
+	_targets_file.store_csv_line(PackedStringArray([
+		str(AdaptiveManager.trial_number), str(_apple_spawn_time),
+		str(_current_apple.position.x), str(_current_apple.position.y),
+		str(_catch_radius * 2.0), outcome,
+		str(Time.get_unix_time_from_system())
+	]))
+	_targets_file.flush()
 
 func _process(delta: float) -> void:
 	_update_player_pos()
 	AdaptiveManager.update_workspace(_player_pos)
+	_drain_hand_samples()
 
 	if not _is_between_trial:
 		if _current_apple == null:
@@ -328,6 +370,7 @@ func _spawn_apple() -> void:
 	_current_apple.apple_missed.connect(_on_apple_missed)
 	add_child(_current_apple)
 	AdaptiveManager.record_spawn(_player_pos)
+	_apple_spawn_time = Time.get_unix_time_from_system()
 	_catch_timer = 0.0
 
 func _check_catch(delta: float) -> void:
@@ -345,6 +388,7 @@ func _check_catch(delta: float) -> void:
 		_current_apple.set_catch_progress(0.0)
 
 func _on_apple_eaten() -> void:
+	_log_target("caught")
 	var lt: float = _current_apple.lifetime if is_instance_valid(_current_apple) else 0.0
 	AdaptiveManager.record_catch(lt)
 	_trial_caught += 1
@@ -355,6 +399,7 @@ func _on_apple_eaten() -> void:
 	_catch_timer = 0.0
 
 func _on_apple_missed() -> void:
+	_log_target("expired")
 	var lt: float = _current_apple.lifetime if is_instance_valid(_current_apple) else 0.0
 	AdaptiveManager.record_miss(lt)
 	_current_apple = null
@@ -378,6 +423,7 @@ func _spawn_catch_burst(pos: Vector2) -> void:
 func _on_trial_ended(_trial_num: int, caught: int, _spawned: int) -> void:
 	_is_between_trial = true
 	_catch_timer = 0.0
+	_log_target("aborted")  # unresolved target at trial end
 	if is_instance_valid(_current_apple):
 		_current_apple.queue_free()
 	_current_apple = null
@@ -390,28 +436,12 @@ func _on_trial_started(_trial_num: int) -> void:
 	_score_label.text = "0"
 	_between_trial.visible = false
 
-func _on_log_tick() -> void:
-	if not _log_file:
-		return
-	var has_apple := is_instance_valid(_current_apple)
-	var apple_x := _current_apple.position.x if has_apple else -1.0
-	var apple_y := _current_apple.position.y if has_apple else -1.0
-	var status: String = "between" if _is_between_trial \
-		else ("catching" if _catch_timer > 0.0 else "reaching")
-	_log_file.store_csv_line(PackedStringArray([
-		str(Time.get_unix_time_from_system()),
-		str(AdaptiveManager.trial_number),
-		str(AdaptiveManager.difficulty),
-		str(_player_pos.x), str(_player_pos.y),
-		str(apple_x), str(apple_y),
-		status
-	]))
-
 func _on_stop_pressed() -> void:
 	if _graph_overlay != null:
 		return
 	AdaptiveManager.stop_session()
 	_is_between_trial = true
+	_log_target("aborted")  # unresolved target at session stop
 	if is_instance_valid(_current_apple):
 		_current_apple.queue_free()
 	_current_apple = null
@@ -427,6 +457,10 @@ func _exit_tree() -> void:
 		AdaptiveManager.trial_ended.disconnect(_on_trial_ended)
 	if AdaptiveManager.trial_started.is_connected(_on_trial_started):
 		AdaptiveManager.trial_started.disconnect(_on_trial_started)
-	if _log_file:
-		_log_file.close()
-		_log_file = null
+	UDPReceiver.log_enabled = false
+	if _hand_file:
+		_hand_file.close()
+		_hand_file = null
+	if _targets_file:
+		_targets_file.close()
+		_targets_file = null
