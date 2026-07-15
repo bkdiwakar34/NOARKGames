@@ -25,7 +25,7 @@ researcher present; everything that happens without the researcher requires none
 | Session dose | Full freedom, no software nudging | Adherence is the dependent variable; encouragement happens by call/message, outside the software |
 | Game selection | 2 physical arcade buttons (GPIO): "next" cycles, "play" starts, hold "play" ~3 s exits | One-hand friendly, no cursor precision needed, scales to more games |
 | Power-off | Any time, including mid-trial | Data must be complete without clean shutdown → flush every row |
-| Patient feedback | Music + per-target catch/miss effects + 5-star trial screen | Chosen by researcher |
+| Patient feedback | Per-target catch/miss effects + 5-star trial screen; background music tried and removed 2026-07-15 (annoying in testing — re-enable is one line if a real track changes the verdict) | Chosen by researcher |
 | Star fill rule | Caught / spawned (success ratio) | Deliberate: the controller holds this ≈ constant, so feedback is a warm ritual, not a performance signal — keeps feedback from confounding the challenge→motivation study. Revisit after study 1. |
 | Patient-facing language | English, near-zero text | Aphasia-aware design: icons + sound carry meaning; the few words translate cheaply later |
 | Researcher interface | Hidden installer mode in the same app (not separate software) | Setup needs the live tracker + game stack; one deployment; kiosk-industry standard |
