@@ -25,6 +25,13 @@ const CHECKS: Array = [
 ]
 
 
+func _input(event: InputEvent) -> void:
+	# F10 toggles installer mode: it got you in, it gets you out.
+	if event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode == KEY_F10:
+		get_tree().change_scene_to_file("res://app/ui/game_select.tscn")
+
+
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	GlobalSignals.return_to_installer = false
@@ -50,9 +57,15 @@ func _new_page(page_name: String, title: String) -> VBoxContainer:
 	for side in ["margin_top", "margin_left", "margin_right", "margin_bottom"]:
 		margin.add_theme_constant_override(side, 60)
 	add_child(margin)
+	# Scroll wrapper so pages can never push their bottom buttons off-screen
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(scroll)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 14)
-	margin.add_child(box)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(box)
 	var lbl := Label.new()
 	lbl.text = title
 	lbl.add_theme_font_size_override("font_size", 30)

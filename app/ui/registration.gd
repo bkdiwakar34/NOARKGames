@@ -17,6 +17,14 @@ var _success_rate_group: ButtonGroup
 
 const SUCCESS_RATE_MAP = {"70%": 0.7, "80%": 0.8, "90%": 0.9}
 
+func _input(event: InputEvent) -> void:
+	# F10 abandons the form back to the installer (only when it sent us here).
+	if GlobalSignals.return_to_installer and event is InputEventKey \
+			and event.pressed and not event.echo and event.keycode == KEY_F10:
+		GlobalSignals.edit_patient_id = ""
+		get_tree().change_scene_to_file("res://app/installer/installer.tscn")
+
+
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_build_ui()
