@@ -4,9 +4,10 @@ extends Control
 # Plain functional UI on purpose; the design system arrives in later packages.
 
 const SETTINGS_PATH := "res://settings.json"
+const UITheme := preload("res://app/ui/ui_theme.gd")
 
 var _pages: Dictionary = {}          # name -> VBoxContainer
-var _check_labels: Dictionary = {}   # check name -> Label
+var _check_rows: Dictionary = {}     # check name -> {"sb": StyleBoxFlat, "label": Label}
 var _origin_status: Label
 var _edit_btn: Button
 var _test_info: Label
@@ -69,6 +70,8 @@ func _new_page(page_name: String, title: String) -> VBoxContainer:
 	var lbl := Label.new()
 	lbl.text = title
 	lbl.add_theme_font_size_override("font_size", 30)
+	lbl.add_theme_color_override("font_color", UITheme.INK)
+	UITheme.make_bold(lbl)
 	box.add_child(lbl)
 	box.add_child(HSeparator.new())
 	_pages[page_name] = margin
@@ -85,6 +88,12 @@ func _add_button(parent: Node, text: String, cb: Callable) -> Button:
 	var btn := Button.new()
 	btn.text = text
 	btn.custom_minimum_size = Vector2(340, 52)
+	btn.add_theme_stylebox_override("normal", UITheme.button_style(UITheme.INK))
+	btn.add_theme_stylebox_override("hover", UITheme.button_style(UITheme.INK.lightened(0.18)))
+	btn.add_theme_stylebox_override("pressed", UITheme.button_style(UITheme.INK.darkened(0.25)))
+	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
 	btn.pressed.connect(cb)
 	parent.add_child(btn)
 	return btn
@@ -95,10 +104,38 @@ func _add_button(parent: Node, text: String, cb: Callable) -> Button:
 func _build_checklist_page() -> void:
 	var box := _new_page("checklist", "Installer — Install Checklist")
 	for check in CHECKS:
-		var row := Label.new()
-		row.add_theme_font_size_override("font_size", 20)
-		box.add_child(row)
-		_check_labels[check] = row
+		var pc := PanelContainer.new()
+		var row_sb := StyleBoxFlat.new()
+		row_sb.bg_color = UITheme.CARD
+		row_sb.set_corner_radius_all(10)
+		row_sb.content_margin_left = 16.0
+		row_sb.content_margin_right = 12.0
+		row_sb.content_margin_top = 10.0
+		row_sb.content_margin_bottom = 10.0
+		pc.add_theme_stylebox_override("panel", row_sb)
+		var h := HBoxContainer.new()
+		var nm := Label.new()
+		nm.text = check
+		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nm.add_theme_font_size_override("font_size", 20)
+		nm.add_theme_color_override("font_color", UITheme.INK)
+		h.add_child(nm)
+		var pill := PanelContainer.new()
+		var pill_sb := StyleBoxFlat.new()
+		pill_sb.set_corner_radius_all(99)
+		pill_sb.content_margin_left = 14.0
+		pill_sb.content_margin_right = 14.0
+		pill_sb.content_margin_top = 3.0
+		pill_sb.content_margin_bottom = 3.0
+		pill.add_theme_stylebox_override("panel", pill_sb)
+		var pl := Label.new()
+		pl.add_theme_font_size_override("font_size", 15)
+		pl.add_theme_color_override("font_color", Color.WHITE)
+		pill.add_child(pl)
+		h.add_child(pill)
+		pc.add_child(h)
+		box.add_child(pc)
+		_check_rows[check] = {"sb": pill_sb, "label": pl}
 	box.add_child(HSeparator.new())
 
 	_add_button(box, "Register new patient", _on_register_patient)
@@ -109,6 +146,9 @@ func _build_checklist_page() -> void:
 
 	var dbg := CheckButton.new()
 	dbg.text = "Show researcher overlays in game (debug numbers, plots, workspace shade, stop button)"
+	dbg.add_theme_color_override("font_color", UITheme.INK)
+	dbg.add_theme_color_override("font_pressed_color", UITheme.INK)
+	dbg.add_theme_color_override("font_hover_color", UITheme.INK)
 	dbg.button_pressed = GlobalSignals.show_debug_overlays
 	dbg.toggled.connect(func(on: bool): GlobalSignals.show_debug_overlays = on)
 	box.add_child(dbg)
@@ -134,12 +174,10 @@ func _refresh_status() -> void:
 	_set_check("Origin locked", origin_ok)
 	_set_check("Workspace calibrated", WorkspaceConfig.is_calibrated)
 	if patient_ok and not sched_ok:
-		_check_labels["Patient registered"].text = "⚠  Patient registered — no rate schedule (re-register)"
-		_check_labels["Patient registered"].add_theme_color_override("font_color", Color(0.8, 0.6, 0.1))
+		_set_pill("Patient registered", "! no schedule", Color("C99A2E"))
 	else:
 		_set_check("Patient registered", sched_ok)
-	_check_labels["Upload configured"].text = "—  Upload configured (v1: later)"
-	_check_labels["Upload configured"].add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+	_set_pill("Upload configured", "v1: later", Color(0.55, 0.52, 0.48))
 
 	_edit_btn.visible = patient_ok
 	if patient_ok:
@@ -150,10 +188,16 @@ func _refresh_status() -> void:
 
 
 func _set_check(check: String, ok: bool) -> void:
-	var lbl: Label = _check_labels[check]
-	lbl.text = ("✓  " if ok else "✗  ") + check
-	lbl.add_theme_color_override("font_color",
-		Color(0.15, 0.6, 0.2) if ok else Color(0.8, 0.15, 0.15))
+	if ok:
+		_set_pill(check, "✓ done", UITheme.LEAF)
+	else:
+		_set_pill(check, "✗ missing", Color("C4483B"))
+
+
+func _set_pill(check: String, text: String, color: Color) -> void:
+	var row: Dictionary = _check_rows[check]
+	row["sb"].bg_color = color
+	row["label"].text = text
 
 
 # settings.json can rename calibration files (e.g. per-machine camera calib);
@@ -190,6 +234,7 @@ func _build_origin_page() -> void:
 	var box := _new_page("origin", "Origin Ritual")
 	var instr := Label.new()
 	instr.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	instr.add_theme_color_override("font_color", UITheme.INK)
 	instr.text = ("Only needed after a camera move or a fresh install.\n" +
 		"1. Place the device at the marked parking pose on the table.\n" +
 		"2. Press Re-lock and keep the device still.\n" +
@@ -197,6 +242,7 @@ func _build_origin_page() -> void:
 	box.add_child(instr)
 	_origin_status = Label.new()
 	_origin_status.add_theme_font_size_override("font_size", 22)
+	_origin_status.add_theme_color_override("font_color", UITheme.INK)
 	box.add_child(_origin_status)
 	_add_button(box, "Re-lock origin now", _on_relock)
 	_add_button(box, "Back", func(): _show_page("checklist"))
@@ -241,8 +287,10 @@ func _build_test_page() -> void:
 	var box := _new_page("test", "Test Drive")
 	var instr := Label.new()
 	instr.text = "Move the device — the cursor should follow. Touch all three circles."
+	instr.add_theme_color_override("font_color", UITheme.INK)
 	box.add_child(instr)
 	_test_info = Label.new()
+	_test_info.add_theme_color_override("font_color", UITheme.INK)
 	box.add_child(_test_info)
 	_add_button(box, "Back", func(): _show_page("checklist"))
 
@@ -262,13 +310,15 @@ func _process(_delta: float) -> void:
 
 
 func _draw() -> void:
+	# Flat warm paper — the workbench, deliberately not the patient's orchard
+	draw_rect(Rect2(Vector2.ZERO, get_rect().size), UITheme.PAPER)
 	if not _pages.has("test") or not _pages["test"].visible:
 		return
 	for t in _test_targets:
-		var col := Color(0.2, 0.7, 0.25, 0.9) if t["hit"] else Color(0.5, 0.5, 0.55, 0.9)
+		var col := Color(UITheme.LEAF, 0.9) if t["hit"] else Color(0.5, 0.5, 0.55, 0.9)
 		draw_arc(t["pos"], 55.0, 0.0, TAU, 48, col, 4.0)
 		if t["hit"]:
 			draw_circle(t["pos"], 12.0, col)
-	var cursor := Color(0.22, 0.22, 0.22, 0.9)
+	var cursor := Color(UITheme.INK, 0.9)
 	draw_arc(_player_pos, 13.0, 0.0, TAU, 48, cursor, 2.0)
 	draw_circle(_player_pos, 2.5, cursor)

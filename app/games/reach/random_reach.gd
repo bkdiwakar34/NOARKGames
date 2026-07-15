@@ -63,23 +63,23 @@ func _build_ui() -> void:
 	add_child(_between_trial)
 	_between_trial.visible = false
 
+	# Score pill, top-right (a small apple glyph is drawn beside it in _draw)
 	_score_label = Label.new()
 	_score_label.text = "0"
-	_score_label.add_theme_font_size_override("font_size", 80)
-	_score_label.add_theme_color_override("font_color", Color(1.0, 0.55, 0.05))
-	_score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_score_label.custom_minimum_size = Vector2(160.0, 90.0)
-	_score_label.position = Vector2(vp.x - 175.0, 18.0)
+	_score_label.add_theme_font_size_override("font_size", 56)
+	_score_label.add_theme_color_override("font_color", UITheme.INK)
+	UITheme.make_bold(_score_label)
+	_score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var pill := StyleBoxFlat.new()
+	pill.bg_color = Color(1.0, 0.99, 0.97, 0.72)
+	pill.set_corner_radius_all(99)
+	pill.content_margin_left = 58.0
+	pill.content_margin_right = 26.0
+	pill.content_margin_top = 6.0
+	pill.content_margin_bottom = 6.0
+	_score_label.add_theme_stylebox_override("normal", pill)
+	_score_label.position = Vector2(vp.x - 190.0, 20.0)
 	add_child(_score_label)
-
-	var score_sub := Label.new()
-	score_sub.text = "pops"
-	score_sub.add_theme_font_size_override("font_size", 20)
-	score_sub.add_theme_color_override("font_color", Color(0.50, 0.32, 0.08, 0.85))
-	score_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	score_sub.custom_minimum_size = Vector2(160.0, 28.0)
-	score_sub.position = Vector2(vp.x - 175.0, 110.0)
-	add_child(score_sub)
 
 	_stop_btn = Button.new()
 	_stop_btn.text = "■ Stop"
@@ -100,12 +100,7 @@ func _build_ui() -> void:
 	pdim.size = vp
 	_pause_layer.add_child(pdim)
 	var pcard := Panel.new()
-	var psb := StyleBoxFlat.new()
-	psb.bg_color = Color(0.995, 0.975, 0.935, 0.98)
-	psb.set_corner_radius_all(28)
-	psb.shadow_size = 18
-	psb.shadow_color = Color(0.15, 0.10, 0.05, 0.28)
-	pcard.add_theme_stylebox_override("panel", psb)
+	pcard.add_theme_stylebox_override("panel", UITheme.card_style())
 	pcard.size = Vector2(760.0, 220.0)
 	pcard.position = vp * 0.5 - pcard.size * 0.5
 	_pause_layer.add_child(pcard)
@@ -129,12 +124,12 @@ func _build_ui() -> void:
 
 	_calib_label = Label.new()
 	_calib_label.add_theme_font_size_override("font_size", 20)
-	_calib_label.add_theme_color_override("font_color", Color(0.10, 0.10, 0.12, 0.92))
+	_calib_label.add_theme_color_override("font_color", UITheme.INK)
 	_calib_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_calib_label.custom_minimum_size = Vector2(vp.x, 30.0)
 	_calib_label.position = Vector2(0.0, 14.0)
 	var calib_bg := StyleBoxFlat.new()
-	calib_bg.bg_color = Color(1.0, 0.95, 0.78, 0.85)
+	calib_bg.bg_color = Color(1.0, 0.99, 0.97, 0.85)
 	calib_bg.content_margin_left = 10.0
 	calib_bg.content_margin_right = 10.0
 	calib_bg.content_margin_top = 4.0
@@ -165,10 +160,13 @@ func _build_ui() -> void:
 
 func _draw() -> void:
 	var size := get_rect().size
-	for i in 24:
-		var t := float(i) / 24.0
-		var col := Color(0.96, 0.94, 0.91).lerp(Color(0.88, 0.83, 0.76), t)
-		draw_rect(Rect2(0.0, t * size.y, size.x, size.y / 24.0 + 1.0), col)
+	UITheme.draw_orchard(self, size)
+
+	# Mini apple glyph inside the score pill's left end
+	var gpos := Vector2(size.x - 160.0, 58.0)
+	draw_circle(gpos, 15.0, UITheme.APPLE_DARK)
+	draw_circle(gpos + Vector2(-1.5, -2.0), 13.5, UITheme.APPLE_RED)
+	draw_circle(gpos + Vector2(-5.0, -6.0), 4.0, Color(1.0, 1.0, 1.0, 0.35))
 
 	if AdaptiveManager.ws_calibrated and GlobalSignals.show_debug_overlays:
 		var ws_col := Color(0.3, 0.3, 0.3, 0.22)
@@ -215,8 +213,8 @@ func _draw() -> void:
 			else:
 				draw_rect(rect, Color(0.70, 0.70, 0.70, 0.20), false, 1.0)
 
-	# Cursor — thin charcoal ring with small centre dot
-	var cursor_col := Color(0.22, 0.22, 0.22, 0.82)
+	# Cursor — thin warm-ink ring with small centre dot
+	var cursor_col := Color(UITheme.INK.r, UITheme.INK.g, UITheme.INK.b, 0.80)
 	draw_arc(_player_pos, 13.0, 0.0, TAU, 48, cursor_col, 2.0)
 	draw_circle(_player_pos, 2.5, cursor_col)
 

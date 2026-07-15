@@ -55,43 +55,45 @@ func _draw() -> void:
 		var ease_in := p * p                      # slow start, fast finish
 		var ease_out := 1.0 - (1.0 - p) * (1.0 - p)  # fast start, soft landing
 
-		var ring_col := balloon_color.lerp(UITheme.MISS, 0.5)
+		var ring_col := UITheme.APPLE_RED.lerp(UITheme.MISS, 0.5)
 		ring_col.a = 0.55 * (1.0 - p)
 		draw_arc(Vector2.ZERO, target_radius * (1.0 + 0.65 * ease_out),
 			0.0, TAU, 64, ring_col, 2.0)
 
-		var body_col := balloon_color.lerp(UITheme.MISS, 0.4 + 0.5 * p)
+		var body_col := UITheme.APPLE_RED.lerp(UITheme.MISS, 0.4 + 0.5 * p)
 		body_col.a = pow(1.0 - p, 1.4)
 		var r_d := target_radius * (1.0 - 0.8 * ease_in)
 		draw_circle(Vector2(0.0, 22.0 * ease_in), r_d, body_col)
 		return
 
 	var r := target_radius
-	var fill := balloon_color
 
-	# Brighten fill as patient holds on target
+	# Apple body: dark base + offset lighter body fakes radial shading
+	draw_circle(Vector2.ZERO, r, UITheme.APPLE_DARK)
+	draw_circle(Vector2(-r * 0.08, -r * 0.10), r * 0.92, UITheme.APPLE_RED)
+	draw_circle(Vector2(-r * 0.30, -r * 0.32), r * 0.45, UITheme.APPLE_LIGHT)
+	draw_circle(Vector2(-r * 0.32, -r * 0.36), r * 0.16, Color(1.0, 1.0, 1.0, 0.35))
+
+	# Brighten while the patient holds on target
 	if _catch_progress > 0.0:
-		fill = fill.lerp(Color(0.88, 0.97, 0.97), _catch_progress * 0.65)
+		draw_circle(Vector2.ZERO, r, Color(1.0, 0.97, 0.90, 0.45 * _catch_progress))
 
-	# Solid circle
-	draw_circle(Vector2.ZERO, r, fill)
+	# Stem + leaf
+	draw_set_transform(Vector2(r * 0.02, -r * 0.98), 0.12, Vector2.ONE)
+	draw_rect(Rect2(-r * 0.05, -r * 0.28, r * 0.10, r * 0.30), Color(0.42, 0.29, 0.17))
+	draw_set_transform(Vector2(r * 0.30, -r * 1.04), -0.5, Vector2(1.0, 0.45))
+	draw_circle(Vector2.ZERO, r * 0.22, UITheme.LEAF)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
-	# Outline — darkened version of fill
-	draw_arc(Vector2.ZERO, r, 0.0, TAU, 64, fill.darkened(0.38), 2.5)
-
-	# Lifetime drain arc outside the circle, drains clockwise
+	# Time ring: one calm gold ring emptying clockwise on a faint track
+	# (replaces the old grey/orange/red three-alarm arc)
 	var time_frac := _lifetime / lifetime
-	var arc_col: Color
-	if time_frac < 0.5:
-		arc_col = Color(0.52, 0.52, 0.52, 0.45)
-	elif time_frac < 0.75:
-		arc_col = Color(0.90, 0.58, 0.08, 0.65)
-	else:
-		arc_col = Color(0.85, 0.16, 0.16, 0.78)
-	draw_arc(Vector2.ZERO, r + 7.0, -PI * 0.5,
-		-PI * 0.5 + TAU * (1.0 - time_frac), 64, arc_col, 3.5)
+	var track := Color(UITheme.INK.r, UITheme.INK.g, UITheme.INK.b, 0.12)
+	draw_arc(Vector2.ZERO, r + 9.0, 0.0, TAU, 64, track, 4.0, true)
+	draw_arc(Vector2.ZERO, r + 9.0, -PI * 0.5,
+		-PI * 0.5 + TAU * (1.0 - time_frac), 64, UITheme.GOLD, 4.0, true)
 
-	# Catch fill arc inside the circle edge
+	# Catch progress arc inside the body edge
 	if _catch_progress > 0.0:
-		draw_arc(Vector2.ZERO, r - 5.0, -PI * 0.5,
-			-PI * 0.5 + TAU * _catch_progress, 48, Color(1.0, 1.0, 1.0, 0.78), 4.5)
+		draw_arc(Vector2.ZERO, r - 6.0, -PI * 0.5,
+			-PI * 0.5 + TAU * _catch_progress, 48, Color(1.0, 1.0, 1.0, 0.85), 5.0, true)

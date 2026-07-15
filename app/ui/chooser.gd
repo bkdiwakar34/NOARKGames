@@ -9,7 +9,9 @@ const UITheme := preload("res://app/ui/ui_theme.gd")
 # F10 = researcher installer, as everywhere.
 
 const GAMES: Array = [
-	{"name": "Apple Catch", "scene": "res://app/games/reach/random_reach.tscn"},
+	# Display name only — logs/CSV filenames keep the internal name RandomReach
+	# for data continuity across the study.
+	{"name": "Apple Harvest", "scene": "res://app/games/reach/random_reach.tscn"},
 ]
 
 var _selected: int = 0
@@ -22,13 +24,14 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var vp := get_viewport_rect().size
 
-	_style_normal = _card_style(Color(0.99, 0.97, 0.93, 0.95), Color(0.75, 0.70, 0.62), 2)
-	_style_selected = _card_style(Color(1.0, 0.99, 0.95, 1.0), UITheme.ACCENT, 6)
+	_style_normal = UITheme.card_style(Color(0.75, 0.70, 0.62), 2)
+	_style_selected = UITheme.card_style(UITheme.APPLE_RED, 6)
 
 	var title := Label.new()
 	title.text = "Choose your game"
 	title.add_theme_font_size_override("font_size", UITheme.FONT_HUGE)
 	title.add_theme_color_override("font_color", UITheme.TEXT_DARK)
+	UITheme.make_bold(title)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.custom_minimum_size = Vector2(vp.x, 90.0)
 	title.position = Vector2(0.0, vp.y * 0.10)
@@ -52,31 +55,73 @@ func _ready() -> void:
 		icon.position = Vector2(card_size.x * 0.5, 150.0)
 		card.add_child(icon)
 		icon.draw.connect(func():
-			icon.draw_circle(Vector2.ZERO, 95.0, Color(0.82, 0.18, 0.15))
-			icon.draw_circle(Vector2(-30.0, -35.0), 24.0, Color(1.0, 1.0, 1.0, 0.25))
-			icon.draw_rect(Rect2(-6.0, -130.0, 12.0, 40.0), Color(0.35, 0.22, 0.10))
-			icon.draw_circle(Vector2(26.0, -112.0), 17.0, Color(0.30, 0.62, 0.25)))
+			icon.draw_circle(Vector2.ZERO, 95.0, UITheme.APPLE_DARK)
+			icon.draw_circle(Vector2(-8.0, -10.0), 88.0, UITheme.APPLE_RED)
+			icon.draw_circle(Vector2(-28.0, -30.0), 42.0, UITheme.APPLE_LIGHT)
+			icon.draw_circle(Vector2(-30.0, -34.0), 15.0, Color(1.0, 1.0, 1.0, 0.35))
+			icon.draw_set_transform(Vector2(2.0, -96.0), 0.12, Vector2.ONE)
+			icon.draw_rect(Rect2(-5.0, -26.0, 10.0, 30.0), Color(0.42, 0.29, 0.17))
+			icon.draw_set_transform(Vector2(30.0, -100.0), -0.5, Vector2(1.0, 0.45))
+			icon.draw_circle(Vector2.ZERO, 21.0, UITheme.LEAF)
+			icon.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE))
 
 		var name_lbl := Label.new()
 		name_lbl.text = GAMES[i]["name"]
 		name_lbl.add_theme_font_size_override("font_size", 40)
 		name_lbl.add_theme_color_override("font_color", UITheme.TEXT_DARK)
+		UITheme.make_bold(name_lbl)
 		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		name_lbl.custom_minimum_size = Vector2(card_size.x, 60.0)
 		name_lbl.position = Vector2(0.0, 290.0)
 		card.add_child(name_lbl)
 
-	# Hint bar (mirrors the future physical buttons)
-	var hint := Label.new()
-	hint.text = "◀ ▶  choose          ⏎  play"
-	hint.add_theme_font_size_override("font_size", UITheme.FONT_LARGE)
-	hint.add_theme_color_override("font_color", UITheme.TEXT_SOFT)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.custom_minimum_size = Vector2(vp.x, 50.0)
-	hint.position = Vector2(0.0, vp.y - 90.0)
-	add_child(hint)
+	# Hint bar: the two future physical buttons as colored circles — the same
+	# colors will mark the real buttons on the table.
+	var hint_panel := PanelContainer.new()
+	var hsb := StyleBoxFlat.new()
+	hsb.bg_color = Color(1.0, 0.99, 0.97, 0.72)
+	hsb.set_corner_radius_all(99)
+	hsb.content_margin_left = 30.0
+	hsb.content_margin_right = 30.0
+	hsb.content_margin_top = 10.0
+	hsb.content_margin_bottom = 10.0
+	hint_panel.add_theme_stylebox_override("panel", hsb)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 40)
+	hint_panel.add_child(hb)
+	hb.add_child(_hint_item("◀ ▶", Color("5B8DB8"), "choose"))
+	hb.add_child(_hint_item("▶", UITheme.LEAF, "play"))
+	add_child(hint_panel)
+	await get_tree().process_frame
+	hint_panel.position = Vector2((vp.x - hint_panel.size.x) * 0.5, vp.y - 96.0)
 
 	_update_selection()
+
+
+func _hint_item(symbol: String, dot_color: Color, word: String) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 12)
+	var dot := PanelContainer.new()
+	var dsb := StyleBoxFlat.new()
+	dsb.bg_color = dot_color
+	dsb.set_corner_radius_all(99)
+	dsb.content_margin_left = 12.0
+	dsb.content_margin_right = 12.0
+	dsb.content_margin_top = 6.0
+	dsb.content_margin_bottom = 6.0
+	dot.add_theme_stylebox_override("panel", dsb)
+	var sym := Label.new()
+	sym.text = symbol
+	sym.add_theme_font_size_override("font_size", 18)
+	sym.add_theme_color_override("font_color", Color.WHITE)
+	dot.add_child(sym)
+	h.add_child(dot)
+	var lbl := Label.new()
+	lbl.text = word
+	lbl.add_theme_font_size_override("font_size", UITheme.FONT_LARGE)
+	lbl.add_theme_color_override("font_color", UITheme.TEXT_SOFT)
+	h.add_child(lbl)
+	return h
 
 
 func _card_style(bg: Color, border: Color, border_w: int) -> StyleBoxFlat:
@@ -126,8 +171,4 @@ func _start_selected() -> void:
 
 
 func _draw() -> void:
-	var size := get_rect().size
-	for i in 24:
-		var t := float(i) / 24.0
-		draw_rect(Rect2(0.0, t * size.y, size.x, size.y / 24.0 + 1.0),
-			UITheme.BG_TOP.lerp(UITheme.BG_BOTTOM, t))
+	UITheme.draw_orchard(self, get_rect().size)

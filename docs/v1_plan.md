@@ -28,6 +28,8 @@ researcher present; everything that happens without the researcher requires none
 | Patient feedback | Per-target catch/miss effects + 5-star trial screen; background music tried and removed 2026-07-15 (annoying in testing — re-enable is one line if a real track changes the verdict) | Chosen by researcher |
 | Star fill rule | Caught / spawned (success ratio) | Deliberate: the controller holds this ≈ constant, so feedback is a warm ritual, not a performance signal — keeps feedback from confounding the challenge→motivation study. Revisit after study 1. |
 | Patient-facing language | English, near-zero text | Aphasia-aware design: icons + sound carry meaning; the few words translate cheaply later |
+| Visual identity | "Calm Orchard" (mockup approved 2026-07-15): dawn-sky gradient + sage hills on patient screens, warm-brown ink, apple-red accent, Nunito font (drop-in), flat warm paper for the installer | Interface lives in the game's world; calm and readable for older patients |
+| Game display name | "Apple Harvest" (was "Apple Catch"); internal/log name stays RandomReach | Warmer, adult; log name frozen for data continuity |
 | Researcher interface | Hidden installer mode in the same app (not separate software) | Setup needs the live tracker + game stack; one deployment; kiosk-industry standard |
 | Day's target success rate | Read automatically from the patient file (pre-sampled 14-day schedule per design.md §1) | Nobody is present at home to set it |
 

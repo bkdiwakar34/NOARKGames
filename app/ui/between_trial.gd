@@ -26,13 +26,7 @@ func _ready() -> void:
 
 	# Rounded card with drop shadow
 	var card := Panel.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.995, 0.975, 0.935, 0.98)
-	sb.set_corner_radius_all(28)
-	sb.shadow_size = 18
-	sb.shadow_color = Color(0.15, 0.10, 0.05, 0.28)
-	sb.shadow_offset = Vector2(0.0, 6.0)
-	card.add_theme_stylebox_override("panel", sb)
+	card.add_theme_stylebox_override("panel", UITheme.card_style())
 	card.size = card_size
 	card.position = card_pos
 	add_child(card)

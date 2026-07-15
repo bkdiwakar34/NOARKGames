@@ -1,5 +1,12 @@
 extends Node
 
+const UITheme := preload("res://app/ui/ui_theme.gd")
+
+func _ready() -> void:
+	# One call themes every control in the app (falls back to the default
+	# font until Nunito ttf files are dropped into app/assets/fonts/).
+	UITheme.apply_global_font()
+
 var current_patient_id: String = ""
 var selected_game_mode: String = "2D"
 
