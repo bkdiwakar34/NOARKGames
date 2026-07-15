@@ -123,6 +123,18 @@ func update_patient(hospital_id: String, fields: Dictionary) -> bool:
 	return true
 
 
+# Saved calibration profile (workspace tiles + Fitts model), written by
+# AdaptiveManager so sessions can start without the 4-minute calibration.
+func set_calib_profile(hospital_id: String, profile: Dictionary) -> void:
+	if hospital_id in patient_register:
+		patient_register[hospital_id]["calib_profile"] = profile
+		save_database()
+
+
+func get_calib_profile(hospital_id: String) -> Dictionary:
+	return get_patient(hospital_id).get("calib_profile", {})
+
+
 func remove_patient(hospital_id: String) -> bool:
 	if hospital_id in patient_register:
 		patient_register.erase(hospital_id)

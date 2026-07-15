@@ -87,7 +87,7 @@ func _show_page(page_name: String) -> void:
 func _add_button(parent: Node, text: String, cb: Callable) -> Button:
 	var btn := Button.new()
 	btn.text = text
-	btn.custom_minimum_size = Vector2(340, 52)
+	btn.custom_minimum_size = Vector2(0, 48)
 	btn.add_theme_stylebox_override("normal", UITheme.button_style(UITheme.INK))
 	btn.add_theme_stylebox_override("hover", UITheme.button_style(UITheme.INK.lightened(0.18)))
 	btn.add_theme_stylebox_override("pressed", UITheme.button_style(UITheme.INK.darkened(0.25)))
@@ -138,14 +138,9 @@ func _build_checklist_page() -> void:
 		_check_rows[check] = {"sb": pill_sb, "label": pl}
 	box.add_child(HSeparator.new())
 
-	_add_button(box, "Register new patient", _on_register_patient)
-	_edit_btn = _add_button(box, "Edit current patient", _on_edit_patient)
-	_add_button(box, "Origin ritual", func(): _show_page("origin"))
-	_add_button(box, "Workspace calibration (4 corners)", _on_workspace_cal)
-	_add_button(box, "Test drive", _on_test_drive)
-
+	# Researcher switches: overlay visibility + calibration policy
 	var dbg := CheckButton.new()
-	dbg.text = "Show researcher overlays in game (debug numbers, plots, workspace shade, stop button)"
+	dbg.text = "Show researcher overlays in game"
 	dbg.add_theme_color_override("font_color", UITheme.INK)
 	dbg.add_theme_color_override("font_pressed_color", UITheme.INK)
 	dbg.add_theme_color_override("font_hover_color", UITheme.INK)
@@ -153,11 +148,43 @@ func _build_checklist_page() -> void:
 	dbg.toggled.connect(func(on: bool): GlobalSignals.show_debug_overlays = on)
 	box.add_child(dbg)
 
-	_add_button(box, "Session settings (researcher game screen)", func():
-		get_tree().change_scene_to_file("res://app/ui/game_select.tscn"))
+	var calib_row := HBoxContainer.new()
+	calib_row.add_theme_constant_override("separation", 12)
+	var calib_lbl := Label.new()
+	calib_lbl.text = "Calibration at game start:"
+	calib_lbl.add_theme_color_override("font_color", UITheme.INK)
+	calib_row.add_child(calib_lbl)
+	var calib_opt := OptionButton.new()
+	calib_opt.add_item("Auto (weekly)")     # calib_mode "auto"
+	calib_opt.add_item("Always calibrate")  # "always" — testing
+	calib_opt.add_item("Skip (use saved)")  # "never" — demos
+	calib_opt.select(["auto", "always", "never"].find(GlobalSignals.calib_mode))
+	calib_opt.item_selected.connect(func(i: int):
+		GlobalSignals.calib_mode = ["auto", "always", "never"][i])
+	calib_row.add_child(calib_opt)
+	box.add_child(calib_row)
 
 	box.add_child(HSeparator.new())
-	_add_button(box, "Exit installer", func():
+
+	# Tool buttons in rows, like the approved mockup — not a scrolling stack
+	var tools := HBoxContainer.new()
+	tools.add_theme_constant_override("separation", 10)
+	box.add_child(tools)
+	_add_button(tools, "Register new patient", _on_register_patient)
+	_edit_btn = _add_button(tools, "Edit current patient", _on_edit_patient)
+	_add_button(tools, "Origin ritual", func(): _show_page("origin"))
+	_add_button(tools, "Workspace calibration", _on_workspace_cal)
+	_add_button(tools, "Test drive", _on_test_drive)
+
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 10)
+	box.add_child(row2)
+	_add_button(row2, "Session settings", func():
+		get_tree().change_scene_to_file("res://app/ui/game_select.tscn"))
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row2.add_child(spacer)
+	_add_button(row2, "Exit installer ▸", func():
 		get_tree().change_scene_to_file("res://app/ui/chooser.tscn"))
 
 

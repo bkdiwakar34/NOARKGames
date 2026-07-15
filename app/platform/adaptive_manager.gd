@@ -138,6 +138,19 @@ func start_session(rate: float) -> void:
 	_center           = _viewport_size * 0.5
 	_a_global_max     = 200.0
 	reachable_cells.clear()
+
+	# Skip the ~4-minute calibration when a fresh saved profile exists.
+	# Policy via GlobalSignals.calib_mode: auto = weekly, always/never =
+	# installer's manual override for testing and demos.
+	var mode: String = GlobalSignals.calib_mode
+	var prof: Dictionary = PatientDB.get_calib_profile(GlobalSignals.current_patient_id)
+	if mode != "always" and not prof.is_empty():
+		var age: float = Time.get_unix_time_from_system() \
+			- float(prof.get("calibrated_unix", 0))
+		if mode == "never" or age < 7.0 * 86400.0:
+			_apply_profile(prof)
+			return
+
 	_build_scan_grid()
 
 
@@ -443,7 +456,102 @@ func _finish_fitts_cal() -> void:
 	_trial_caught      = 0
 	_trial_spawned     = 0
 	_trial_apple_start = outcome_log.size()
+	_save_profile(true)
 	_start_trial()
+
+
+# ── Calibration persistence (docs/v1_plan.md; policy in GlobalSignals) ───────
+
+var _pending_trial_start: bool = false
+
+# Called by the game scene once it's on screen, so a profile-restored session
+# doesn't start its trial clock while the scene is still loading.
+func game_scene_ready() -> void:
+	if _pending_trial_start:
+		_pending_trial_start = false
+		_start_trial()
+
+
+func _make_profile() -> Dictionary:
+	var cells: Array = []
+	for c in reachable_cells:
+		cells.append([c["pos"].x, c["pos"].y])
+	var comf: Array = []
+	for c in _comfortable_cells:
+		comf.append([c["pos"].x, c["pos"].y])
+	var welf: Dictionary = {}
+	for k in _welford:
+		welf[str(k)] = _welford[k]
+	return {
+		"saved_unix": int(Time.get_unix_time_from_system()),
+		"viewport": [_viewport_size.x, _viewport_size.y],
+		"cells": cells,
+		"comf": comf,
+		"centre": [_workspace_centre.x, _workspace_centre.y],
+		"a_comfortable": _a_comfortable,
+		"a_global_max": _a_global_max,
+		"scan_step": [scan_step.x, scan_step.y],
+		"w_min": _w_min,
+		"fitts_a": _rls_theta[0],
+		"fitts_b": _rls_theta[1],
+		"welford": welf,
+	}
+
+
+func _save_profile(full_cal: bool) -> void:
+	var pid: String = GlobalSignals.current_patient_id
+	if pid == "":
+		return
+	var prof := _make_profile()
+	if full_cal:
+		prof["calibrated_unix"] = prof["saved_unix"]
+	else:
+		# Online-learning updates keep the model fresh but must NOT reset the
+		# weekly recalibration clock.
+		var old: Dictionary = PatientDB.get_calib_profile(pid)
+		prof["calibrated_unix"] = old.get("calibrated_unix", prof["saved_unix"])
+	PatientDB.set_calib_profile(pid, prof)
+
+
+func _apply_profile(prof: Dictionary) -> void:
+	_viewport_size = Vector2(prof["viewport"][0], prof["viewport"][1])
+	_center = _viewport_size * 0.5
+	reachable_cells = []
+	for c in prof.get("cells", []):
+		reachable_cells.append({"pos": Vector2(c[0], c[1])})
+	_comfortable_cells = []
+	for c in prof.get("comf", []):
+		_comfortable_cells.append({"pos": Vector2(c[0], c[1])})
+	if _comfortable_cells.is_empty():
+		_comfortable_cells = reachable_cells.duplicate()
+	_workspace_centre = Vector2(prof["centre"][0], prof["centre"][1])
+	_a_comfortable = float(prof.get("a_comfortable", 100.0))
+	_a_global_max = float(prof.get("a_global_max", 200.0))
+	scan_step = Vector2(prof["scan_step"][0], prof["scan_step"][1])
+	_w_min = float(prof.get("w_min", 50.0))
+	ws_min = _center - Vector2(_a_global_max, _a_global_max)
+	ws_max = _center + Vector2(_a_global_max, _a_global_max)
+	ws_calibrated = true
+	_rls_theta = [float(prof.get("fitts_a", 0.0)), float(prof.get("fitts_b", 0.5))]
+	fitts_a = _rls_theta[0]
+	fitts_b = _rls_theta[1]
+	# Confident prior: online learning refines the saved model rather than
+	# re-deriving it from scratch.
+	_rls_P = [[1.0, 0.0], [0.0, 0.2]]
+	_build_aw_pairs(SESSION_W_VALUES)
+	var welf: Dictionary = prof.get("welford", {})
+	for k in welf:
+		var idx := int(k)
+		if idx >= 0 and idx < aw_pairs.size():
+			var w: Dictionary = welf[k]
+			_welford[idx] = {"n": int(w.get("n", 0)),
+				"mean": float(w.get("mean", 0.0)), "M2": float(w.get("M2", 0.0))}
+	_phase = Phase.SESSION
+	trial_number = 0
+	_pending_trial_start = true
+	var age_days := (Time.get_unix_time_from_system() \
+		- float(prof.get("calibrated_unix", 0))) / 86400.0
+	print("Calibration profile loaded (full calibration %.1f days ago)" % age_days)
 
 
 # Aggregate per-W hit rate across all distances; _w_min is the smallest W whose
@@ -670,6 +778,8 @@ func _start_trial() -> void:
 
 func _on_trial_timer_ended() -> void:
 	trial_ended.emit(trial_number, _trial_caught, _trial_spawned)
+	if _phase == Phase.SESSION:
+		_save_profile(false)  # keep the saved model current (survives power-off)
 	_between_timer.start(BETWEEN_DURATION)
 
 

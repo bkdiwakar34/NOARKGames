@@ -49,6 +49,7 @@ func _ready() -> void:
 	_player_pos = vp * 0.5
 	_catch_hold_time = AdaptiveManager.catch_hold_time
 	AdaptiveManager.set_viewport_size(vp)
+	AdaptiveManager.game_scene_ready()  # starts trial 1 now if a saved profile skipped calibration
 	_build_ui()
 	_connect_signals()
 	_start_logging()
