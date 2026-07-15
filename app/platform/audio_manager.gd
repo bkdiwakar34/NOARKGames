@@ -24,7 +24,7 @@ var _star_stream:  AudioStream
 
 func _ready() -> void:
 	_music_player = AudioStreamPlayer.new()
-	_music_player.volume_db = -8.0
+	_music_player.volume_db = -4.0
 	add_child(_music_player)
 	_sfx_player = AudioStreamPlayer.new()
 	_sfx_player.volume_db = 2.0
@@ -151,7 +151,9 @@ func _make_music() -> AudioStreamWAV:
 		var f: float = notes[ni]
 		# per-note envelope: soft attack, slow release (pad-like)
 		var env := minf(tn * 6.0, 1.0) * exp(-tn * 1.8)
-		var arp := sin(TAU * f * t) * 0.26 * env
-		var drone := (sin(TAU * 130.81 * t) + 0.5 * sin(TAU * 196.0 * t)) * 0.09
+		# One octave up (f*2) with a brightness harmonic: small monitor
+		# speakers barely reproduce quiet sines below ~250 Hz.
+		var arp := (sin(TAU * f * 2.0 * t) + 0.35 * sin(TAU * f * 4.0 * t)) * 0.30 * env
+		var drone := (sin(TAU * 261.63 * t) + 0.5 * sin(TAU * 392.0 * t)) * 0.08
 		s[i] = arp + drone
 	return _wav_from_samples(s, MUSIC_SAMPLE_RATE, true)
