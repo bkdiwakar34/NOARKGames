@@ -108,7 +108,7 @@ func _build_checklist_page() -> void:
 	_add_button(box, "Test drive", _on_test_drive)
 
 	var dbg := CheckButton.new()
-	dbg.text = "Show researcher overlays in game (active from package 3)"
+	dbg.text = "Show researcher overlays in game (debug numbers, plots, workspace shade, stop button)"
 	dbg.button_pressed = GlobalSignals.show_debug_overlays
 	dbg.toggled.connect(func(on: bool): GlobalSignals.show_debug_overlays = on)
 	box.add_child(dbg)

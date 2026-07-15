@@ -4,7 +4,8 @@ var raw_x: float = 0.0
 var raw_y: float = 0.0
 var raw_z: float = 0.0
 var screen_pos: Vector2 = Vector2.ZERO
-var connected: bool = false
+var connected: bool = false        # latches true on first packet (mouse-fallback switch)
+var last_packet_ms: int = 0        # for is_fresh(): connected says "ever", this says "now"
 var _tracker_pid: int = -1
 
 const SCALER_X: int = 2000
@@ -102,6 +103,7 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 			(raw_z - 0.2) * 1400.0 + 40.0
 		)
 	connected = true
+	last_packet_ms = Time.get_ticks_msec()
 
 	if log_enabled:
 		_log_mutex.lock()
@@ -117,6 +119,12 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 		packets_per_sec = _pkt_count
 		_pkt_count      = 0
 		_pkt_window_ms  = now
+
+# True while packets are actually arriving. `connected` latches true forever
+# after the first packet; this is the live signal ("tracker lost" detection).
+func is_fresh(max_age_ms: int = 1500) -> bool:
+	return connected and Time.get_ticks_msec() - last_packet_ms <= max_age_ms
+
 
 # One-shot (deliberately not sticky like _outgoing): ask the tracker to discard
 # its world origin and re-lock from the next stable detection. Used by the

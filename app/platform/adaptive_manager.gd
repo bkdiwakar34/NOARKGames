@@ -677,6 +677,13 @@ func _on_between_timer_ended() -> void:
 	_start_trial()
 
 
+# Tracker-lost pause: freeze the trial clocks without ending anything, so a
+# dropped tracker can't burn trial time the patient never had.
+func set_timers_paused(p: bool) -> void:
+	_trial_timer.paused = p
+	_between_timer.paused = p
+
+
 func stop_session() -> void:
 	_trial_timer.stop()
 	_between_timer.stop()

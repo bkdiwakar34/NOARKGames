@@ -3,6 +3,7 @@ extends Control
 const APPLE_SCENE := preload("res://app/games/reach/apple.tscn")
 const BETWEEN_TRIAL_SCENE := preload("res://app/ui/between_trial.tscn")
 const GRAPH_OVERLAY_SCRIPT := preload("res://app/games/reach/graph_overlay.gd")
+const UITheme := preload("res://app/ui/ui_theme.gd")
 
 var _catch_radius:    float = 60.0  # set per-apple from AdaptiveManager
 var _catch_hold_time: float = 1.0
@@ -23,6 +24,9 @@ var _debug_label: Label = null
 var _calib_label: Label = null
 var _is_between_trial: bool = false
 var _graph_overlay: Control = null
+var _stop_btn: Button = null
+var _pause_layer: CanvasLayer = null
+var _is_paused: bool = false  # tracker-lost pause (docs/v1_plan.md §3 system state)
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -68,14 +72,51 @@ func _build_ui() -> void:
 	score_sub.position = Vector2(vp.x - 175.0, 110.0)
 	add_child(score_sub)
 
-	var stop_btn := Button.new()
-	stop_btn.text = "■ Stop"
-	stop_btn.custom_minimum_size = Vector2(88.0, 34.0)
-	stop_btn.position = Vector2(12.0, 12.0)
-	stop_btn.add_theme_font_size_override("font_size", 15)
-	stop_btn.modulate.a = 0.70
-	stop_btn.pressed.connect(_on_stop_pressed)
-	add_child(stop_btn)
+	_stop_btn = Button.new()
+	_stop_btn.text = "■ Stop"
+	_stop_btn.custom_minimum_size = Vector2(88.0, 34.0)
+	_stop_btn.position = Vector2(12.0, 12.0)
+	_stop_btn.add_theme_font_size_override("font_size", 15)
+	_stop_btn.modulate.a = 0.70
+	_stop_btn.pressed.connect(_on_stop_pressed)
+	add_child(_stop_btn)
+
+	# Tracker-lost pause overlay: friendly, no error codes, self-recovering.
+	_pause_layer = CanvasLayer.new()
+	_pause_layer.layer = 10
+	_pause_layer.visible = false
+	add_child(_pause_layer)
+	var pdim := ColorRect.new()
+	pdim.color = Color(0.05, 0.04, 0.03, 0.45)
+	pdim.size = vp
+	_pause_layer.add_child(pdim)
+	var pcard := Panel.new()
+	var psb := StyleBoxFlat.new()
+	psb.bg_color = Color(0.995, 0.975, 0.935, 0.98)
+	psb.set_corner_radius_all(28)
+	psb.shadow_size = 18
+	psb.shadow_color = Color(0.15, 0.10, 0.05, 0.28)
+	pcard.add_theme_stylebox_override("panel", psb)
+	pcard.size = Vector2(760.0, 220.0)
+	pcard.position = vp * 0.5 - pcard.size * 0.5
+	_pause_layer.add_child(pcard)
+	var plabel := Label.new()
+	plabel.text = "Please place the handle\nback on the table"
+	plabel.add_theme_font_size_override("font_size", 40)
+	plabel.add_theme_color_override("font_color", UITheme.TEXT_DARK)
+	plabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	plabel.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	plabel.custom_minimum_size = Vector2(pcard.size.x, 130.0)
+	plabel.position = pcard.position + Vector2(0.0, 20.0)
+	_pause_layer.add_child(plabel)
+	var psub := Label.new()
+	psub.text = "The game will continue by itself"
+	psub.add_theme_font_size_override("font_size", 22)
+	psub.add_theme_color_override("font_color", UITheme.TEXT_SOFT)
+	psub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	psub.custom_minimum_size = Vector2(pcard.size.x, 40.0)
+	psub.position = pcard.position + Vector2(0.0, 152.0)
+	_pause_layer.add_child(psub)
 
 	_calib_label = Label.new()
 	_calib_label.add_theme_font_size_override("font_size", 20)
@@ -120,7 +161,7 @@ func _draw() -> void:
 		var col := Color(0.96, 0.94, 0.91).lerp(Color(0.88, 0.83, 0.76), t)
 		draw_rect(Rect2(0.0, t * size.y, size.x, size.y / 24.0 + 1.0), col)
 
-	if AdaptiveManager.ws_calibrated:
+	if AdaptiveManager.ws_calibrated and GlobalSignals.show_debug_overlays:
 		var ws_col := Color(0.3, 0.3, 0.3, 0.22)
 		var ws_min := AdaptiveManager.ws_min
 		var ws_max := AdaptiveManager.ws_max
@@ -133,7 +174,7 @@ func _draw() -> void:
 
 	# Reachable-region shade: one continuous faint fill over every grid tile
 	# within spawn tolerance of a reached cell — valid spawns land inside it.
-	if AdaptiveManager._phase >= AdaptiveManager.Phase.FITTS_CAL:
+	if AdaptiveManager._phase >= AdaptiveManager.Phase.FITTS_CAL and GlobalSignals.show_debug_overlays:
 		var shade := Color(0.30, 0.60, 0.35, 0.16)
 		var edge := Color(0.30, 0.60, 0.35, 0.35)
 		var step: Vector2 = AdaptiveManager.scan_step
@@ -145,7 +186,8 @@ func _draw() -> void:
 
 	# Grid workspace scan overlay (visible during scan and until Phase 0b ends)
 	var scan_cells: Array = AdaptiveManager._scan_cells
-	if not scan_cells.is_empty() and AdaptiveManager._phase <= AdaptiveManager.Phase.PRECISION_SCAN:
+	if not scan_cells.is_empty() and AdaptiveManager._phase <= AdaptiveManager.Phase.PRECISION_SCAN \
+			and GlobalSignals.show_debug_overlays:
 		var current_idx: int = AdaptiveManager._scan_cell_idx
 		var half: float = AdaptiveManager.SCAN_CELL_SIZE * 0.5
 		var cell_sz: float = AdaptiveManager.SCAN_CELL_SIZE
@@ -171,7 +213,7 @@ func _draw() -> void:
 
 	# Fitts fit overlay (bottom-right) — live scatter of (ID, MT) points and
 	# the current a + b·ID line. Visible during Phase 0c and the live session.
-	if AdaptiveManager._phase >= AdaptiveManager.Phase.FITTS_CAL:
+	if AdaptiveManager._phase >= AdaptiveManager.Phase.FITTS_CAL and GlobalSignals.show_debug_overlays:
 		_draw_fitts_overlay()
 
 
@@ -320,6 +362,15 @@ func _process(delta: float) -> void:
 	AdaptiveManager.update_workspace(_player_pos)
 	_drain_hand_samples()
 
+	var dbg: bool = GlobalSignals.show_debug_overlays
+	_debug_label.visible = dbg
+	_stop_btn.visible = dbg
+
+	_update_pause_state()
+	if _is_paused:
+		queue_redraw()
+		return
+
 	if not _is_between_trial:
 		if _current_apple == null:
 			_spawn_apple()
@@ -348,6 +399,19 @@ func _process(delta: float) -> void:
 		]
 
 	queue_redraw()
+
+
+# Pause when the tracker was in use but packets stopped arriving; resume by
+# itself when they return. Never triggers in mouse-fallback dev mode.
+func _update_pause_state() -> void:
+	var lost: bool = UDPReceiver.connected and not UDPReceiver.is_fresh()
+	if lost == _is_paused:
+		return
+	_is_paused = lost
+	_pause_layer.visible = lost
+	AdaptiveManager.set_timers_paused(lost)
+	if is_instance_valid(_current_apple):
+		_current_apple.set_process(not lost)  # freeze the lifetime drain
 
 
 func _update_player_pos() -> void:
