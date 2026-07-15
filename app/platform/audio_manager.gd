@@ -24,13 +24,13 @@ var _star_stream:  AudioStream
 
 func _ready() -> void:
 	_music_player = AudioStreamPlayer.new()
-	_music_player.volume_db = -16.0
+	_music_player.volume_db = -8.0
 	add_child(_music_player)
 	_sfx_player = AudioStreamPlayer.new()
-	_sfx_player.volume_db = -6.0
+	_sfx_player.volume_db = 2.0
 	add_child(_sfx_player)
 	_star_player = AudioStreamPlayer.new()
-	_star_player.volume_db = -6.0
+	_star_player.volume_db = 2.0
 	add_child(_star_player)
 
 	_music_player.stream = _load_or("music", _make_music())
@@ -102,7 +102,7 @@ func _make_catch() -> AudioStreamWAV:
 		var f := 660.0 if t < 0.12 else 990.0
 		var t0 := t if t < 0.12 else t - 0.12
 		var env := exp(-t0 * 13.0)
-		s[i] = (sin(TAU * f * t) + 0.30 * sin(TAU * 2.0 * f * t)) * 0.45 * env
+		s[i] = (sin(TAU * f * t) + 0.30 * sin(TAU * 2.0 * f * t)) * 0.70 * env
 	return _wav_from_samples(s, SAMPLE_RATE, false)
 
 
@@ -118,7 +118,7 @@ func _make_miss() -> AudioStreamWAV:
 		var f := lerpf(320.0, 170.0, t / dur)
 		phase += f / SAMPLE_RATE
 		var env := minf(t * 25.0, 1.0) * exp(-t * 6.0)
-		s[i] = sin(TAU * phase) * 0.30 * env
+		s[i] = sin(TAU * phase) * 0.45 * env
 	return _wav_from_samples(s, SAMPLE_RATE, false)
 
 
@@ -131,7 +131,7 @@ func _make_star() -> AudioStreamWAV:
 	for i in n:
 		var t := float(i) / SAMPLE_RATE
 		var env := exp(-t * 7.0)
-		s[i] = (sin(TAU * 784.0 * t) + 0.35 * sin(TAU * 2117.0 * t)) * 0.40 * env
+		s[i] = (sin(TAU * 784.0 * t) + 0.35 * sin(TAU * 2117.0 * t)) * 0.60 * env
 	return _wav_from_samples(s, SAMPLE_RATE, false)
 
 
@@ -151,7 +151,7 @@ func _make_music() -> AudioStreamWAV:
 		var f: float = notes[ni]
 		# per-note envelope: soft attack, slow release (pad-like)
 		var env := minf(tn * 6.0, 1.0) * exp(-tn * 1.8)
-		var arp := sin(TAU * f * t) * 0.14 * env
-		var drone := (sin(TAU * 130.81 * t) + 0.5 * sin(TAU * 196.0 * t)) * 0.055
+		var arp := sin(TAU * f * t) * 0.26 * env
+		var drone := (sin(TAU * 130.81 * t) + 0.5 * sin(TAU * 196.0 * t)) * 0.09
 		s[i] = arp + drone
 	return _wav_from_samples(s, MUSIC_SAMPLE_RATE, true)
