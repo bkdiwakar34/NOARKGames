@@ -51,81 +51,90 @@ A single reaching game wired to the adaptive controller. Each apple is a target;
 
 The deployed `v2/Core/adaptive_manager.gd` uses Fitts' Law to drive difficulty. It replaced an earlier PI controller (preserved as `adaptive_manager_pid.gd` for reference).
 
-### 4.1 Calibration phases (run before normal play, every session)
+### 4.1 Calibration phases (full run: first session, then weekly)
 
 | Phase | Purpose | Apples |
 |---|---|---|
 | **0a — Workspace scan** | Discover the patient's reachable region | grid spiral, early-terminates at unreachable ring |
-| **0c — Fitts calibration** | Fit Fitts model parameters `(a, b)` | 5 distances × 3 widths × 5 reps = 75 |
+| **0c — Fitts calibration** | Fit Fitts model parameters $(a, b)$ | 5 distances × 3 widths × 5 reps = 75 |
 
-Phase 0b (precision scan) was folded into 0c — the smallest reliably-hit width `W_min` is derived from per-W hit rates within Phase 0c. Total calibration ~105 apples.
+Phase 0b (precision scan) was folded into 0c — the smallest reliably-hit width $W_{\min}$ is derived from per-$W$ hit rates within Phase 0c. Total calibration ~105 apples.
+
+Since 2026-07-15 the calibration result (workspace tiles, $(a,b)$, per-pair variances) persists
+in the patient file (`calib_profile`). Game start reuses it when the last full calibration is
+under 7 days old; otherwise the phases rerun. The installer's *Auto / Always / Skip* switch
+overrides this for testing and demos. Between full calibrations the model keeps adapting
+online (§4.5), and the evolving state is re-saved after every trial.
 
 ### 4.2 Fitts' Law model
 
-For each apple of amplitude `A` (pixels) and width `W` (pixels), the Index of Difficulty is
+For each apple of amplitude $A$ (pixels) and width $W$ (pixels), the Index of Difficulty is
 
-```
-ID = log2(A/W + 1)        (Shannon form, MacKenzie 1992)
-```
+$$\mathrm{ID} = \log_2\!\left(\frac{A}{W} + 1\right) \qquad \text{(Shannon form, MacKenzie 1992)}$$
 
 Movement time is modelled as
 
-```
-MT = a + b·ID
-```
+$$\mathrm{MT} = a + b \cdot \mathrm{ID}$$
 
-where `a` (s) is the intercept (initiation time) and `b` (s/bit) is the slope (motor cost per bit of difficulty).
+where $a$ (s) is the intercept (initiation time) and $b$ (s/bit) is the slope (motor cost per bit of difficulty).
 
-### 4.3 Initial `(a, b)` fit (after Phase 0c)
+### 4.3 Initial $(a, b)$ fit (after Phase 0c)
 
-Ordinary least squares on the 15 calibration pairs:
+Ordinary least squares over the $N = 15$ calibration pairs, using each pair's mean movement time $\overline{\mathrm{MT}}_k$:
 
-```
-b = (N·Σ ID·MT̄ − Σ ID · Σ MT̄) / (N·Σ ID² − (Σ ID)²)
-a = (Σ MT̄ − b·Σ ID) / N
-```
+$$b = \frac{N \sum_k \mathrm{ID}_k\,\overline{\mathrm{MT}}_k \;-\; \sum_k \mathrm{ID}_k \sum_k \overline{\mathrm{MT}}_k}{N \sum_k \mathrm{ID}_k^2 \;-\; \bigl(\sum_k \mathrm{ID}_k\bigr)^2}
+\qquad\quad
+a = \frac{\sum_k \overline{\mathrm{MT}}_k \;-\; b \sum_k \mathrm{ID}_k}{N}$$
 
-Per-pair residual variance `σ²_k` is also initialised from the calibration sample.
+The per-pair residual variance $\sigma_k^2$ is also initialised from the calibration sample.
 
 ### 4.4 Per-apple lifetime in the session
 
-Sample an `(A, W)` pair uniformly from the 15 calibrated pairs, then set the lifetime so the patient catches with probability `r` (the day's target):
+The session uses $5 \times 10 = 50$ $(A, W)$ pairs: the target width $W$ is **fixed for a whole
+trial**, cycling through 10 session widths in reshuffled blocks (so trial number and size don't
+confound), while the amplitude $A$ is drawn per apple from the 5 calibrated distances. For the
+chosen pair $k$, the lifetime is set so the patient catches with probability $r$ (the day's
+assigned target):
 
-```
-MT̂ = a + b·ID
-σ = √σ²_k
-lifetime = clip(MT̂ + z(r)·σ, ℓ_min, ℓ_max)
-```
+$$\widehat{\mathrm{MT}} = a + b\,\mathrm{ID}_k \qquad \sigma_k = \sqrt{\sigma_k^2}$$
 
-`z(r) = Φ⁻¹(r)` is the standard-normal quantile (e.g. `z(0.8) = 0.84`). Assumes MTs for a fixed `(A, W)` are approximately normal.
+$$\ell = \operatorname{clip}\!\bigl(\widehat{\mathrm{MT}} + z(r)\,\sigma_k,\;\; \ell_{\min},\; \ell_{\max}\bigr)$$
+
+where $z(r) = \Phi^{-1}(r)$ is the standard-normal quantile (e.g. $z(0.8) \approx 0.84$).
+Assumes MTs for a fixed $(A, W)$ are approximately normal.
 
 ### 4.5 Online adaptation
 
-After every successful catch (`MT`, `ID`):
+After every successful catch, form the observation $x = [1, \mathrm{ID}]^\top$ and prediction error
+$e = \mathrm{MT} - x^\top \theta$, then update:
 
-- **RLS** updates `(a, b)` incrementally:
-  - State: `θ = [a, b]`, covariance `P` (2×2, initialised at 1000·I).
-  - Per observation: `g = Pẍ / (1 + xᵀPx)`, `θ ← θ + g·err`, `P ← P − g·xᵀP`.
-- **Welford** updates per-pair residual SD `σ_k` in a streaming, numerically stable way.
+- **Recursive least squares** on $\theta = [a, b]^\top$ with covariance $P$ ($2 \times 2$,
+  initialised at $1000\,I$ after a fresh calibration, or at a confident prior when a saved
+  profile is loaded):
+
+$$g = \frac{P x}{1 + x^\top P x} \qquad \theta \leftarrow \theta + g\,e \qquad P \leftarrow P - g\,x^\top P$$
+
+- **Welford's algorithm** updates the per-pair residual SD $\sigma_k$ in a streaming,
+  numerically stable way.
+
+Misses carry no movement time and update nothing (known limitation — see todo.md).
 
 ### 4.6 Movement time measurement
 
-```
-MT = t_caught − t_spawn − t_hold
-```
+$$\mathrm{MT} = t_{\mathrm{caught}} - t_{\mathrm{spawn}} - t_{\mathrm{hold}}$$
 
-Times from `Time.get_ticks_msec()`. Subtracting `t_hold` (1 s) isolates the reach from the catch-confirmation hold.
+Times from `Time.get_ticks_msec()`. Subtracting the catch-confirmation hold $t_{\mathrm{hold}}$
+isolates the reach itself.
 
 ### 4.7 Reachability constraint
 
-Apples can only spawn at positions the patient can physically reach in the lifetime they're given:
-
-```
-v̂ ← max(v̂, d_i / ℓ_i)   over catches i
-d_max = ℓ · v̂
-```
-
-If a sampled spawn is further than `d_max` from the player, it is pulled back along the same direction so distance equals `d_max`.
+Apples spawn only inside the patient's measured workspace. A candidate position is sampled at
+distance $A$ from the player at a random angle (up to 24 attempts) and accepted iff it lands
+inside a tile the patient hit during the workspace scan — the same geometry the researcher
+shade overlay draws, so overlay and acceptance cannot disagree. If no angle at distance $A$
+lands in-region, the apple falls back to a comfortable-zone cell (actual distance then differs
+from the pair's nominal $A$; logged difficulty uses the nominal value — known limitation).
+*(The earlier velocity-based pull-back described here was replaced on 2026-07-15.)*
 
 ---
 
