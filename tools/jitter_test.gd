@@ -5,10 +5,13 @@ extends Control
 # workspace positions, for a workdone presentation.
 #
 # Run directly, bypassing the app entirely — no existing scene is touched:
-#   godot --path . tools/jitter_test.tscn
-# (autoloads still load normally, including UDPReceiver and WorkspaceConfig.)
+#   godot --path . tools/jitter_test.tscn   (or F6 with this scene open)
+# The tracker is launched automatically by the UDPReceiver autoload, exactly
+# as in the main app; the cursor follows the mouse only until the device is
+# actually seen by the camera, then switches to the tracker.
 #
-# Controls:
+# Flow: START MENU (calibrate? / which mode?) -> [calibration] -> GRID.
+# Grid controls:
 #   LEFT/RIGHT  change target (only while stopped)
 #   M           toggle old/new mode (only while stopped)
 #   SPACE       start/stop recording at the current target+mode
@@ -16,36 +19,118 @@ extends Control
 
 const CELL_SIZE: float = 120.0  # matches AdaptiveManager.SCAN_CELL_SIZE
 
+enum State { MENU, CALIBRATE, GRID }
+var _state: int = State.MENU
+
+var _do_calibration: bool = true
+var _mode: String = "new"         # "old" or "new"
+
 var _targets: Array = []          # Vector2 positions
 var _recorded: Array = []         # {"old": bool, "new": bool} per target
 var _target_idx: int = 0
-var _mode: String = "new"         # "old" or "new"
 var _recording: bool = false
 var _log_file: FileAccess = null
 var _player_pos: Vector2 = Vector2.ZERO
-var _status_label: Label
+
+var _menu: Control = null
+var _calib_check: CheckBox = null
+var _mode_option: OptionButton = null
+var _status_label: Label = null
 var _calib_overlay: Control = null
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_build_menu()
+
+
+# ── Start menu ────────────────────────────────────────────────────────────────
+
+func _build_menu() -> void:
+	_menu = VBoxContainer.new()
+	_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_menu.custom_minimum_size = Vector2(560, 0)
+	_menu.add_theme_constant_override("separation", 22)
+	add_child(_menu)
+
+	var title := Label.new()
+	title.text = "Jitter comparison test"
+	title.add_theme_font_size_override("font_size", 34)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu.add_child(title)
+
+	var already := "  (already calibrated)" if WorkspaceConfig.is_calibrated else "  (not calibrated yet)"
+	_calib_check = CheckBox.new()
+	_calib_check.text = "Do 4-corner calibration first" + already
+	_calib_check.add_theme_font_size_override("font_size", 22)
+	_calib_check.button_pressed = not WorkspaceConfig.is_calibrated
+	_menu.add_child(_calib_check)
+
+	var mode_row := HBoxContainer.new()
+	mode_row.add_theme_constant_override("separation", 14)
+	var mode_lbl := Label.new()
+	mode_lbl.text = "Start in mode:"
+	mode_lbl.add_theme_font_size_override("font_size", 22)
+	mode_row.add_child(mode_lbl)
+	_mode_option = OptionButton.new()
+	_mode_option.add_theme_font_size_override("font_size", 22)
+	_mode_option.add_item("NEW  (all markers, rigid body)")   # index 0 -> "new"
+	_mode_option.add_item("OLD  (12/24/20, equal weight)")    # index 1 -> "old"
+	_mode_option.select(0)
+	mode_row.add_child(_mode_option)
+	_menu.add_child(mode_row)
+
+	var hint := Label.new()
+	hint.text = "You can switch mode any time during the test with the M key."
+	hint.add_theme_font_size_override("font_size", 16)
+	hint.modulate = Color(0.3, 0.3, 0.3)
+	_menu.add_child(hint)
+
+	var start_btn := Button.new()
+	start_btn.text = "Start"
+	start_btn.custom_minimum_size = Vector2(0, 56)
+	start_btn.add_theme_font_size_override("font_size", 24)
+	start_btn.pressed.connect(_on_start_pressed)
+	_menu.add_child(start_btn)
+
+	var tracker_note := Label.new()
+	tracker_note.name = "TrackerNote"
+	tracker_note.add_theme_font_size_override("font_size", 16)
+	tracker_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu.add_child(tracker_note)
+
+
+func _on_start_pressed() -> void:
+	_do_calibration = _calib_check.button_pressed
+	_mode = "new" if _mode_option.selected == 0 else "old"
+
+	_menu.queue_free()
+	_menu = null
 
 	_status_label = Label.new()
 	_status_label.add_theme_font_size_override("font_size", 20)
 	_status_label.position = Vector2(16, 16)
-	_status_label.custom_minimum_size = Vector2(900, 140)
+	_status_label.custom_minimum_size = Vector2(1000, 160)
 	add_child(_status_label)
 
-	if WorkspaceConfig.is_calibrated:
-		_start_after_calibration()
-	else:
+	if _do_calibration:
+		_state = State.CALIBRATE
 		_calib_overlay = load("res://app/installer/workspace_calibration_overlay.gd").new()
-		_calib_overlay.calibration_done.connect(_start_after_calibration)
+		_calib_overlay.calibration_done.connect(_on_calibration_done)
 		add_child(_calib_overlay)
+	else:
+		_enter_grid()
 
 
-func _start_after_calibration() -> void:
+func _on_calibration_done() -> void:
 	_calib_overlay = null
+	_enter_grid()
+
+
+# ── Grid ──────────────────────────────────────────────────────────────────────
+
+func _enter_grid() -> void:
+	_state = State.GRID
 	_build_grid()
 	_open_log_file()
 	_apply_mode()
@@ -55,6 +140,10 @@ func _start_after_calibration() -> void:
 func _build_grid() -> void:
 	var gmin: Vector2 = WorkspaceConfig.workspace_min
 	var gmax: Vector2 = WorkspaceConfig.workspace_max
+	if not (gmax.x > gmin.x and gmax.y > gmin.y):
+		var vp := get_viewport_rect().size   # no calibration -> full viewport
+		gmin = Vector2(vp.x * 0.05, vp.y * 0.05)
+		gmax = Vector2(vp.x * 0.95, vp.y * 0.95)
 	var usable_w: float = gmax.x - gmin.x
 	var usable_h: float = gmax.y - gmin.y
 	var cols: int = max(1, int(usable_w / CELL_SIZE))
@@ -97,6 +186,8 @@ func _apply_mode() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if _state != State.GRID:
+		return
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	match event.keycode:
@@ -119,6 +210,20 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(_delta: float) -> void:
+	if _state == State.MENU:
+		if _menu:
+			var note: Label = _menu.get_node_or_null("TrackerNote")
+			if note:
+				if UDPReceiver.connected:
+					note.text = "Tracker connected — %d packets/s" % UDPReceiver.packets_per_sec
+					note.modulate = Color(0.15, 0.6, 0.2)
+				else:
+					note.text = "Tracker not connected yet — show the device to the camera"
+					note.modulate = Color(0.8, 0.5, 0.1)
+		return
+	if _state != State.GRID:
+		return
+
 	_player_pos = UDPReceiver.screen_pos if UDPReceiver.connected else get_global_mouse_position()
 	var samples: Array = UDPReceiver.take_samples()
 	if _recording and _log_file:
@@ -133,15 +238,19 @@ func _process(_delta: float) -> void:
 	for r in _recorded:
 		if r["old"] and r["new"]:
 			done += 1
-	_status_label.text = "Target %d / %d   (%d fully recorded)\nMode: %s%s\ntracker: %s  %d pkt/s\n\nLEFT/RIGHT: change target (stopped only)   M: toggle mode (stopped only)\nSPACE: start/stop recording   ESC: save and quit" % [
+	var track := "connected  %d pkt/s" % UDPReceiver.packets_per_sec if UDPReceiver.connected \
+		else "NOT connected (cursor = mouse)"
+	_status_label.text = "Target %d / %d   (%d fully recorded)\nMode: %s%s\nTracker: %s\n\nLEFT/RIGHT: change target (stopped only)   M: toggle mode (stopped only)\nSPACE: start/stop recording   ESC: save and quit" % [
 		_target_idx + 1, _targets.size(), done,
-		_mode.to_upper(), "  [RECORDING]" if _recording else "",
-		"connected" if UDPReceiver.connected else "NOT connected", UDPReceiver.packets_per_sec,
+		_mode.to_upper(), "   [RECORDING]" if _recording else "",
+		track,
 	]
 	queue_redraw()
 
 
 func _draw() -> void:
+	if _state != State.GRID:
+		return
 	draw_rect(Rect2(Vector2.ZERO, get_rect().size), Color(0.96, 0.94, 0.91))
 
 	for i in _targets.size():
