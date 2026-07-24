@@ -134,7 +134,6 @@ def _plot_screen_heatmap(pos, old_j, new_j, med_old, med_new):
     axes[0].set_ylabel("screen y (px)")
     cbar = fig.colorbar(im, ax=axes, fraction=0.026, pad=0.02)
     cbar.set_label("Device wobble at rest (mm)")
-    fig.suptitle("Tracking jitter across the workspace", fontsize=15)
     fig.savefig(os.path.join(DATA_DIR, "jitter_screenmap.png"), dpi=200,
                 bbox_inches="tight", facecolor="white")
     plt.close(fig)
