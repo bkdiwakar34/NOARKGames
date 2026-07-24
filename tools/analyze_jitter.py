@@ -117,26 +117,23 @@ def _smooth_field(pos, vals, gx, gy):
 
 
 def _plot_screen_heatmap(pos, old_j, new_j, med_old, med_new):
+    # Two separate images, same color scale so they are directly comparable.
     vmax = float(np.ceil(np.percentile(np.concatenate([old_j, new_j]), 95)))
     gx, gy = np.meshgrid(np.linspace(0, SCREEN_W, 300), np.linspace(0, SCREEN_H, 170))
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4.6), constrained_layout=True)
-    im = None
-    for ax, vals, title, med in [
-            (axes[0], old_j, "Old setup  (3 markers, averaged)", med_old),
-            (axes[1], new_j, "New setup  (rigid body)", med_new)]:
+    for vals, fname in [(old_j, "jitter_old.png"), (new_j, "jitter_new.png")]:
+        fig, ax = plt.subplots(figsize=(7, 4.4), constrained_layout=True)
         field = _smooth_field(pos, vals, gx, gy)
         im = ax.pcolormesh(gx, gy, field, cmap="RdBu_r", vmin=0, vmax=vmax,
                            shading="gouraud", rasterized=True)
-        ax.set_title(f"{title}\nmedian {med:.2f} mm")
         ax.set_aspect("equal")
         ax.invert_yaxis()   # screen y grows downward
         ax.set_xlabel("screen x (px)")
-    axes[0].set_ylabel("screen y (px)")
-    cbar = fig.colorbar(im, ax=axes, fraction=0.026, pad=0.02)
-    cbar.set_label("Device wobble at rest (mm)")
-    fig.savefig(os.path.join(DATA_DIR, "jitter_screenmap.png"), dpi=200,
-                bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+        ax.set_ylabel("screen y (px)")
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
+        cbar.set_label("Device wobble at rest (mm)")
+        fig.savefig(os.path.join(DATA_DIR, fname), dpi=200,
+                    bbox_inches="tight", facecolor="white")
+        plt.close(fig)
 
 
 def _plot_summary(old_j, new_j, factor):
