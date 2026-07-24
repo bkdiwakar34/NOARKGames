@@ -18,6 +18,8 @@ extends Control
 #   ESC         save the CSV and quit
 
 const CELL_SIZE: float = 120.0  # matches AdaptiveManager.SCAN_CELL_SIZE
+const RECORD_DURATION: float = 5.0  # fixed per-segment recording, so every segment
+                                    # has the same sample count (fair variance comparison)
 
 enum State { MENU, CALIBRATE, GRID }
 var _state: int = State.MENU
@@ -29,6 +31,7 @@ var _targets: Array = []          # Vector2 positions
 var _recorded: Array = []         # {"old": bool, "new": bool} per target
 var _target_idx: int = 0
 var _recording: bool = false
+var _record_left: float = 0.0     # seconds remaining in the current fixed-duration recording
 var _log_file: FileAccess = null
 var _player_pos: Vector2 = Vector2.ZERO
 
@@ -202,14 +205,16 @@ func _input(event: InputEvent) -> void:
 				_mode = "old" if _mode == "new" else "new"
 				_apply_mode()
 		KEY_SPACE:
-			_recording = not _recording
+			# Start a fixed-duration recording; ignored while one is running,
+			# so the duration is always exactly RECORD_DURATION (no manual stop).
 			if not _recording:
-				_recorded[_target_idx][_mode] = true
+				_recording = true
+				_record_left = RECORD_DURATION
 		KEY_ESCAPE:
 			_finish()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _state == State.MENU:
 		if _menu:
 			var note: Label = _menu.get_node_or_null("TrackerNote")
@@ -233,6 +238,10 @@ func _process(_delta: float) -> void:
 				str(s[1]), str(s[2]), str(s[3]), str(s[4]), str(s[5])
 			]))
 		_log_file.flush()
+		_record_left -= delta
+		if _record_left <= 0.0:
+			_recording = false
+			_recorded[_target_idx][_mode] = true
 
 	var done: int = 0
 	for r in _recorded:
@@ -240,10 +249,11 @@ func _process(_delta: float) -> void:
 			done += 1
 	var track := "connected  %d pkt/s" % UDPReceiver.packets_per_sec if UDPReceiver.connected \
 		else "NOT connected (cursor = mouse)"
-	_status_label.text = "Target %d / %d   (%d fully recorded)\nMode: %s%s\nTracker: %s\n\nLEFT/RIGHT: change target (stopped only)   M: toggle mode (stopped only)\nSPACE: start/stop recording   ESC: save and quit" % [
+	var rec_txt := "   [RECORDING %.1f s]" % _record_left if _recording else ""
+	_status_label.text = "Target %d / %d   (%d fully recorded)\nMode: %s%s\nTracker: %s\n\nLEFT/RIGHT: change target   M: toggle mode   (both only when idle)\nSPACE: record %.0f s (auto-stops)   ESC: save and quit" % [
 		_target_idx + 1, _targets.size(), done,
-		_mode.to_upper(), "   [RECORDING]" if _recording else "",
-		track,
+		_mode.to_upper(), rec_txt,
+		track, RECORD_DURATION,
 	]
 	queue_redraw()
 
