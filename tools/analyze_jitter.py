@@ -2,10 +2,14 @@
 Analyze the jitter-comparison data: old setup (3 markers, equal-weight average)
 vs new setup (all markers, rigid-body joint solve).
 
-For each held target the "jitter" is the RMS distance of the tracked point from
-its own mean position while the device was held still — i.e. how much the cursor
-wandered at rest. Lower is better. The comparison is per-target (matched by
-target_id) plus an overall summary, with plots saved for a presentation.
+Jitter is the RMS distance of the tracked device position from its own mean
+while held still — how much the position estimate wobbles at rest. It is
+computed from the RAW tracker coordinates (tracker_x/y/z, in metres), so the
+millimetre values are true physical device wobble: no monitor size, no table
+size, no screen-mapping assumption enters. Lower is better.
+
+Plots are laid out on the actual screen positions so you can see WHERE on the
+workspace each setup struggles.
 
 Run:  python tools/analyze_jitter.py
 Reads every tools/jitter_data/jitter_test_*.csv, splits by the 'mode' column.
@@ -16,164 +20,149 @@ import glob
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.path import Path
+from scipy.interpolate import RBFInterpolator
+from scipy.spatial import ConvexHull
 
-# ── config ────────────────────────────────────────────────────────────────────
 DATA_DIR = os.path.join(os.path.dirname(__file__), "jitter_data")
-# Screen positions are in the game's 1152-wide coordinate space. On a 23.8"
-# 1920x1080 panel (~527 mm wide) that is 527/1152 mm per game-pixel. Adjust if
-# the monitor differs; pixel results are unaffected.
-MM_PER_PX = 527.0 / 1152.0
+OLD_COLOR = "#C24B57"
+NEW_COLOR = "#2E8B84"
+INK = "#1f2a2e"
+MUTED = "#5b6b70"
+SCREEN_W, SCREEN_H = 1152.0, 648.0   # game coordinate space
+MOVE_THRESHOLD_MM = 12.0             # exclude recordings where the device was moved mid-capture
 
-OLD_COLOR = "#D1495B"   # old setup
-NEW_COLOR = "#2E8B84"   # new setup
-
-
-def load_rows(path):
-    with open(path, newline="") as f:
-        for r in csv.DictReader(f):
-            yield r
+plt.rcParams.update({"font.size": 12})
 
 
 def load_all():
-    """Return {mode: {target_id: Nx2 array of (screen_x, screen_y)}}.
-    Consecutive byte-identical samples are collapsed: the tracker repeats each
-    pose several times between fresh frames, and those repeats are not
-    independent measurements (they don't change the spread, only inflate N)."""
+    """{mode: {target_id: Nx5 array of (screen_x, screen_y, tx, ty, tz)}}.
+    Consecutive byte-identical samples collapsed (tracker repeats each pose
+    between fresh frames; repeats are not independent measurements)."""
     data = {}
     for path in sorted(glob.glob(os.path.join(DATA_DIR, "jitter_test_*.csv"))):
         prev = None
-        for r in load_rows(path):
-            key = (r["screen_x"], r["screen_y"], r["tracker_x"],
-                   r["tracker_y"], r["tracker_z"])
-            if key == prev:
-                continue          # drop repeated (non-independent) frame
-            prev = key
-            mode = r["mode"]
-            tid = int(r["target_id"])
-            data.setdefault(mode, {}).setdefault(tid, []).append(
-                (float(r["screen_x"]), float(r["screen_y"])))
+        with open(path, newline="") as f:
+            for r in csv.DictReader(f):
+                key = (r["screen_x"], r["screen_y"], r["tracker_x"],
+                       r["tracker_y"], r["tracker_z"])
+                if key == prev:
+                    continue
+                prev = key
+                data.setdefault(r["mode"], {}).setdefault(int(r["target_id"]), []).append(
+                    (float(r["screen_x"]), float(r["screen_y"]),
+                     float(r["tracker_x"]), float(r["tracker_y"]), float(r["tracker_z"])))
     return {m: {t: np.array(v) for t, v in td.items()} for m, td in data.items()}
 
 
-def jitter_rms_px(points):
-    """RMS distance from the mean position (radial spread), in pixels."""
-    c = points.mean(axis=0)
-    d = points - c
-    return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
+def jitter_mm(points):
+    """3-D RMS distance of the tracked position from its mean, in millimetres."""
+    xyz = points[:, 2:5]
+    d = xyz - xyz.mean(axis=0)
+    return float(np.sqrt(np.mean(np.sum(d * d, axis=1)))) * 1000.0
 
 
-# A recording is contaminated if the device was moved mid-capture (held at one
-# spot, then another) rather than held still. Detect by comparing the centroid
-# of the first half of samples to the second half: genuine jitter oscillates
-# around one point (small shift); a move shows a large shift. Threshold in px.
-MOVE_THRESHOLD_PX = 25.0
-
-
-def segment_moved(points):
+def moved_mm(points):
+    """True if the device was held at two different spots (first half vs second
+    half of the tracked position shifts by more than the threshold)."""
     if len(points) < 4:
         return False
-    h = len(points) // 2
-    shift = np.linalg.norm(points[:h].mean(axis=0) - points[h:].mean(axis=0))
-    return shift > MOVE_THRESHOLD_PX
+    xyz = points[:, 2:5]
+    h = len(xyz) // 2
+    return np.linalg.norm(xyz[:h].mean(axis=0) - xyz[h:].mean(axis=0)) * 1000.0 > MOVE_THRESHOLD_MM
+
+
+def screen_pos(points):
+    return points[:, 0:2].mean(axis=0)
 
 
 def main():
     data = load_all()
-    modes = set(data)
-    if not {"old", "new"} <= modes:
-        raise SystemExit(f"Need both 'old' and 'new' modes; found: {sorted(modes)}")
+    if not {"old", "new"} <= set(data):
+        raise SystemExit(f"Need both 'old' and 'new' modes; found: {sorted(data)}")
 
     targets = sorted(set(data["old"]) & set(data["new"]))
-    print(f"Matched targets (in both modes): {len(targets)}")
-
-    # Drop targets where either recording was contaminated by a mid-capture move.
     excluded = [t for t in targets
-                if segment_moved(data["old"][t]) or segment_moved(data["new"][t])]
-    if excluded:
-        print(f"Excluded {len(excluded)} target(s) where the device moved "
-              f"mid-recording: {excluded}")
+                if moved_mm(data["old"][t]) or moved_mm(data["new"][t])]
     targets = [t for t in targets if t not in excluded]
-    print(f"Clean targets analysed: {len(targets)}\n")
+    print(f"Matched targets: {len(targets) + len(excluded)}   "
+          f"excluded (device moved mid-recording): {excluded}   analysed: {len(targets)}\n")
 
-    rows = []
-    print(f"{'target':>6} | {'old (px)':>9} {'new (px)':>9} | "
-          f"{'old (mm)':>9} {'new (mm)':>9} | {'improve x':>9} | {'n_old':>5} {'n_new':>5}")
-    print("-" * 82)
-    for t in targets:
-        jo = jitter_rms_px(data["old"][t])
-        jn = jitter_rms_px(data["new"][t])
-        ratio = jo / jn if jn > 0 else float("nan")
-        rows.append((t, jo, jn, ratio, len(data["old"][t]), len(data["new"][t])))
-        print(f"{t:>6} | {jo:>9.2f} {jn:>9.2f} | {jo*MM_PER_PX:>9.2f} "
-              f"{jn*MM_PER_PX:>9.2f} | {ratio:>8.2f}x | "
-              f"{len(data['old'][t]):>5} {len(data['new'][t]):>5}")
+    old_j = np.array([jitter_mm(data["old"][t]) for t in targets])
+    new_j = np.array([jitter_mm(data["new"][t]) for t in targets])
+    pos = np.array([screen_pos(data["new"][t]) for t in targets])
 
-    jo_all = np.array([r[1] for r in rows])
-    jn_all = np.array([r[2] for r in rows])
-    print("-" * 82)
-    print(f"\nMedian jitter   old = {np.median(jo_all):.2f} px "
-          f"({np.median(jo_all)*MM_PER_PX:.2f} mm)")
-    print(f"Median jitter   new = {np.median(jn_all):.2f} px "
-          f"({np.median(jn_all)*MM_PER_PX:.2f} mm)")
-    print(f"Median improvement factor (old/new) = {np.median(jo_all/jn_all):.2f}x")
-    print(f"Targets where new is tighter: {int(np.sum(jn_all < jo_all))} / {len(rows)}")
+    print(f"{'target':>6} | {'old (mm)':>9} {'new (mm)':>9} | {'improve':>8}")
+    print("-" * 42)
+    for t, jo, jn in zip(targets, old_j, new_j):
+        print(f"{t:>6} | {jo:>9.2f} {jn:>9.2f} | {jo/jn:>7.1f}x")
+    print("-" * 42)
+    print(f"\nMedian device wobble  old = {np.median(old_j):.2f} mm")
+    print(f"Median device wobble  new = {np.median(new_j):.2f} mm")
+    print(f"Median improvement factor = {np.median(old_j/new_j):.1f}x")
+    print(f"New tighter at {int(np.sum(new_j < old_j))} / {len(targets)} positions")
 
-    _plot_bars(rows)
-    _plot_clusters(data, targets)
-    _plot_summary(jo_all, jn_all)
+    factor = float(np.median(old_j / new_j))
+    _plot_screen_heatmap(pos, old_j, new_j, float(np.median(old_j)), float(np.median(new_j)))
+    _plot_summary(old_j, new_j, factor)
     print(f"\nPlots saved in {DATA_DIR}")
 
 
-def _plot_bars(rows):
-    t = [r[0] for r in rows]
-    jo = [r[1] * MM_PER_PX for r in rows]
-    jn = [r[2] * MM_PER_PX for r in rows]
-    x = np.arange(len(t))
-    fig, ax = plt.subplots(figsize=(13, 4.5))
-    ax.bar(x - 0.2, jo, 0.4, label="Old (3 markers, average)", color=OLD_COLOR)
-    ax.bar(x + 0.2, jn, 0.4, label="New (rigid body)", color=NEW_COLOR)
-    ax.set_xlabel("Target"); ax.set_ylabel("Jitter — RMS spread (mm)")
-    ax.set_title("Cursor jitter at rest, per workspace position")
-    ax.set_xticks(x); ax.set_xticklabels(t, fontsize=7)
-    ax.legend(); ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout(); fig.savefig(os.path.join(DATA_DIR, "jitter_bars.png"), dpi=150)
+def _smooth_field(pos, vals, gx, gy):
+    """Smooth continuous field via thin-plate RBF over the full rectangle."""
+    rbf = RBFInterpolator(pos, vals, kernel="thin_plate_spline", smoothing=1.0)
+    pts = np.column_stack([gx.ravel(), gy.ravel()])
+    return np.clip(rbf(pts), 0.0, None).reshape(gx.shape)
+
+
+def _plot_screen_heatmap(pos, old_j, new_j, med_old, med_new):
+    vmax = float(np.ceil(np.percentile(np.concatenate([old_j, new_j]), 95)))
+    gx, gy = np.meshgrid(np.linspace(0, SCREEN_W, 300), np.linspace(0, SCREEN_H, 170))
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.6), constrained_layout=True)
+    im = None
+    for ax, vals, title, med in [
+            (axes[0], old_j, "Old setup  (3 markers, averaged)", med_old),
+            (axes[1], new_j, "New setup  (rigid body)", med_new)]:
+        field = _smooth_field(pos, vals, gx, gy)
+        im = ax.pcolormesh(gx, gy, field, cmap="RdBu_r", vmin=0, vmax=vmax,
+                           shading="gouraud", rasterized=True)
+        ax.set_title(f"{title}\nmedian {med:.2f} mm")
+        ax.set_aspect("equal")
+        ax.invert_yaxis()   # screen y grows downward
+        ax.set_xlabel("screen x (px)")
+    axes[0].set_ylabel("screen y (px)")
+    cbar = fig.colorbar(im, ax=axes, fraction=0.026, pad=0.02)
+    cbar.set_label("Device wobble at rest (mm)")
+    fig.suptitle("Tracking jitter across the workspace", fontsize=15)
+    fig.savefig(os.path.join(DATA_DIR, "jitter_screenmap.png"), dpi=200,
+                bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
-def _plot_clusters(data, targets):
-    # Six targets spread across the run, clouds centered on their own mean so
-    # old vs new overlay and the tighter cluster is obvious.
-    picks = [targets[int(round(i))] for i in np.linspace(0, len(targets) - 1, 6)]
-    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
-    for ax, t in zip(axes.flat, picks):
-        for mode, col, lab in [("old", OLD_COLOR, "Old"), ("new", NEW_COLOR, "New")]:
-            p = data[mode][t]
-            d = (p - p.mean(axis=0)) * MM_PER_PX
-            ax.scatter(d[:, 0], d[:, 1], s=10, alpha=0.5, color=col, label=lab)
-        ax.set_title(f"Target {t}"); ax.set_aspect("equal")
-        ax.axhline(0, color="0.8", lw=0.5); ax.axvline(0, color="0.8", lw=0.5)
-        ax.set_xlabel("mm"); ax.set_ylabel("mm")
-        lim = 6
-        ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
-        ax.legend(fontsize=8)
-    fig.suptitle("Spread of the tracked point while held still (centered per target)")
-    fig.tight_layout(); fig.savefig(os.path.join(DATA_DIR, "jitter_clusters.png"), dpi=150)
-    plt.close(fig)
-
-
-def _plot_summary(jo_all, jn_all):
-    fig, ax = plt.subplots(figsize=(5, 5.5))
-    parts = ax.boxplot([jo_all * MM_PER_PX, jn_all * MM_PER_PX],
-                       tick_labels=["Old\n(3 markers)", "New\n(rigid body)"],
-                       patch_artist=True, widths=0.5)
-    for patch, col in zip(parts["boxes"], [OLD_COLOR, NEW_COLOR]):
-        patch.set_facecolor(col); patch.set_alpha(0.6)
-    for med in parts["medians"]:
-        med.set_color("black")
-    ax.set_ylabel("Jitter — RMS spread (mm)")
-    ax.set_title("Jitter across all workspace positions")
-    ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout(); fig.savefig(os.path.join(DATA_DIR, "jitter_summary.png"), dpi=150)
+def _plot_summary(old_j, new_j, factor):
+    fig, ax = plt.subplots(figsize=(6, 5.6))
+    fig.subplots_adjust(left=0.14, right=0.95, top=0.82, bottom=0.10)
+    positions = [0, 1]
+    for x, vals, col in [(0, old_j, OLD_COLOR), (1, new_j, NEW_COLOR)]:
+        jitter_x = x + (np.random.default_rng(0).uniform(-0.07, 0.07, len(vals)))
+        ax.scatter(jitter_x, vals, s=26, color=col, alpha=0.45, edgecolors="none", zorder=3)
+        med = np.median(vals)
+        ax.plot([x - 0.22, x + 0.22], [med, med], color=col, lw=3, zorder=4)
+        ax.text(x, med, f"  {med:.2f} mm", va="center", ha="left",
+                fontsize=12, color=col, fontweight="bold")
+    ax.set_xticks(positions)
+    ax.set_xticklabels(["Old setup\n3 markers, averaged", "New setup\nrigid body"], fontsize=12)
+    ax.set_ylabel("Device wobble at rest (mm)", fontsize=12)
+    ax.set_ylim(0, None)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.grid(axis="y", alpha=0.25)
+    ax.set_title("Tracking jitter across all positions", fontsize=17,
+                 fontweight="bold", loc="left", pad=28)
+    ax.text(0, 1.03, f"New setup is {factor:.1f}× tighter (median)",
+            transform=ax.transAxes, fontsize=12, color=MUTED, va="bottom")
+    fig.savefig(os.path.join(DATA_DIR, "jitter_summary.png"), dpi=200,
+                bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
