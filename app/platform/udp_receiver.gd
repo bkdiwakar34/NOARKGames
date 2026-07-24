@@ -151,6 +151,12 @@ func send_tracker_setup(subset: bool, rigid: bool) -> void:
 	# ignores the repeats, re-locking its origin on each actual change.
 	_outgoing = "SETUP:%s,%s" % [markers, algo]
 
+# Like send_tracker_setup, but for algo values it doesn't expose (e.g. "equal" —
+# the jitter-comparison tool's reconstruction of the old per-marker setup).
+# Not used by any patient-facing screen.
+func send_setup_raw(markers: String, algo: String) -> void:
+	_outgoing = "SETUP:%s,%s" % [markers, algo]
+
 func stop() -> void:
 	_running = false
 	_outgoing = "STOP"

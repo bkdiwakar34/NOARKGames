@@ -185,6 +185,7 @@ class MainClass:
         self._demo_subset = set(int(i) for i in settings.get("demo_subset_ids", [12, 20]))
         self._allowed_ids = None          # None = use all detected markers
         self._use_rigid   = True          # joint solve when board geometry is loaded
+        self._equal_weight = False        # per-marker path: equal vs pixel-area weighting
         self._setup_state = ("all", "rigid")
 
         # Persisted world origin: the locked (R, grip) live in the CAMERA frame,
@@ -736,12 +737,17 @@ class MainClass:
                 @ Config.MARKER_OFFSETS[_id].reshape(3, 1)
                 + tvecs[index].reshape(3, 1)
             ).T[0]
-            # Weight = projected pixel area of this marker (shoelace via diagonals).
-            # Bigger marker in the image => corners more precise => estimate more trustworthy.
-            c = np.asarray(corners[index]).reshape(4, 2)
-            d1 = c[2] - c[0]   # top-left → bottom-right
-            d2 = c[3] - c[1]   # top-right → bottom-left
-            weights[index] = 0.5 * abs(d1[0] * d2[1] - d1[1] * d2[0])
+            if self._equal_weight:
+                # Reconstructing the old setup's behavior for comparison: every
+                # visible marker counts the same, regardless of apparent size.
+                weights[index] = 1.0
+            else:
+                # Weight = projected pixel area of this marker (shoelace via diagonals).
+                # Bigger marker in the image => corners more precise => more trustworthy.
+                c = np.asarray(corners[index]).reshape(4, 2)
+                d1 = c[2] - c[0]   # top-left → bottom-right
+                d2 = c[3] - c[1]   # top-right → bottom-left
+                weights[index] = 0.5 * abs(d1[0] * d2[1] - d1[1] * d2[0])
 
         valid = ~np.isnan(grip_points[:, 0])
         total_w = weights[valid].sum()
@@ -752,7 +758,10 @@ class MainClass:
     # ── demo comparison mode ──────────────────────────────────────────────────
 
     def _apply_setup(self, cmd: bytes) -> None:
-        """Handle "SETUP:<subset|all>,<rigid|legacy>" from Godot's settings menu."""
+        """Handle "SETUP:<subset|all>,<rigid|legacy|equal>" from Godot's settings menu
+        or the standalone jitter-comparison tool. "equal" is per-marker with equal
+        weighting (vs. legacy's pixel-area weighting) — used to reconstruct the old
+        setup's behavior for comparison; never sent during normal patient sessions."""
         try:
             markers, algo = cmd.decode().split(":", 1)[1].strip().split(",")
         except ValueError:
@@ -762,9 +771,11 @@ class MainClass:
             return  # Godot re-sends its sticky command every 100 ms
         self._setup_state = (markers, algo)
         self._allowed_ids = self._demo_subset if markers == "subset" else None
-        self._use_rigid   = (algo == "rigid")
+        self._use_rigid    = (algo == "rigid")
+        self._equal_weight = (algo == "equal")
         self._reset_origin()
-        solver = "rigid body" if (self._use_rigid and self.board is not None) else "per-marker"
+        solver = "rigid body" if (self._use_rigid and self.board is not None) else \
+            ("per-marker (equal weight)" if self._equal_weight else "per-marker")
         print(f"Setup changed: markers={sorted(self._allowed_ids) if self._allowed_ids else 'all'}, "
               f"solver={solver} — re-locking origin")
 
