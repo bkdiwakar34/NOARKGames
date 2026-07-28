@@ -3,7 +3,7 @@
 **NOARKGames** — Godot 4.5 rehabilitation gaming platform for stroke patients.
 All active development is in `app/` (platform/games/ui/installer split). `v2/` is the frozen
 fallback it was copied from (launchable via `--main-scene res://v2/Scenes/main.tscn`); the
-old codebase (`Main_screen/`, `Games/`) is untouched.
+pre-v2 codebase now lives in `legacy/` (retired, `.gdignore`d — see `legacy/README.md`).
 Read [docs/design.md](docs/design.md) for the architecture + current Fitts'-Law adaptive design.
 Read [docs/v1_plan.md](docs/v1_plan.md) for the v1 product plan and build order.
 Read [docs/setup.md](docs/setup.md) for hardware and how to run.

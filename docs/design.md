@@ -151,42 +151,55 @@ The full historical maths walkthrough is in [presentation_notes.md](presentation
 
 ---
 
-## 6. v2 Architecture
+## 6. Architecture
 
-All active code is in `v2/`. The old codebase (`Main_screen/`, `Games/`) is untouched but unused.
+All active code is in `app/`, split platform / games / ui / installer (see
+[v1_plan.md](v1_plan.md)). `v2/` is the frozen fallback `app/` was copied from,
+still launchable via `--main-scene res://v2/Scenes/main.tscn`. The pre-v2
+codebase is retired in `legacy/` (`.gdignore`d, see `legacy/README.md`).
 
 ### Autoloads (order matters; see `project.godot`)
 
 | # | Name | Script | Purpose |
 |---|---|---|---|
-| 1 | PatientDB | `v2/Core/patient_db.gd` | Patient JSON, target_success_rate |
-| 2 | GlobalSignals | `v2/Core/global_signals.gd` | Signal bus, current_patient_id |
-| 3 | UDPReceiver | `v2/Core/udp_receiver.gd` | UDP:12345, screen_pos |
-| 4 | SessionManager | `v2/Core/session_manager.gd` | Session/trial IDs, CSV logs |
-| 5 | AdaptiveManager | `v2/Core/adaptive_manager.gd` | Trial timer, Fitts model, lifetime selection |
+| 1 | PatientDB | `app/platform/patient_db.gd` | Patient JSON, rate schedule, calibration profile |
+| 2 | GlobalSignals | `app/platform/global_signals.gd` | Signal bus, current_patient_id, installer flags |
+| 3 | UDPReceiver | `app/platform/udp_receiver.gd` | UDP:12345, screen_pos, 100 Hz log buffer |
+| 4 | SessionManager | `app/platform/session_manager.gd` | Session/trial IDs, CSV logs |
+| 5 | AdaptiveManager | `app/platform/adaptive_manager.gd` | Trial timer, Fitts model, lifetime selection |
+| 6 | WorkspaceConfig | `app/platform/workspace_config.gd` | 4-corner sensor-to-screen affine |
+| 7 | AudioManager | `app/platform/audio_manager.gd` | Catch / miss / star sounds |
 
 ### Folder layout
 
 ```
-v2/
-  Core/                     — 5 autoloads above
-  Scenes/
-    main.tscn / .gd                       — entry; routes to registration or game_select
-    registration.tscn / .gd               — therapist registers patient on Day 1
-    game_select.tscn / .gd                — game selection + session controls
-    between_trial.tscn / .gd              — 3-sec amber pause card
-    workspace_calibration_overlay.gd      — 4-corner sensor-to-screen calibration
-  Games/
-    random_reach/
-      random_reach.gd / .tscn             — main game, wired to AdaptiveManager
-      apple.gd / .tscn                    — single-apple (lifetime, catch, miss)
-      graph_overlay.gd                    — stop-session graph (programmatic, no .tscn)
+app/
+  platform/           — the autoloads above (tracking, data, difficulty)
+  ui/
+    chooser.tscn / .gd            — patient landing screen (game cards)
+    main.tscn / .gd               — entry; routes to registration or chooser
+    registration.tscn / .gd       — patient details + 14-day rate schedule
+    game_select.tscn / .gd        — researcher session settings
+    between_trial.tscn / .gd      — 5-star trial summary
+    ui_theme.gd                   — design system (colors, fonts, background)
+  games/reach/
+    random_reach.gd / .tscn       — the reaching game, wired to AdaptiveManager
+    apple.gd / .tscn              — single target (lifetime, catch, miss)
+    graph_overlay.gd              — stop-session graph (programmatic, no .tscn)
+  installer/
+    installer.tscn / .gd          — checklist, origin ritual, test drive (F10)
+    workspace_calibration_overlay.gd  — 4-corner sensor-to-screen calibration
+  assets/               — fonts (Nunito), audio drop-in folder
 pyscripts/
   main.py             — production tracker (Pi + dev)
   filters.py          — EMA / Kalman / OneEuro / CornerStability
   calibrate_camera.py — fisheye intrinsics calibration
+  calibrate_board.py  — per-device marker layout (board_geometry.json)
   diagnose_jitter.py  — multi-pose noise-floor measurement
-  simulate.py         — interactive PID simulator (legacy, kept for reference)
+tools/
+  jitter_test.gd/.tscn  — standalone old-vs-rigid jitter comparison harness
+  analyze_jitter.py     — its analysis + figures
+  jitter_data/          — collected CSVs and generated plots
 ```
 
 ---

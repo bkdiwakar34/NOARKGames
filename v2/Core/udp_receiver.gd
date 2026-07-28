@@ -18,6 +18,12 @@ var packets_per_sec: int = 0     # measured arrival rate, updated once a second
 var _pkt_count: int = 0
 var _pkt_window_ms: int = 0
 
+# Per-packet log buffer: filled on the network thread at tracker rate (~100 Hz),
+# drained by the game scene once per frame via take_samples().
+var log_enabled: bool = false
+var _log_buffer: Array = []      # [unix_time, screen_x, screen_y, tracker_x, tracker_y, tracker_z]
+var _log_mutex: Mutex = Mutex.new()
+
 var _udp: PacketPeerUDP = PacketPeerUDP.new()
 var _thread: Thread = Thread.new()
 var _port: int = 12345
@@ -96,6 +102,14 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 			(raw_z - 0.2) * 1400.0 + 40.0
 		)
 	connected = true
+
+	if log_enabled:
+		_log_mutex.lock()
+		_log_buffer.append([Time.get_unix_time_from_system(),
+			screen_pos.x, screen_pos.y, raw_x, raw_y, raw_z])
+		if _log_buffer.size() > 2000:  # safety cap if the game stops draining
+			_log_buffer = _log_buffer.slice(_log_buffer.size() - 2000)
+		_log_mutex.unlock()
 
 	_pkt_count += 1
 	var now: int = Time.get_ticks_msec()
