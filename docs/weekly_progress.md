@@ -60,7 +60,7 @@ Key commits:
 
 ### 2026-06-04 (simulator)
 - Use sheep position at spawn time for speed estimation
-- **Interactive PID simulator** (`pyscripts/simulate.py`): per-apple update frequency control
+- **Interactive PID simulator** (`legacy/simulate.py`, retired with the PID controller): per-apple update frequency control
 - Simulator redesign: r-space (`r = distance / (lifetime × speed)`), principled init, deterministic analytic catch rate, healthy user model with separate `actual_speed` vs `estimated_speed`
 
 **Theme**: built the adaptive difficulty system end-to-end (PI → PID → staircase calibration → simulator for validation).
