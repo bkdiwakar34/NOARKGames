@@ -2,6 +2,13 @@
 
 End-to-end derivation of how a raw fisheye camera frame becomes a 3D position broadcast to Godot. Walks every stage of `main.py` in execution order, with the equations OpenCV is solving under each function call.
 
+> **Scope.** This is the pipeline reference — every stage, in order, as deployed
+> (§6 and §7 updated 2026-07-28 for the joint rigid-body solve and the validated,
+> persistent origin lock). For the focused *why the new method beats the old* argument
+> — constraint counts, failure modes, the depth-precision derivation — see
+> [rigid_body_math.md](rigid_body_math.md). For the measured result, see
+> `tools/analyze_jitter.py` and its figures.
+
 ---
 
 ## Notation
@@ -329,61 +336,192 @@ Output: $\mathbf{R}$ (rotation matrix, often stored as Rodrigues vector $\mathbf
 
 ---
 
-## 6. Centroid from multiple markers
+## 6. Combining markers into one position
 
-The skateboard has 5 markers (IDs 4, 8, 12, 14, 20) at different positions on different faces. Usually 1–2 are visible per frame. For each visible marker $i$, we have:
+The device carries markers on several faces (IDs 12 front, 14 front-top, 20/24 back
+sides, plus 4, 8, 28, 32 on the reprint); typically 1–3 are visible per frame. There
+are two ways to turn those detections into one grip position. **The joint rigid-body
+solve (§6.1) is what runs today**; the per-marker average (§6.2) is the superseded
+method, kept because it is the fallback when board geometry is missing, and because
+it is the baseline the comparison in [rigid_body_math.md](rigid_body_math.md) measures
+against.
 
-- $\mathbf{R}_i, \mathbf{t}_i$ from `solvePnP` — marker $i$'s pose in camera frame.
-- `MARKER_OFFSETS[i]` $= {}_{\text{mkr}_i}\mathbf{o}_i$ — vector from marker $i$'s centre to the skateboard's centre, in marker $i$'s own local frame.
+### 6.1 Joint rigid-body solve — deployed
 
-**Each marker independently predicts** where the skateboard centre is in the camera frame:
+The markers are glued to one rigid object, so their poses relative to each other are
+physical constants. `calibrate_board.py` measures them once (§6.3) and stores, for
+each marker $i$, its fixed pose in the **board frame**:
 
 $$
-{}_{\text{cam}}\mathbf{c}_i = \mathbf{R}_i \cdot {}_{\text{mkr}_i}\mathbf{o}_i + \mathbf{t}_i
+{}_{\text{board}}\mathbf{X} = \mathbf{R}^{b}_{i}\, {}_{\text{mkr}_i}\mathbf{X} + \mathbf{t}^{b}_{i}
 $$
 
-The factor $\mathbf{R}_i$ rotates the offset from marker $i$'s local frame to the camera frame; adding $\mathbf{t}_i$ shifts from marker $i$'s position to the skateboard centre.
-
-**Centroid** = mean of the per-marker predictions:
+Applying this to the four known corner coordinates $\mathbf{X}_k$ of each marker gives
+every corner's fixed position on the device:
 
 $$
-{}_{\text{cam}}\mathbf{c} = \frac{1}{N} \sum_{i \in \text{visible}} {}_{\text{cam}}\mathbf{c}_i
+{}_{\text{board}}\mathbf{X}_{i,k} = \mathbf{R}^{b}_{i} \mathbf{X}_k + \mathbf{t}^{b}_{i}
 $$
 
-If all markers are rigidly attached to the same skateboard, all $N$ predictions should agree exactly; in practice they differ slightly due to corner noise, and the mean averages out part of that noise.
+These constants live in `board_geometry.json`, together with one consensus grip point
+${}_{\text{board}}\mathbf{g}$.
+
+At runtime, whatever subset $V$ of markers is visible, **all** their corners go into a
+single PnP problem with **one** unknown pose $(\mathbf{R}, \mathbf{t})$ — the pose of
+the whole device:
+
+$$
+\min_{\mathbf{R},\, \mathbf{t}} \; \sum_{i \in V} \sum_{k=1}^{4}
+\left\| \operatorname{project}\!\left(\mathbf{K},\; \mathbf{R}\, {}_{\text{board}}\mathbf{X}_{i,k} + \mathbf{t}\right) - \mathbf{u}_{i,k} \right\|^2
+$$
+
+The grip point then follows directly — no voting, no averaging:
+
+$$
+{}_{\text{cam}}\mathbf{g} = \mathbf{R}\, {}_{\text{board}}\mathbf{g} + \mathbf{t}
+$$
+
+**Why this is better.** With three markers visible, the old way solved 3 separate
+6-unknown problems from 8 measurements each ($8/6 \approx 1.3$ constraint ratio, each
+point set coplanar). The joint solve has 24 measurements against 6 unknowns (ratio 4)
+over a non-coplanar point set. Two things follow:
+
+- **Depth precision scales with the pixel span of the measured shape.** A single marker
+  spans ~90 px in the image; the whole device spans ~250 px. Depth is read from how
+  much that span *shrinks*, so a wider constellation resolves depth ~3× better from the
+  same corner noise — on top of the $\sqrt{3}$ from pooling more corners.
+- **The two-tilt ambiguity dies.** That failure mode is a property of *coplanar* point
+  sets. The device's faces are angled, so the mirrored pose projects visibly wrongly and
+  the second minimum disappears whenever ≥ 2 non-parallel markers are visible.
+
+Measured on 43 workspace positions: median device wobble at rest fell from 3.27 mm to
+0.78 mm, a 5.2× reduction (`tools/analyze_jitter.py`).
+
+**Degradation:** with only one marker visible the problem necessarily reduces to
+single-marker quality — the geometry cannot supply constraints the image doesn't have.
+
+### 6.2 Per-marker average — superseded
+
+For each visible marker $i$, `solvePnP` gives $\mathbf{R}_i, \mathbf{t}_i$, and a
+hand-measured offset ${}_{\text{mkr}_i}\mathbf{o}_i$ points from that marker's centre to
+the grip. Each marker independently predicts the grip position:
+
+$$
+{}_{\text{cam}}\mathbf{g}_i = \mathbf{R}_i \cdot {}_{\text{mkr}_i}\mathbf{o}_i + \mathbf{t}_i
+$$
+
+and the predictions are combined by a weighted mean:
+
+$$
+{}_{\text{cam}}\mathbf{g} = \frac{\sum_{i \in V} w_i\, {}_{\text{cam}}\mathbf{g}_i}{\sum_{i \in V} w_i}
+\qquad w_i = \text{projected pixel area of marker } i
+$$
+
+(The original code used equal weights, $w_i = 1$; pixel-area weighting was added later on
+the reasoning that a marker appearing larger has proportionally more precise corners. The
+`SETUP:...,equal` command restores equal weighting — that is how the old setup is
+reconstructed for comparison.)
+
+Three structural weaknesses, all of which §6.1 removes:
+
+1. **Each solve is weakly constrained** — 8 measurements, 6 unknowns, and the four points
+   are coplanar, so depth rests on sub-pixel size changes of one small square.
+2. **The lever arm amplifies rotation error.** Each $\mathbf{R}_i$ is uncertain, and that
+   uncertainty is multiplied by the offset length $\|\mathbf{o}_i\|$ before reaching the
+   grip — a marker 12 cm from the grip converts a 1° rotation error into ~2 mm of
+   position error.
+3. **Disagreement is averaged, not resolved.** Physically impossible disagreement between
+   markers (they are rigidly joined, so they *cannot* truly disagree) is smoothed after
+   the fact rather than used as evidence during the solve.
+
+### 6.3 Where the board geometry comes from
+
+`calibrate_board.py` never uses `MARKER_OFFSETS` — it measures the layout directly, so
+the result stays valid even if a hand-measured offset is wrong. In every frame where two
+markers $i$ and $j$ are both visible, each is solved independently and combined so that
+the camera cancels out:
+
+$$
+\mathbf{R}_{ij} = \mathbf{R}_i^\top \mathbf{R}_j
+\qquad
+\mathbf{t}_{ij} = \mathbf{R}_i^\top (\mathbf{t}_j - \mathbf{t}_i)
+$$
+
+$(\mathbf{R}_{ij}, \mathbf{t}_{ij})$ is a fact about the device alone. Samples are
+rejected if the fit is poor or the mirrored tilt fits nearly as well, then ≥ 30 surviving
+samples per pair are averaged with outlier trimming (`pose_averaging.py`).
+
+Markers that never appear together (front and back cannot face one camera at once) are
+linked by **composing** through a shared neighbour:
+
+$$
+\mathbf{R}_{ik} = \mathbf{R}_{ij}\mathbf{R}_{jk}
+\qquad
+\mathbf{t}_{ik} = \mathbf{R}_{ij}\mathbf{t}_{jk} + \mathbf{t}_{ij}
+$$
+
+Walking outward from the reference marker this way puts every marker in one common frame.
+
+**Self-check before saving:** each marker independently predicts the grip point via its
+own offset, ${}_{\text{board}}\mathbf{g}_i = \mathbf{R}^{b}_i \mathbf{o}_i + \mathbf{t}^{b}_i$.
+All predictions should land on the same physical spot; the script prints each one's
+distance from their mean and flags any beyond 5 mm — a disagreement means either the
+solved geometry or that hand-measured offset is wrong.
 
 ---
 
 ## 7. World-frame transformation — reporting position relative to a fixed origin
 
-The centroid above is in the **camera frame** — useless to the game, which wants positions relative to the patient's starting pose. So at session start we **lock** the world origin.
+The grip point above is in the **camera frame** — useless to the game, which wants
+positions relative to a fixed reference. So the tracker **locks** a world origin.
 
-**At lock time** (after `ORIGIN_LOCK_FRAMES` of stable detections):
-
-- Save the first detected marker's pose: $\mathbf{R}_0, \mathbf{t}_0$.
-- Compute and save the world-origin point in camera frame:
+**At lock time**, two quantities are saved, both expressed in the camera frame:
 
 $$
-{}_{\text{cam}}\mathbf{c}_0 = \mathbf{R}_0 \cdot {}_{\text{mkr}_0}\mathbf{o}_0 + \mathbf{t}_0
+\mathbf{R}_{\text{lock}} \;=\; \text{the device's orientation at lock}
+\qquad
+{}_{\text{cam}}\mathbf{g}_{\text{lock}} \;=\; \text{the grip point at lock}
 $$
 
-This is the skateboard centre's position in camera frame *at the moment we locked*.
+In rigid-body mode both come straight from the board pose
+($\mathbf{R}_{\text{lock}} = \mathbf{R}$, ${}_{\text{cam}}\mathbf{g}_{\text{lock}} = \mathbf{R}\,{}_{\text{board}}\mathbf{g} + \mathbf{t}$),
+so the axes belong to the **device as a whole** — not to whichever marker happened to be
+seen first, which was the caveat of the per-marker version.
 
-**Every subsequent frame:** compute the displacement of the current centroid from the locked one, in camera frame:
-
-$$
-{}_{\text{cam}}\mathbf{d} = {}_{\text{cam}}\mathbf{c}_0 - {}_{\text{cam}}\mathbf{c}
-$$
-
-Then rotate that displacement into the world frame (the locked marker's local frame), by multiplying with $\mathbf{R}_0^\top$:
+**Every subsequent frame**, the displacement from the locked point is rotated into the
+locked frame:
 
 $$
-{}_{\text{world}}\mathbf{p} = \mathbf{R}_0^\top \cdot {}_{\text{cam}}\mathbf{d}
+{}_{\text{world}}\mathbf{p} = \mathbf{R}_{\text{lock}}^\top \left( {}_{\text{cam}}\mathbf{g}_{\text{lock}} - {}_{\text{cam}}\mathbf{g} \right)
 $$
 
-This is the reported 3D position: how far and in what direction the skateboard centre has moved since lock time, expressed in axes aligned with the locked marker.
+That is the 3D position streamed to Godot: how far, and in what direction, the grip has
+moved since lock time.
 
-**Caveat:** because $\mathbf{R}_0$ is one marker's local frame (not the rig as a whole), the world axes here depend on which marker happened to be detected first at lock time. A multi-marker `aruco.Board` would replace this with a consistent rig frame derived from CAD.
+**Locking is validated, not taken from one frame.** The lock only commits after
+`ORIGIN_LOCK_FRAMES` = 10 consecutive frames in which the same marker set is detected and
+mean corner motion stays below `ORIGIN_STABLE_PX` = 2 px (in dual-camera mode the gate is
+pose-space instead: translation and rotation deltas below `origin_stable_m` /
+`origin_stable_rad`). This prevents anchoring the entire session to a single noisy
+detection.
+
+**The lock persists across restarts.** $(\mathbf{R}_{\text{lock}}, {}_{\text{cam}}\mathbf{g}_{\text{lock}})$
+are written to `origin_lock.json` and reloaded on startup. Because they are stored **in the
+camera frame**, they stay valid as long as the camera does not move — which is what makes
+sessions (and patients, on an identically-mounted rig) comparable to each other. Two
+consequences worth knowing:
+
+- Moving the camera silently invalidates the file: it still loads, but no longer describes
+  reality. Delete it and re-lock (the installer's origin ritual sends `RELOCK`).
+- Because the lock is camera-frame, data recorded under *different* locks can still be
+  reconciled afterwards — invert the transform to recover camera-frame coordinates:
+
+$$
+{}_{\text{cam}}\mathbf{g} = {}_{\text{cam}}\mathbf{g}_{\text{lock}} - \mathbf{R}_{\text{lock}}\, {}_{\text{world}}\mathbf{p}
+$$
+
+This is why every logged data file stamps the contents of `origin_lock.json` in its header
+(see [v1_plan.md §5](v1_plan.md)) — the stamp is the undo key.
 
 ---
 

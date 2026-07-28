@@ -1,5 +1,12 @@
 # The Rigid-Body Tracking Math — Old vs New
 
+> **Scope.** This document is the *argument*: why the joint solve beats per-marker
+> averaging, derived from constraint counts and failure modes. For the full pipeline
+> in execution order (camera model → distortion → detection → refinement → pose →
+> origin lock → filters) see [tracker-math.md](tracker-math.md). Measured outcome:
+> median device wobble 3.27 mm → 0.78 mm across 43 workspace positions
+> (`tools/analyze_jitter.py`).
+
 *Written 2026-07-07. Companion to the code in `pyscripts/board.py`, `pyscripts/calibrate_board.py`, and `pyscripts/main.py`. Math renders in Obsidian's preview mode.*
 
 This note explains, from the ground up, what the old per-marker tracking algorithm did, what the new rigid-body (joint) algorithm does, and mathematically why the new one has far less depth (Z) jitter.
