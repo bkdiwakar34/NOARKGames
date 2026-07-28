@@ -123,8 +123,25 @@ Misses carry no movement time and update nothing (known limitation — see todo.
 
 $$\mathrm{MT} = t_{\mathrm{caught}} - t_{\mathrm{spawn}} - t_{\mathrm{hold}}$$
 
-Times from `Time.get_ticks_msec()`. Subtracting the catch-confirmation hold $t_{\mathrm{hold}}$
-isolates the reach itself.
+Times from `Time.get_ticks_msec()`; $t_{\mathrm{caught}}$ is the instant the target
+disappears, i.e. when the cursor has stayed inside it for an unbroken
+$t_{\mathrm{hold}}$.
+
+**MT is acquisition time, not time-to-first-arrival** (deliberate, confirmed
+2026-07-28). Only the final successful hold is subtracted, so if the patient
+touches the target and overshoots, the failed hold and the return trip stay
+inside MT. Example with $t_{\mathrm{hold}} = 1\,$s: touch at 0.8 s, overshoot,
+re-enter at 1.5 s, hold completes at 2.5 s → MT = 1.5 s, not 0.8 s.
+
+Two consequences when reporting:
+
+- $a$ and $b$ are fitted to *acquisition* time, so $b$ is not the classical
+  Fitts "motor cost per bit" (that is defined on first-arrival time). Call it an
+  acquisition-time slope. MT also starts at spawn, so reaction time sits inside
+  $a$ alongside movement initiation.
+- Overshoot inconsistency enters $\sigma_k$, and $\sigma_k$ sets the deadline via
+  $z(r)\sigma_k$ — so a patient's difficulty depends partly on their steadiness,
+  not on speed alone. Intended, but worth stating.
 
 ### 4.7 Reachability constraint
 
