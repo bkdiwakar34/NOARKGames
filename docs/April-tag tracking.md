@@ -454,7 +454,77 @@ They are what `camera_calib.toml` holds, and §2 is how they are obtained. Note 
 cannot be measured separately — the same chessboard fit produces all eight at once, because
 each one's best value depends on the others.
 
-### 1.2 Where this goes next
+**In matrix form.** $\mathbf{K}$ still applies, but only to the *warped* coordinates —
+the distortion sits between the perspective division and the matrix:
+
+$$
+\begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
+= \mathbf{K} \begin{bmatrix} x_d \\ y_d \\ 1 \end{bmatrix},
+\qquad
+\begin{bmatrix} x_d \\ y_d \end{bmatrix} = \mathcal{D}\!\left( \frac{X}{Z}, \frac{Y}{Z} \right)
+$$
+
+where $\mathcal{D}$ is the nonlinear warp defined by the four equations above. This is why
+the whole projection cannot collapse into one matrix: $\mathcal{D}$ is not linear, so no
+$3\times3$ matrix can absorb it. Matrix, then warp, then matrix again — that is the honest
+structure.
+
+### 1.2 The inverse: from a pixel back to a 3D ray
+
+Reversing the chain runs the same four steps backwards, and the linear part inverts in
+closed form:
+
+$$
+\text{1. undo } \mathbf{K}: \qquad
+\begin{bmatrix} x_d \\ y_d \\ 1 \end{bmatrix} = \mathbf{K}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix},
+\qquad
+\mathbf{K}^{-1} =
+\begin{bmatrix}
+\frac{1}{f_x} & 0 & -\frac{c_x}{f_x} \\[4pt]
+0 & \frac{1}{f_y} & -\frac{c_y}{f_y} \\[4pt]
+0 & 0 & 1
+\end{bmatrix}
+$$
+
+$$
+\text{2. distorted radius:} \qquad \theta_d = \sqrt{x_d^2 + y_d^2}
+$$
+
+$$
+\text{3. undo the polynomial:} \qquad \text{solve } \; \theta_d = \theta\left(1 + k_1\theta^2 + k_2\theta^4 + k_3\theta^6 + k_4\theta^8\right) \; \text{ for } \theta
+$$
+
+$$
+\text{4. back to a direction:} \qquad r = \tan\theta, \qquad
+\begin{bmatrix} a \\ b \end{bmatrix} = \frac{r}{\theta_d} \begin{bmatrix} x_d \\ y_d \end{bmatrix}
+$$
+
+Step 3 is the only awkward one: that polynomial has no closed-form inverse, so OpenCV
+solves it numerically (a few Newton iterations per point). Everything else is exact
+arithmetic.
+
+**And here is the crux.** What comes out is a *direction*, not a position:
+
+$$
+\boxed{\;
+\begin{bmatrix} X \\ Y \\ Z \end{bmatrix} = \lambda \begin{bmatrix} a \\ b \\ 1 \end{bmatrix},
+\qquad \lambda > 0 \text{ unknown}
+\;}
+$$
+
+The pixel $(u,v)$ tells you the *ray* along which the 3D point must lie — but every point on
+that ray produces the identical pixel. The scale $\lambda$ (equivalently, the depth $Z$) was
+destroyed by the perspective division and cannot be recovered from one pixel by any amount
+of algebra.
+
+That is precisely why there is no single "inverse matrix equation" mapping $(u,v)$ to
+$(X,Y,Z)$, and why the rest of this document exists. Depth is recovered only by adding
+outside information: **four corners of a marker whose physical size is known** (§6), or
+**many corners of a device whose geometry is known** (§7). Given $n$ such points, the
+unknown $\lambda_i$ are pinned down because the recovered points must also satisfy the known
+rigid geometry — that constraint is what turns $n$ rays into one pose.
+
+### 1.3 Where this goes next
 
 We now have an accurate description of how this lens bends light.
 There are two ways to use it, and the choice matters for everything downstream:
