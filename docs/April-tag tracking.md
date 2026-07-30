@@ -3,7 +3,7 @@
 End-to-end derivation of how a raw fisheye camera frame becomes a 3D position broadcast to Godot. Walks every stage of `main.py` in execution order, with the equations OpenCV is solving under each function call.
 
 > **Scope.** This is the pipeline reference — every stage, in order, as deployed
-> (§6 and §7 updated 2026-07-28 for the joint rigid-body solve and the validated,
+> (§7 and §8 updated 2026-07-28 for the joint rigid-body solve and the validated,
 > persistent origin lock). For the focused *why the new method beats the old* argument
 > — constraint counts, failure modes, the depth-precision derivation — see
 > [rigid_body_math.md](rigid_body_math.md). For the measured result, see
@@ -26,8 +26,8 @@ performed **once, offline**, before any tracking happens:
 
 | Prerequisite | Produces | Covered in |
 |---|---|---|
-| Camera calibration (`calibrate_camera.py`) | $f_x, f_y, c_x, c_y$ and $k_1 \ldots k_4$ → `camera_calib.toml` | §0.7, §1 |
-| Board calibration (`calibrate_board.py`) | where each marker sits on the device → `board_geometry.json` | §6.3 |
+| Camera calibration (`calibrate_camera.py`) | $f_x, f_y, c_x, c_y$ and $k_1 \ldots k_4$ → `camera_calib.toml` | §2 |
+| Board calibration (`calibrate_board.py`) | where each marker sits on the device → `board_geometry.json` | §7.3 |
 
 Both invert the same logic as tracking, but with the unknowns swapped: photograph something
 whose 3D geometry is *known* (a chessboard of measured squares; markers on a rigid device),
@@ -35,22 +35,24 @@ and solve for the constants instead of the pose. Get these wrong and every stage
 inherits the error silently — the pipeline will still run and still produce plausible
 numbers.
 
-With those in hand, the per-frame pipeline follows the arc above:
+The order below reflects that dependency. Sections 0 and 1 build the forward model and
+state what its parameters *are*; §2 measures them; from §3 onward the model is used:
 
 | § | Stage | What it contributes |
 |---|---|---|
 | 0 | Pinhole model | The forward model in its simplest form: 3D point → pixel, via four constants. Exact near the image centre. |
-| 1 | Lens distortion | Our 160° lens does not obey the simple model at the edges. Measure how it actually behaves. |
-| 2 | Undistortion | Undo that deviation once per frame, so every later stage can use §0's simple equations and ignore the lens. |
-| 3 | Marker detection | Find the black-and-white squares in the image and read their IDs — the raw evidence. |
-| 4 | Corner refinement | Locate each corner to sub-pixel precision. Everything downstream inherits this accuracy. |
-| 5 | Pose estimation | **The inversion.** Search for the pose whose projected corners best match the detected ones. |
-| 6 | Combining markers | Fuse all visible markers into one device pose, using the calibrated board geometry. |
-| 7 | World frame | Re-express that pose relative to a fixed, locked origin, so numbers mean the same thing across sessions. |
-| 8 | Filtering | Smooth the frame-to-frame result before it drives the game. |
+| 1 | Lens distortion | Completes the forward model: our 160° lens deviates at the edges, and four more coefficients describe how. |
+| 2 | **Calibration** | Measures all of those parameters for this specific camera. Everything above is unusable until this is done. |
+| 3 | Undistortion | Undo the lens deviation once per frame, so every later stage can use §0's simple equations and ignore the lens. |
+| 4 | Marker detection | Find the black-and-white squares in the image and read their IDs — the raw evidence. |
+| 5 | Corner refinement | Locate each corner to sub-pixel precision. Everything downstream inherits this accuracy. |
+| 6 | Pose estimation | **The inversion.** Search for the pose whose projected corners best match the detected ones. |
+| 7 | Combining markers | Fuse all visible markers into one device pose, using the calibrated board geometry. |
+| 8 | World frame | Re-express that pose relative to a fixed, locked origin, so numbers mean the same thing across sessions. |
+| 9 | Filtering | Smooth the frame-to-frame result before it drives the game. |
 
 Two threads run through all of it. **Accuracy compounds**: a fraction of a pixel of corner
-error in §4 becomes millimetres of position error by §7. And **each stage exists to let the
+error in §5 becomes millimetres of position error by §8. And **each stage exists to let the
 next one stay simple** — undistortion is done so pose estimation can pretend the lens is
 perfect; board calibration is done so pose estimation can treat many markers as one object.
 
@@ -85,12 +87,15 @@ so depth is genuinely ambiguous. What the tracker does instead is *search*: gues
 project it forward with the equations below, compare against the pixels actually detected,
 and adjust. The forward model is the thing being run inside that loop, thousands of times
 a second. Get it right and everything downstream follows; get it wrong and every pose is
-wrong in the same way. The search itself is §5.
+wrong in the same way. The search itself is §6.
 
 The chain in this section runs: coordinate frame → the projection itself → converting to
 pixels → shifting the origin to the image corner → the same thing in matrix notation →
-where the four constants come from → what the model assumes, and why a 160° lens breaks
-those assumptions (leading into §1).
+what the model assumes, and why a 160° lens breaks those assumptions (leading into §1).
+
+Throughout this section the four constants $f_x, f_y, c_x, c_y$ are treated as known.
+Where they actually come from is §2 — deferred until §1 has introduced the rest of the
+parameters, since calibration measures them all in one fit.
 
 ### 0.1 The camera frame
 
@@ -234,7 +239,7 @@ $$
 
 This section repackages them as one matrix multiplication. **No new mathematics happens
 here** — it is the same two equations. The point is that the packaged form composes with
-the other transforms in the pipeline (§5, §7) and is what OpenCV expects as an argument.
+the other transforms in the pipeline (§6, §8) and is what OpenCV expects as an argument.
 
 **The intrinsic matrix** collects the four camera constants:
 
@@ -292,7 +297,7 @@ This is worth pausing on: **that final division is the perspective effect itself
 matrix multiplication is entirely linear — it cannot shrink distant objects. All the
 depth-dependence of §0.2 lives in that one normalising division, which is why the model
 is called *projective* rather than linear, and why $Z$ is the awkward unknown when the
-problem is inverted (§5).
+problem is inverted (§6).
 
 In code, either form works — dividing first, or dividing after:
 
@@ -306,31 +311,7 @@ projected = K @ np.array([X, Y, Z])
 u, v = projected[0] / projected[2], projected[1] / projected[2]
 ```
 
-### 0.7 The intrinsics, and where the four numbers come from
-
-The complete forward model needs exactly four constants: $(f_x, f_y, c_x, c_y)$. Together
-they are called the **intrinsics** — properties of *this* lens-and-sensor pair, fixed for
-the life of the camera and independent of the scene in front of it.
-
-They are not looked up in a datasheet; they are **measured**, once per camera unit, by
-`calibrate_camera.py`. The procedure inverts the logic of everything above: photograph a
-chessboard whose square size is known, so the true 3D geometry is not in doubt, then find
-the intrinsics that make the projected corners land closest to the corners actually
-detected. Roughly:
-
-$$
-(f_x, f_y, c_x, c_y, \mathbf{D}) \;=\; \arg\min \sum_{\text{all corners}} \left\| \text{detected} - \text{projected} \right\|^2
-$$
-
-The residual of that fit is the **reprojection error** reported at the end of calibration —
-0.63 px for our camera. It is the single best summary of calibration quality: under ~1 px
-is good, and a much larger value means the intrinsics are not describing this camera well,
-so every pose computed later inherits the error.
-
-That same fit also produces the distortion coefficients $\mathbf{D}$, which is what the
-next section is about.
-
-### 0.8 What the model assumes — and why a 160° lens breaks it
+### 0.7 What the model assumes — and why a 160° lens breaks it
 
 The model above assumes:
 
@@ -365,7 +346,7 @@ downstream.
 
 ## 1. Lens distortion — the fisheye model
 
-§0.8 introduced a second rung: the pinhole model puts a ray at $r = f\tan\theta$, while a
+§0.7 introduced a second rung: the pinhole model puts a ray at $r = f\tan\theta$, while a
 fisheye puts it at roughly $r = f\theta$. That word **roughly** is what this section is
 about. $r = f\theta$ describes an *ideal* fisheye; no physical lens follows it exactly.
 So there are three rungs, each closer to the truth:
@@ -423,7 +404,59 @@ The polynomial in $\theta$ models how aggressively a fisheye lens bends rays as 
 
 **Why the standard pinhole model fails at high FOV:** Brown–Conrady writes distortion as a polynomial in $r$ (radial distance in image space). At fisheye angles, the relationship between $\theta$ (incoming ray angle) and $r$ becomes very non-linear, and a low-order polynomial can't fit both centre and edge accurately at the same time. Kannala–Brandt parametrises directly in $\theta$, which stays well-behaved up to nearly $\pi/2$.
 
-**Where this goes next.** We now have an accurate description of how this lens bends light.
+### 1.1 The complete forward model
+
+§0 ended with the projection written as a single matrix multiply by $\mathbf{K}$. That form
+is now incomplete: $\mathbf{K}$ contains only the pinhole constants, and a real lens applies
+a warp that no $3 \times 3$ matrix can express. The full model has three stages, and only
+the last is linear:
+
+$$
+\underbrace{(X, Y, Z) \;\longrightarrow\; \left(\tfrac{X}{Z}, \tfrac{Y}{Z}\right)}_{\text{1. perspective division}}
+\;\longrightarrow\;
+\underbrace{(x_d, y_d)}_{\text{2. lens warp}}
+\;\longrightarrow\;
+\underbrace{(u, v)}_{\text{3. } \mathbf{K}}
+$$
+
+Written out in full, the projection of a 3D point in the camera frame is now:
+
+$$
+a = \frac{X}{Z}, \qquad b = \frac{Y}{Z}, \qquad r = \sqrt{a^2 + b^2}, \qquad \theta = \arctan(r)
+$$
+
+$$
+\theta_d = \theta\left(1 + k_1\theta^2 + k_2\theta^4 + k_3\theta^6 + k_4\theta^8\right)
+$$
+
+$$
+x_d = \frac{\theta_d}{r}\, a, \qquad y_d = \frac{\theta_d}{r}\, b
+$$
+
+$$
+\boxed{\;u = f_x\, x_d + c_x, \qquad v = f_y\, y_d + c_y\;}
+$$
+
+Compare with §0's version, $u = f_x \cdot (X/Z) + c_x$: the *only* change is that the raw
+ratio $X/Z$ has been replaced by the warped $x_d$. Set all $k_i = 0$ and $\theta_d = \theta$,
+which for small angles gives $x_d \to a$ and recovers §0 exactly. So the pinhole model is
+not wrong, it is the zero-distortion special case.
+
+**The full parameter set is therefore eight numbers:**
+
+$$
+\underbrace{f_x,\; f_y,\; c_x,\; c_y}_{\mathbf{K} \text{ — intrinsics}}
+\qquad
+\underbrace{k_1,\; k_2,\; k_3,\; k_4}_{\mathbf{D} \text{ — distortion}}
+$$
+
+They are what `camera_calib.toml` holds, and §2 is how they are obtained. Note that they
+cannot be measured separately — the same chessboard fit produces all eight at once, because
+each one's best value depends on the others.
+
+### 1.2 Where this goes next
+
+We now have an accurate description of how this lens bends light.
 There are two ways to use it, and the choice matters for everything downstream:
 
 1. **Keep the raw image and carry the distortion model through every later calculation.**
@@ -433,12 +466,68 @@ There are two ways to use it, and the choice matters for everything downstream:
    everything else.** Then §0's simple equations apply unchanged for the rest of the
    pipeline.
 
-`main.py` does the second, which is what §2 describes. That is why every later `solvePnP`
+`main.py` does the second, which is what §3 describes. That is why every later `solvePnP`
 call passes zeros for the distortion coefficients — by then, the distortion is already gone.
 
 ---
 
-## 2. Image undistortion — straightening the fisheye
+## 2. Calibration — measuring the eight parameters
+
+The forward model is now complete but unusable: it has eight unknown constants that belong
+to one physical camera unit. Calibration determines them, once, offline
+(`calibrate_camera.py`).
+
+**The idea.** Tracking solves for a pose with the camera parameters known. Calibration does
+the reverse — it uses a target whose 3D geometry is *known beyond doubt* and solves for the
+parameters instead. A printed chessboard works because its corners lie on an exact grid at a
+measured square size (30 mm here), so their positions in the board's own frame are known
+without measurement error.
+
+**The fit.** Photograph the board in ~20 orientations. Each image contributes its own unknown
+board pose $(\mathbf{R}_j, \mathbf{t}_j)$, and all images share the same camera parameters.
+Everything is estimated together by minimising reprojection error over the whole set:
+
+$$
+\min_{\substack{f_x, f_y, c_x, c_y,\; \mathbf{D} \\ \{\mathbf{R}_j, \mathbf{t}_j\}}}
+\;\sum_{j=1}^{N_{\text{images}}} \;\sum_{i=1}^{N_{\text{corners}}}
+\left\| \; \mathbf{u}_{ij} \;-\; \pi\!\left(\mathbf{X}_i; \; \mathbf{R}_j, \mathbf{t}_j, \; \mathbf{K}, \mathbf{D}\right) \right\|^2
+$$
+
+where $\mathbf{X}_i$ are the known board corners, $\mathbf{u}_{ij}$ the corners actually
+detected in image $j$, and $\pi(\cdot)$ is the complete forward model of §1.1. In words:
+**find the camera parameters and board poses that best explain every corner in every image
+simultaneously.**
+
+This is why the parameters cannot be measured one at a time. A slightly wrong $c_x$ can be
+partly compensated by a different $k_1$, so their best values are coupled and only a joint
+fit resolves them.
+
+**Why many orientations matter.** Images that all show the board flat and centred constrain
+the distortion coefficients poorly — those coefficients only reveal themselves through
+corners far off-axis. `calibrate_camera.py` auto-captures when the board is held steady, and
+the board should be worked across the whole field of view, including tilted and near the
+edges, or the fit will be confident and wrong in exactly the region §1's table showed to be
+most extreme.
+
+**Reading the result.** The residual of that minimisation is the **reprojection error**
+printed at the end — 0.63 px for our camera. It is the average distance between where a
+corner was seen and where the fitted model predicts it. Under ~1 px is good. A larger value
+means the model does not describe this camera well, and every pose computed downstream
+inherits the discrepancy.
+
+Two sanity checks worth running on the numbers themselves:
+
+- $c_x, c_y$ should sit near the image centre (640, 400 for a 1280×800 sensor). Ours are
+  (654, 349) — a plausible manufacturing offset. Far from centre suggests a bad fit.
+- $f_x \approx f_y$, since the pixels are square (§0.3). Ours differ by 0.3 %.
+
+The output is written to `camera_calib.toml` and is valid only for **that camera with that
+lens at that resolution**. Change any of the three and it must be redone — which is why the
+file is per-machine and never shared between kits (see `pyscripts/README.md`).
+
+---
+
+## 3. Image undistortion — straightening the fisheye
 
 `main.py` builds an undistortion map once at startup:
 
@@ -505,7 +594,7 @@ where $W(t)$ is a cubic kernel like $W(t) = \frac{3}{2}|t|^3 - \frac{5}{2}|t|^2 
 
 ---
 
-## 3. Marker detection — pixels to corners
+## 4. Marker detection — pixels to corners
 
 `detectMarkers(undistorted_frame)` runs an 8-stage pipeline internally. Each stage is decision-based, not differentiable math, so the equations here are simpler.
 
@@ -543,7 +632,7 @@ $$
 
 ---
 
-## 4. Sub-pixel corner refinement
+## 5. Sub-pixel corner refinement
 
 Stage 3 gives corners with $\pm 1$ pixel accuracy. The refinement step pushes that to $\pm 0.1$–$0.3$ pixels.
 
@@ -569,7 +658,7 @@ The resulting 4 refined corners are accurate to sub-pixel precision because the 
 
 ---
 
-## 5. Pose estimation — solving for marker pose from 4 corners
+## 6. Pose estimation — solving for marker pose from 4 corners
 
 `cv2.solvePnP(obj_points, img_points, K, np.zeros(5), flags=SOLVEPNP_IPPE_SQUARE)`
 
@@ -600,20 +689,20 @@ Output: $\mathbf{R}$ (rotation matrix, often stored as Rodrigues vector $\mathbf
 
 ---
 
-## 6. Combining markers into one position
+## 7. Combining markers into one position
 
 The device carries markers on several faces (IDs 12 front, 14 front-top, 20/24 back
 sides, plus 4, 8, 28, 32 on the reprint); typically 1–3 are visible per frame. There
 are two ways to turn those detections into one grip position. **The joint rigid-body
-solve (§6.1) is what runs today**; the per-marker average (§6.2) is the superseded
+solve (§7.1) is what runs today**; the per-marker average (§7.2) is the superseded
 method, kept because it is the fallback when board geometry is missing, and because
 it is the baseline the comparison in [rigid_body_math.md](rigid_body_math.md) measures
 against.
 
-### 6.1 Joint rigid-body solve — deployed
+### 7.1 Joint rigid-body solve — deployed
 
 The markers are glued to one rigid object, so their poses relative to each other are
-physical constants. `calibrate_board.py` measures them once (§6.3) and stores, for
+physical constants. `calibrate_board.py` measures them once (§7.3) and stores, for
 each marker $i$, its fixed pose in the **board frame**:
 
 $$
@@ -664,7 +753,7 @@ Measured on 43 workspace positions: median device wobble at rest fell from 3.27 
 **Degradation:** with only one marker visible the problem necessarily reduces to
 single-marker quality — the geometry cannot supply constraints the image doesn't have.
 
-### 6.2 Per-marker average — superseded
+### 7.2 Per-marker average — superseded
 
 For each visible marker $i$, `solvePnP` gives $\mathbf{R}_i, \mathbf{t}_i$, and a
 hand-measured offset ${}_{\text{mkr}_i}\mathbf{o}_i$ points from that marker's centre to
@@ -686,7 +775,7 @@ the reasoning that a marker appearing larger has proportionally more precise cor
 `SETUP:...,equal` command restores equal weighting — that is how the old setup is
 reconstructed for comparison.)
 
-Three structural weaknesses, all of which §6.1 removes:
+Three structural weaknesses, all of which §7.1 removes:
 
 1. **Each solve is weakly constrained** — 8 measurements, 6 unknowns, and the four points
    are coplanar, so depth rests on sub-pixel size changes of one small square.
@@ -698,7 +787,7 @@ Three structural weaknesses, all of which §6.1 removes:
    markers (they are rigidly joined, so they *cannot* truly disagree) is smoothed after
    the fact rather than used as evidence during the solve.
 
-### 6.3 Where the board geometry comes from
+### 7.3 Where the board geometry comes from
 
 `calibrate_board.py` never uses `MARKER_OFFSETS` — it measures the layout directly, so
 the result stays valid even if a hand-measured offset is wrong. In every frame where two
@@ -734,7 +823,7 @@ solved geometry or that hand-measured offset is wrong.
 
 ---
 
-## 7. World-frame transformation — reporting position relative to a fixed origin
+## 8. World-frame transformation — reporting position relative to a fixed origin
 
 The grip point above is in the **camera frame** — useless to the game, which wants
 positions relative to a fixed reference. So the tracker **locks** a world origin.
@@ -785,15 +874,15 @@ $$
 $$
 
 This is why every logged data file stamps the contents of `origin_lock.json` in its header
-(see [v1_plan.md §5](v1_plan.md)) — the stamp is the undo key.
+(see [v1_plan.md §6](v1_plan.md)) — the stamp is the undo key.
 
 ---
 
-## 8. Smoothing filters — three choices
+## 9. Smoothing filters — three choices
 
 The world-frame position $\mathbf{p}_t$ above is noisy frame-to-frame. The configurable filter smooths it.
 
-### 8.1 EMA — Exponential Moving Average
+### 9.1 EMA — Exponential Moving Average
 
 A first-order low-pass:
 
@@ -807,7 +896,7 @@ $\alpha \in (0, 1]$ controls responsiveness:
 
 Default: $\alpha = 0.4$. Noise reduction factor at steady state: $\sqrt{\alpha / (2 - \alpha)} \approx 0.5$ (about 2× quieter).
 
-### 8.2 Kalman — constant-velocity model
+### 9.2 Kalman — constant-velocity model
 
 State vector at time $t$:
 
@@ -847,7 +936,7 @@ Output position: the first 3 components of $\mathbf{s}_t$.
 
 **Why this overshoots at stops:** the predict step assumes velocity persists. When the hand stops abruptly, $\mathbf{s}^-$ contains a non-zero velocity for several frames before the update step drives it to zero, producing position values that continue past where the hand actually is.
 
-### 8.3 One Euro filter — speed-adaptive low-pass
+### 9.3 One Euro filter — speed-adaptive low-pass
 
 Two EMAs stacked: one for velocity estimation, one for position, where the position EMA's $\alpha$ varies with the velocity estimate.
 
@@ -893,13 +982,13 @@ Parameters:
 - $\beta$ (`one_euro_beta`): how fast the cutoff opens with speed. For input in metres, $\beta \approx 5$–$10$ is reasonable.
 - $f_{d\text{cutoff}}$ (`one_euro_d_cutoff`): cutoff for the velocity estimate itself. Higher = the filter reacts faster to stops.
 
-### 8.4 NoOp
+### 9.4 NoOp
 
 Pass-through: $\mathbf{y}_t = \mathbf{p}_t$. Useful for measuring the raw noise floor at the cursor.
 
 ---
 
-## 9. UDP packet — sending to Godot
+## 10. UDP packet — sending to Godot
 
 The filtered 3D position is packed into a UDP datagram:
 
@@ -913,7 +1002,7 @@ The packet is sent on the bound socket to whatever address last sent us a messag
 
 ---
 
-## 10. Godot side — world position to screen pixels
+## 11. Godot side — world position to screen pixels
 
 `UDPReceiver` (Godot) reads the packet and extracts `raw_x` and `raw_z` (the X and Z components of the world-frame position from Step 7 — the locked marker's local X and Z axes).
 
