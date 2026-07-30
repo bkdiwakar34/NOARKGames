@@ -456,7 +456,7 @@ each one's best value depends on the others.
 
 **The whole thing as one equation.** The radial warp is a scaling of both coordinates by the
 same factor $\theta_d / r$, so it can be written as a diagonal matrix and placed directly
-next to $\mathbf{K}$ — all eight parameters visible in one line:
+next to $\mathbf{K}$:
 
 $$
 \begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
@@ -479,12 +479,30 @@ r = \sqrt{\left(\tfrac{X}{Z}\right)^2 + \left(\tfrac{Y}{Z}\right)^2},
 \theta_d = \theta\left(1 + k_1\theta^2 + k_2\theta^4 + k_3\theta^6 + k_4\theta^8\right)
 $$
 
+**Where the $k$ coefficients actually sit.** They are inside $\theta_d$, so they never appear
+in the matrix as written — the whole distortion model is compressed into the single entry
+$\theta_d / r$. Substituting the definitions back in, that one entry is:
+
+$$
+\frac{\theta_d}{r}
+=
+\frac{\arctan r \,\left(1 + k_1 \arctan^2 r + k_2 \arctan^4 r + k_3 \arctan^6 r + k_4 \arctan^8 r\right)}{r}
+$$
+
+which is why it is normally abbreviated. Written this way the eight parameters are all on
+the page: $f_x, f_y, c_x, c_y$ in $\mathbf{K}$, and $k_1 \ldots k_4$ in that entry. Note
+they enter *completely differently* — the intrinsics are plain multipliers and offsets, while
+the $k$'s sit inside a nonlinear function of the point's own radius. Only the intrinsics can
+live in a constant matrix.
+
 $\mathbf{K}$ is constant. $\mathbf{S}$ is not — its entries depend on $r$, which depends on
 the point being projected. That is exactly what makes the model nonlinear: you cannot
 multiply $\mathbf{K}\mathbf{S}$ once and reuse the product, because $\mathbf{S}$ is
-different for every point. Set $k_1 \ldots k_4 = 0$ and, for small angles,
-$\theta_d / r \to 1$, so $\mathbf{S} \to \mathbf{I}$ and the equation collapses to §0.6's
-pinhole form.
+different for every point.
+
+Set $k_1 \ldots k_4 = 0$ and the bracket becomes 1, leaving $\theta_d / r = \arctan(r)/r$.
+For small angles $\arctan r \approx r$, so $\mathbf{S} \to \mathbf{I}$ and the equation
+collapses to §0.6's pinhole form.
 
 ### 1.2 The inverse: from a pixel back to a 3D ray
 
