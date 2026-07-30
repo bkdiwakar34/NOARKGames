@@ -454,53 +454,71 @@ They are what `camera_calib.toml` holds, and §2 is how they are obtained. Note 
 cannot be measured separately — the same chessboard fit produces all eight at once, because
 each one's best value depends on the others.
 
-**In matrix form.** $\mathbf{K}$ still applies, but only to the *warped* coordinates —
-the distortion sits between the perspective division and the matrix:
+**The whole thing as one equation.** The radial warp is a scaling of both coordinates by the
+same factor $\theta_d / r$, so it can be written as a diagonal matrix and placed directly
+next to $\mathbf{K}$ — all eight parameters visible in one line:
 
 $$
 \begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
-= \mathbf{K} \begin{bmatrix} x_d \\ y_d \\ 1 \end{bmatrix},
-\qquad
-\begin{bmatrix} x_d \\ y_d \end{bmatrix} = \mathcal{D}\!\left( \frac{X}{Z}, \frac{Y}{Z} \right)
+=
+\underbrace{
+\begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}
+}_{\mathbf{K}}
+\underbrace{
+\begin{bmatrix} \dfrac{\theta_d}{r} & 0 & 0 \\[6pt] 0 & \dfrac{\theta_d}{r} & 0 \\[6pt] 0 & 0 & 1 \end{bmatrix}
+}_{\mathbf{S}(\theta) \;-\; \text{lens warp}}
+\begin{bmatrix} X/Z \\ Y/Z \\ 1 \end{bmatrix}
 $$
 
-where $\mathcal{D}$ is the nonlinear warp defined by the four equations above. This is why
-the whole projection cannot collapse into one matrix: $\mathcal{D}$ is not linear, so no
-$3\times3$ matrix can absorb it. Matrix, then warp, then matrix again — that is the honest
-structure.
+$$
+\text{where} \quad
+r = \sqrt{\left(\tfrac{X}{Z}\right)^2 + \left(\tfrac{Y}{Z}\right)^2},
+\quad
+\theta = \arctan r,
+\quad
+\theta_d = \theta\left(1 + k_1\theta^2 + k_2\theta^4 + k_3\theta^6 + k_4\theta^8\right)
+$$
+
+$\mathbf{K}$ is constant. $\mathbf{S}$ is not — its entries depend on $r$, which depends on
+the point being projected. That is exactly what makes the model nonlinear: you cannot
+multiply $\mathbf{K}\mathbf{S}$ once and reuse the product, because $\mathbf{S}$ is
+different for every point. Set $k_1 \ldots k_4 = 0$ and, for small angles,
+$\theta_d / r \to 1$, so $\mathbf{S} \to \mathbf{I}$ and the equation collapses to §0.6's
+pinhole form.
 
 ### 1.2 The inverse: from a pixel back to a 3D ray
 
-Reversing the chain runs the same four steps backwards, and the linear part inverts in
-closed form:
+Both matrices simply invert, giving the reverse chain in one equation:
 
 $$
-\text{1. undo } \mathbf{K}: \qquad
-\begin{bmatrix} x_d \\ y_d \\ 1 \end{bmatrix} = \mathbf{K}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix},
-\qquad
-\mathbf{K}^{-1} =
+\begin{bmatrix} X \\ Y \\ Z \end{bmatrix}
+= \lambda \;
+\underbrace{
+\begin{bmatrix} \dfrac{\tan\theta}{\theta_d} & 0 & 0 \\[6pt] 0 & \dfrac{\tan\theta}{\theta_d} & 0 \\[6pt] 0 & 0 & 1 \end{bmatrix}
+}_{\mathbf{S}^{-1}(\theta) \;-\; \text{undo the warp}}
+\underbrace{
 \begin{bmatrix}
-\frac{1}{f_x} & 0 & -\frac{c_x}{f_x} \\[4pt]
-0 & \frac{1}{f_y} & -\frac{c_y}{f_y} \\[4pt]
+\dfrac{1}{f_x} & 0 & -\dfrac{c_x}{f_x} \\[6pt]
+0 & \dfrac{1}{f_y} & -\dfrac{c_y}{f_y} \\[6pt]
 0 & 0 & 1
 \end{bmatrix}
+}_{\mathbf{K}^{-1}}
+\begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
 $$
 
-$$
-\text{2. distorted radius:} \qquad \theta_d = \sqrt{x_d^2 + y_d^2}
-$$
+To evaluate it, $\theta$ has to be recovered first, from the two quantities $\mathbf{K}^{-1}$
+produces:
 
 $$
-\text{3. undo the polynomial:} \qquad \text{solve } \; \theta_d = \theta\left(1 + k_1\theta^2 + k_2\theta^4 + k_3\theta^6 + k_4\theta^8\right) \; \text{ for } \theta
+\begin{bmatrix} x_d \\ y_d \\ 1 \end{bmatrix} = \mathbf{K}^{-1}\begin{bmatrix} u \\ v \\ 1 \end{bmatrix},
+\qquad
+\theta_d = \sqrt{x_d^2 + y_d^2},
+\qquad
+\text{then solve } \; \theta_d = \theta\left(1 + k_1\theta^2 + k_2\theta^4 + k_3\theta^6 + k_4\theta^8\right) \; \text{for } \theta
 $$
 
-$$
-\text{4. back to a direction:} \qquad r = \tan\theta, \qquad
-\begin{bmatrix} a \\ b \end{bmatrix} = \frac{r}{\theta_d} \begin{bmatrix} x_d \\ y_d \end{bmatrix}
-$$
-
-Step 3 is the only awkward one: that polynomial has no closed-form inverse, so OpenCV
-solves it numerically (a few Newton iterations per point). Everything else is exact
+That last step is the only awkward one — the polynomial has no closed-form inverse, so
+OpenCV solves it numerically (a few Newton iterations per point). Everything else is exact
 arithmetic.
 
 **And here is the crux.** What comes out is a *direction*, not a position:
