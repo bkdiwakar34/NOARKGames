@@ -173,23 +173,84 @@ The equations above go *forward*: given a 3D point and the intrinsics, find the 
 
 ### 0.7 Matrix form
 
-We bundle the intrinsics into a single $3 \times 3$ matrix:
+Everything so far is two scalar equations:
+
+$$
+u = f_x \cdot \frac{X}{Z} + c_x, \qquad v = f_y \cdot \frac{Y}{Z} + c_y
+$$
+
+This section repackages them as one matrix multiplication. **No new mathematics happens
+here** — it is the same two equations. The point is that the packaged form composes with
+the other transforms in the pipeline (§5, §7) and is what OpenCV expects as an argument.
+
+**The intrinsic matrix** collects the four camera constants:
 
 $$
 \mathbf{K} = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}
 $$
 
-and write the projection compactly using **homogeneous coordinates**:
+Note what this separates: $\mathbf{K}$ is entirely *the camera* — it does not change when
+the scene moves. The point being photographed is the other operand.
+
+**Why the extra 1.** Multiply $\mathbf{K}$ by the ratios $(X/Z,\; Y/Z)$ with a 1 appended,
+and expand it row by row:
 
 $$
-\begin{bmatrix} u \\ v \\ 1 \end{bmatrix} \sim \mathbf{K} \begin{bmatrix} X/Z \\ Y/Z \\ 1 \end{bmatrix}
+\mathbf{K}\begin{bmatrix} X/Z \\ Y/Z \\ 1 \end{bmatrix}
+=
+\begin{bmatrix}
+f_x \cdot \tfrac{X}{Z} + 0 \cdot \tfrac{Y}{Z} + c_x \cdot 1 \\[2pt]
+0 \cdot \tfrac{X}{Z} + f_y \cdot \tfrac{Y}{Z} + c_y \cdot 1 \\[2pt]
+1
+\end{bmatrix}
+=
+\begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
 $$
 
-The "$\sim$" means *equal up to a positive scale factor* — divide the right side by its third component to recover the actual pixel coordinates. In code:
+The first two rows are exactly the scalar equations. And notice what the appended 1 is
+doing: it multiplies the third column, which is how $c_x$ and $c_y$ get **added**.
+
+That is the whole trick of **homogeneous coordinates**. A plain $2 \times 2$ matrix can
+only scale and rotate — it can never add a constant offset, because every term is
+multiplied by an input that could be zero. Appending a coordinate fixed at 1 gives the
+matrix a term that is always present, so a shift becomes expressible as multiplication.
+Once shifts are multiplications, whole chains of operations collapse into one matrix
+product.
+
+**Why the $\sim$.** The same projection is more often written with the raw 3D point,
+un-divided:
+
+$$
+\begin{bmatrix} u \\ v \\ 1 \end{bmatrix} \sim \mathbf{K} \begin{bmatrix} X \\ Y \\ Z \end{bmatrix}
+= \begin{bmatrix} f_x X + c_x Z \\ f_y Y + c_y Z \\ Z \end{bmatrix}
+$$
+
+This is *not* the pixel coordinate yet — every entry is $Z$ times too large. Divide
+through by the third component:
+
+$$
+\begin{bmatrix} f_x X/Z + c_x \\ f_y Y/Z + c_y \\ 1 \end{bmatrix}
+$$
+
+and the correct answer appears. The $\sim$ means "equal up to a positive scale factor,"
+i.e. *divide by the last component to get the real pixel*.
+
+This is worth pausing on: **that final division is the perspective effect itself.** The
+matrix multiplication is entirely linear — it cannot shrink distant objects. All the
+depth-dependence of §0.2 lives in that one normalising division, which is why the model
+is called *projective* rather than linear, and why $Z$ is the awkward unknown when the
+problem is inverted (§0.6).
+
+In code, either form works — dividing first, or dividing after:
 
 ```python
+# ratios first (division done by hand)
 projected = K @ np.array([X / Z, Y / Z, 1.0])
 u, v = projected[0], projected[1]
+
+# raw point, then homogeneous normalisation
+projected = K @ np.array([X, Y, Z])
+u, v = projected[0] / projected[2], projected[1] / projected[2]
 ```
 
 ### 0.8 What the model assumes — and why we need distortion next
