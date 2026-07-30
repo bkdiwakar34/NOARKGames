@@ -33,6 +33,20 @@ End-to-end derivation of how a raw fisheye camera frame becomes a 3D position br
 
 This is the foundation for everything that follows. Goal: derive *exactly* how a 3D point in space ends up at a specific pixel $(u, v)$ on the camera sensor. The equation $u = f_x \cdot X/Z + c_x$ shows up over and over later — here's where it comes from and what each piece means.
 
+**Why build the forward model when tracking needs the reverse?** Tracking asks the
+opposite question: given detected marker corners, where is the marker in 3D? There is no
+direct formula for that — a single pixel could have come from a near point or a far one,
+so depth is genuinely ambiguous. What the tracker does instead is *search*: guess a pose,
+project it forward with the equations below, compare against the pixels actually detected,
+and adjust. The forward model is the thing being run inside that loop, thousands of times
+a second. Get it right and everything downstream follows; get it wrong and every pose is
+wrong in the same way. The search itself is §5.
+
+The chain in this section runs: coordinate frame → the projection itself → converting to
+pixels → shifting the origin to the image corner → the same thing in matrix notation →
+where the four constants come from → what the model assumes, and why a 160° lens breaks
+those assumptions (leading into §1).
+
 ### 0.1 The camera frame
 
 First we need a coordinate system to describe 3D positions. The **camera frame** is the natural one:
@@ -165,13 +179,7 @@ $$
 
 Only 40 pixels right of centre. Twice as far away → half as offset on the sensor. That's the perspective effect captured cleanly.
 
-### 0.6 The inverse problem
-
-The equations above go *forward*: given a 3D point and the intrinsics, find the pixel.
-
-**Marker tracking does the opposite** — given pixels (the detected marker corners) and the intrinsics, find the marker's 3D pose. That's the **PnP problem** solved by `solvePnP` later (§5). Notice that depth $Z$ is what makes the inverse hard — any single pixel could correspond to a near point or a far point. You need *multiple* pixels from a known geometry (the four corners of a square marker of known size) to disentangle depth from lateral position.
-
-### 0.7 Matrix form
+### 0.6 Matrix form
 
 Everything so far is two scalar equations:
 
@@ -239,7 +247,7 @@ This is worth pausing on: **that final division is the perspective effect itself
 matrix multiplication is entirely linear — it cannot shrink distant objects. All the
 depth-dependence of §0.2 lives in that one normalising division, which is why the model
 is called *projective* rather than linear, and why $Z$ is the awkward unknown when the
-problem is inverted (§0.6).
+problem is inverted (§5).
 
 In code, either form works — dividing first, or dividing after:
 
@@ -253,16 +261,60 @@ projected = K @ np.array([X, Y, Z])
 u, v = projected[0] / projected[2], projected[1] / projected[2]
 ```
 
-### 0.8 What the model assumes — and why we need distortion next
+### 0.7 The intrinsics, and where the four numbers come from
 
-This model assumes:
+The complete forward model needs exactly four constants: $(f_x, f_y, c_x, c_y)$. Together
+they are called the **intrinsics** — properties of *this* lens-and-sensor pair, fixed for
+the life of the camera and independent of the scene in front of it.
+
+They are not looked up in a datasheet; they are **measured**, once per camera unit, by
+`calibrate_camera.py`. The procedure inverts the logic of everything above: photograph a
+chessboard whose square size is known, so the true 3D geometry is not in doubt, then find
+the intrinsics that make the projected corners land closest to the corners actually
+detected. Roughly:
+
+$$
+(f_x, f_y, c_x, c_y, \mathbf{D}) \;=\; \arg\min \sum_{\text{all corners}} \left\| \text{detected} - \text{projected} \right\|^2
+$$
+
+The residual of that fit is the **reprojection error** reported at the end of calibration —
+0.63 px for our camera. It is the single best summary of calibration quality: under ~1 px
+is good, and a much larger value means the intrinsics are not describing this camera well,
+so every pose computed later inherits the error.
+
+That same fit also produces the distortion coefficients $\mathbf{D}$, which is what the
+next section is about.
+
+### 0.8 What the model assumes — and why a 160° lens breaks it
+
+The model above assumes:
 
 - Light travels in **straight lines** from each 3D point through a single optical centre.
 - The sensor is **flat** and perpendicular to the optical axis.
 
-Real lenses **bend** light non-linearly. The wider the field of view, the more they bend it. Your OV9281 has a 160° lens — it bends light *a lot*. The next section is about how we model and correct that bending so the pinhole equations above can still be used downstream.
+A real lens bends light, and the further off-axis the ray arrives, the more the landing
+position departs from what the pinhole equations predict. The pinhole model says a ray
+arriving at angle $\theta$ from the optical axis lands at radius $r = f\tan\theta$ from the
+image centre (since $X/Z = \tan\theta$); a fisheye lands it at roughly $r = f\theta$.
+With our $f_x = 887$ px:
 
-The four numbers $(f_x, f_y, c_x, c_y)$ are called the **intrinsics**. They are properties of the lens + sensor pair, not of the scene. The calibration session (`calibrate_camera.py`) measures them once for your specific camera unit.
+| Ray angle off-axis | Pinhole predicts | Fisheye actually |
+|---|---|---|
+| 10° | 156 px | 155 px |
+| 30° | 512 px | 465 px |
+| 60° | 1536 px | 929 px |
+| 80° | **5030 px** | 1238 px |
+
+Near the centre the two agree almost exactly — which is why the pinhole model survives as
+the backbone of the maths. Toward the edges they diverge badly.
+
+The last row also shows why a 160° lens *has* to work this way: $\tan\theta \to \infty$ as
+$\theta \to 90°$, so a rectilinear lens physically cannot capture that field of view — the
+light would need to land far off the chip. A fisheye deliberately compresses wide angles to
+fit them on the sensor.
+
+The next section models that compression, so the pinhole equations can still be used
+downstream.
 
 ---
 
