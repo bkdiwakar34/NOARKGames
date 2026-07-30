@@ -1,4 +1,4 @@
-# Tracker pipeline — full math walkthrough
+
 
 End-to-end derivation of how a raw fisheye camera frame becomes a 3D position broadcast to Godot. Walks every stage of `main.py` in execution order, with the equations OpenCV is solving under each function call.
 
@@ -68,23 +68,56 @@ That's the core of the entire projection. Read it as: **"take the X coordinate, 
 1. **Depth shrinks things.** Doubling $Z$ halves $x_{\text{sensor}}$ — that's why distant objects appear smaller on the sensor.
 2. **The relationship is linear in X and Y at a fixed depth.** A 1 cm shift in $X$ produces a fixed $f/Z$ pixel shift in the image — predictable and well-behaved.
 
-### 0.3 From sensor metres to pixels
+### 0.3 From sensor millimetres to pixels
 
-The sensor is a grid of pixels. If each pixel is $p$ metres wide, then a sensor position of $x_{\text{sensor}}$ metres corresponds to $x_{\text{sensor}} / p$ pixels from the sensor's centre. Substituting from the previous equation:
+First, what the two words mean:
+
+- **The sensor** is the whole light-sensitive chip — one piece of silicon carrying a grid
+  of $1280 \times 800$ pixels. On the OV9281 each pixel is $3\,\mu\text{m}$ square, so the
+  chip measures about $3.84 \times 2.40$ mm in total.
+- **$x_{\text{sensor}}$** is *where on that chip the light landed*, measured as a physical
+  distance from the chip's centre. The previous section gave it in metres.
+
+The image we actually get is not a physical distance, though — it is a grid of pixel
+counts. So we need to convert. Call the width of one pixel $s$ (metres **per pixel**;
+$s = 3\times10^{-6}$ m here). Then:
 
 $$
-u_{\text{from-centre}} = \frac{f}{p} \cdot \frac{X}{Z}
+\underbrace{u_{\text{from-centre}}}_{\text{pixels}}
+\;=\;
+\frac{\overbrace{x_{\text{sensor}}}^{\text{metres}}}{\underbrace{s}_{\text{metres/pixel}}}
 $$
 
-The combined quantity $f / p$ has units of **pixels** and is what we call **focal length in pixels**, written $f_x$. It bakes both the physical focal length and the pixel pitch into one number — so we never need to know $f$ or $p$ separately at runtime.
+**Concretely:** light landing 1 mm right of the chip's centre is
+$0.001 / (3\times10^{-6}) \approx 333$ pixels right of centre.
 
-If the sensor's pixels aren't perfectly square (different $p_x$ and $p_y$ along the two axes), we get two values:
+Substituting $x_{\text{sensor}} = f \cdot X/Z$ from §0.2:
 
 $$
-f_x = \frac{f}{p_x}, \qquad f_y = \frac{f}{p_y}
+u_{\text{from-centre}} = \frac{f}{s} \cdot \frac{X}{Z}
 $$
 
-These are the two focal-length numbers in your calibration file. **Their units are pixels**, not metres.
+The combined quantity $f/s$ is metres ÷ (metres/pixel) = **pixels**. This is the
+**focal length in pixels**, written $f_x$ — and it is the number that appears in your
+calibration file:
+
+$$
+f_x = \frac{f}{s_x}, \qquad f_y = \frac{f}{s_y}
+$$
+
+Two things worth being clear about, because the textbook version of this derivation is
+misleading in practice:
+
+**We never compute $f_x$ this way.** Calibration estimates $f_x$ and $f_y$ *directly*, in
+pixels, by fitting to chessboard images. The physical focal length $f$ and pixel pitch $s$
+are never measured separately, and never needed at runtime. The derivation above explains
+what $f_x$ *means*; it is not the procedure that produces it.
+
+**$f_x \neq f_y$ here is not caused by rectangular pixels.** Textbooks introduce two focal
+lengths to allow for non-square pixels, but the OV9281's pixels *are* square. Your
+calibration reports $f_x = 887.3$ and $f_y = 890.0$ — a 0.3 % difference that is estimation
+noise from the fit, not a property of the sensor. Treat a large gap between the two as a
+sign of a poor calibration, not of exotic hardware.
 
 ### 0.4 Shifting from sensor-centre to image-corner
 
