@@ -19,7 +19,23 @@ that was lost. It cannot do that directly, so the strategy throughout is: **buil
 accurate forward model of how the camera turns 3D into pixels, then search for the 3D pose
 whose predicted pixels match what was actually seen.**
 
-The sections follow that arc:
+**None of it runs until the camera's own constants are known.** The forward model has
+parameters — $f_x, f_y, c_x, c_y$ and the distortion coefficients — and they are properties
+of one physical camera unit, not values anyone can look up. So there is a prerequisite step,
+performed **once, offline**, before any tracking happens:
+
+| Prerequisite | Produces | Covered in |
+|---|---|---|
+| Camera calibration (`calibrate_camera.py`) | $f_x, f_y, c_x, c_y$ and $k_1 \ldots k_4$ → `camera_calib.toml` | §0.7, §1 |
+| Board calibration (`calibrate_board.py`) | where each marker sits on the device → `board_geometry.json` | §6.3 |
+
+Both invert the same logic as tracking, but with the unknowns swapped: photograph something
+whose 3D geometry is *known* (a chessboard of measured squares; markers on a rigid device),
+and solve for the constants instead of the pose. Get these wrong and every stage below
+inherits the error silently — the pipeline will still run and still produce plausible
+numbers.
+
+With those in hand, the per-frame pipeline follows the arc above:
 
 | § | Stage | What it contributes |
 |---|---|---|
@@ -432,11 +448,48 @@ self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
 )
 ```
 
-This precomputes, for every output pixel $(u', v')$ in the corrected (pinhole-equivalent) image, the source coordinate $(u, v)$ in the raw fisheye image:
+This precomputes, for every output pixel $(u', v')$ in the corrected (pinhole-equivalent)
+image, the source coordinate $(u, v)$ to sample from in the raw fisheye image.
 
-For each output pixel, the algorithm inverts the fisheye model: from $(u', v')$ recover the normalised ray $(x'/f_x, y'/f_y)$, treat that as a pinhole ray, find the corresponding undistorted angle $\theta$, apply the fisheye polynomial to get $\theta_d$, then compute back where in the raw image to sample.
+**The map equation.** For each output pixel $(u', v')$, five steps:
 
-The output is `map1, map2` — two arrays the size of the output image storing those source coordinates.
+$$
+\text{1. normalise:} \qquad x' = \frac{u' - c_x}{f_x}, \qquad y' = \frac{v' - c_y}{f_y}
+$$
+
+$$
+\text{2. radius and ray angle:} \qquad r' = \sqrt{x'^2 + y'^2}, \qquad \theta = \arctan(r')
+$$
+
+$$
+\text{3. apply the lens polynomial:} \qquad \theta_d = \theta\left(1 + k_1\theta^2 + k_2\theta^4 + k_3\theta^6 + k_4\theta^8\right)
+$$
+
+$$
+\text{4. rescale radially:} \qquad x_d = \frac{\theta_d}{r'}\, x', \qquad y_d = \frac{\theta_d}{r'}\, y'
+$$
+
+$$
+\text{5. back to pixels:} \qquad \boxed{\;u = f_x x_d + c_x, \qquad v = f_y y_d + c_y\;}
+$$
+
+Those $(u, v)$ are stored as `map1[v'][u']` and `map2[v'][u']`. (At $r' = 0$ the ratio
+$\theta_d / r'$ is taken as its limit, 1 — the centre pixel maps to itself.)
+
+**Why it is built output-first.** Notice that every step above is a *forward* evaluation:
+the polynomial is applied, never inverted. That is deliberate. Going the other way — from a
+raw pixel to where it should move — would require solving
+$\theta_d = \theta(1 + k_1\theta^2 + \ldots)$ for $\theta$, a root-find with no closed form,
+per pixel. By starting from the output grid and asking "where did this pixel come from?",
+the awkward inversion never has to happen. This is the standard trick for image warping:
+iterate over the destination, not the source.
+
+It also guarantees every output pixel gets exactly one value — no gaps or overlaps, which is
+what you would get by pushing source pixels forward into the output.
+
+The output is `map1, map2` — two arrays the size of the output image storing those source
+coordinates. Both are computed once at startup, since $\mathbf{K}$ and $\mathbf{D}$ never
+change.
 
 At runtime, `cv2.remap(frame, map1, map2, INTER_CUBIC)` samples the raw image at the computed source coordinates for every output pixel. Because source coordinates are usually non-integer, we interpolate:
 
