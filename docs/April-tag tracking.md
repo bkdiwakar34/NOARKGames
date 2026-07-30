@@ -11,6 +11,35 @@ End-to-end derivation of how a raw fisheye camera frame becomes a 3D position br
 
 ---
 
+## The story in one page
+
+Everything below is one long inversion. The camera destroys information — it flattens a 3D
+world onto a 2D grid of brightness values — and the tracker's job is to recover the part
+that was lost. It cannot do that directly, so the strategy throughout is: **build an
+accurate forward model of how the camera turns 3D into pixels, then search for the 3D pose
+whose predicted pixels match what was actually seen.**
+
+The sections follow that arc:
+
+| § | Stage | What it contributes |
+|---|---|---|
+| 0 | Pinhole model | The forward model in its simplest form: 3D point → pixel, via four constants. Exact near the image centre. |
+| 1 | Lens distortion | Our 160° lens does not obey the simple model at the edges. Measure how it actually behaves. |
+| 2 | Undistortion | Undo that deviation once per frame, so every later stage can use §0's simple equations and ignore the lens. |
+| 3 | Marker detection | Find the black-and-white squares in the image and read their IDs — the raw evidence. |
+| 4 | Corner refinement | Locate each corner to sub-pixel precision. Everything downstream inherits this accuracy. |
+| 5 | Pose estimation | **The inversion.** Search for the pose whose projected corners best match the detected ones. |
+| 6 | Combining markers | Fuse all visible markers into one device pose, using the calibrated board geometry. |
+| 7 | World frame | Re-express that pose relative to a fixed, locked origin, so numbers mean the same thing across sessions. |
+| 8 | Filtering | Smooth the frame-to-frame result before it drives the game. |
+
+Two threads run through all of it. **Accuracy compounds**: a fraction of a pixel of corner
+error in §4 becomes millimetres of position error by §7. And **each stage exists to let the
+next one stay simple** — undistortion is done so pose estimation can pretend the lens is
+perfect; board calibration is done so pose estimation can treat many markers as one object.
+
+---
+
 ## Notation
 
 | Symbol | Meaning |
@@ -320,7 +349,30 @@ downstream.
 
 ## 1. Lens distortion — the fisheye model
 
-The OV9281 has a 160° FOV fisheye lens. Light rays at the edges of the field bend so much that the pinhole model is wrong by tens of pixels. OpenCV provides two distortion families:
+§0.8 introduced a second rung: the pinhole model puts a ray at $r = f\tan\theta$, while a
+fisheye puts it at roughly $r = f\theta$. That word **roughly** is what this section is
+about. $r = f\theta$ describes an *ideal* fisheye; no physical lens follows it exactly.
+So there are three rungs, each closer to the truth:
+
+| | Landing radius | Describes |
+|---|---|---|
+| Pinhole | $r = f\tan\theta$ | an idealisation — fails badly past ~30° |
+| Ideal fisheye | $r = f\theta$ | the general shape of a fisheye's behaviour |
+| **This lens** | $r = f\theta(1 + k_1\theta^2 + k_2\theta^4 + k_3\theta^6 + k_4\theta^8)$ | the actual OV9281 unit, fitted by calibration |
+
+The four coefficients $k_1 \ldots k_4$ are exactly the correction from the middle row to
+the bottom one: set them all to zero and the equation collapses back to $r = f\theta$.
+They are small numbers — ours are $(0.33, 0.56, -1.40, 1.25)$ — because the ideal fisheye
+is already close; they are fitting the residual.
+
+Why a polynomial in $\theta^2, \theta^4, \ldots$ rather than any other function: a lens is
+radially symmetric, so the correction can only depend on how far off-axis the ray is, never
+on direction. Odd powers would break that symmetry (they change sign when $\theta$ does),
+so only even powers appear. Beyond that, it is simply a flexible curve with enough freedom
+to trace a real lens's behaviour and few enough terms to fit from a few dozen chessboard
+images.
+
+OpenCV provides two distortion families:
 
 | Model | Coefficients | Valid up to | OpenCV |
 |---|---|---|---|
@@ -354,6 +406,19 @@ $$
 The polynomial in $\theta$ models how aggressively a fisheye lens bends rays as a function of how far they are from the optical axis. With $k_1, k_2, k_3, k_4$ fit from a calibration session, this represents the OV9281's behaviour accurately across the entire 160° field.
 
 **Why the standard pinhole model fails at high FOV:** Brown–Conrady writes distortion as a polynomial in $r$ (radial distance in image space). At fisheye angles, the relationship between $\theta$ (incoming ray angle) and $r$ becomes very non-linear, and a low-order polynomial can't fit both centre and edge accurately at the same time. Kannala–Brandt parametrises directly in $\theta$, which stays well-behaved up to nearly $\pi/2$.
+
+**Where this goes next.** We now have an accurate description of how this lens bends light.
+There are two ways to use it, and the choice matters for everything downstream:
+
+1. **Keep the raw image and carry the distortion model through every later calculation.**
+   Every marker detection, every pose solve, every projection would have to apply the
+   polynomial. Nothing is thrown away, but all downstream maths gets harder.
+2. **Undo the distortion once, straight after capture, and hand a clean pinhole image to
+   everything else.** Then §0's simple equations apply unchanged for the rest of the
+   pipeline.
+
+`main.py` does the second, which is what §2 describes. That is why every later `solvePnP`
+call passes zeros for the distortion coefficients — by then, the distortion is already gone.
 
 ---
 
