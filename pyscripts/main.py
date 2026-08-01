@@ -115,13 +115,28 @@ class MainClass:
         self.camera_matrix = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
         self.dist_coeffs   = np.array(calib_data["calibration"]["dist_coeffs"])
 
-        # Fisheye undistort map. After remapping a frame with these, the image is
-        # pinhole-equivalent with intrinsics = camera_matrix and zero distortion,
-        # so downstream solvePnP uses camera_matrix with np.zeros(5).
-        self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
-            self.camera_matrix, self.dist_coeffs, np.eye(3),
-            self.camera_matrix, self.frame_size, cv2.CV_16SC2,
-        )
+        # Two ways to remove the lens distortion, same result downstream:
+        #
+        #   undistort_image = True   remap all 1,024,000 pixels once per frame, then
+        #                            detect on the corrected image (the original path).
+        #   undistort_image = False  detect on the raw frame and undistort only the
+        #                            handful of corner points that come back. Costs a
+        #                            few dozen point transforms instead of a megapixel
+        #                            remap. calibrate_camera.py's verify() already does
+        #                            exactly this.
+        #
+        # Either way the corners reaching solvePnP are pinhole-equivalent with
+        # intrinsics = camera_matrix, so it is still called with np.zeros(5).
+        self._undistort_image = bool(settings.get("undistort_image", True))
+        if self._undistort_image:
+            self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
+                self.camera_matrix, self.dist_coeffs, np.eye(3),
+                self.camera_matrix, self.frame_size, cv2.CV_16SC2,
+            )
+        else:
+            self.map1 = self.map2 = None
+            print("undistort_image=False — detecting on the raw frame, "
+                  "undistorting corners only")
 
         # Leave cores free for Godot on the Pi — OpenCV otherwise parallelises
         # detection across ALL cores and starves the game's render thread.
@@ -530,6 +545,26 @@ class MainClass:
         self.udp_socket.sendto(data_bytes, self.addr)
 
     # ── pose estimation ───────────────────────────────────────────────────────
+
+    def _undistort_corners(self, corners):
+        """Map corners detected in the raw (still distorted) frame into the
+        pinhole-equivalent coordinates the rest of the pipeline assumes.
+
+        Used only when undistort_image is False. Replaces a full-frame remap
+        with four point transforms per marker — the same trick verify() in
+        calibrate_camera.py uses. P=camera_matrix puts the results back in
+        pixel units rather than normalised ones, so everything downstream
+        (corner stability checks, solvePnP, reprojection error) is unchanged."""
+        if corners is None or len(corners) == 0:
+            return corners
+        out = []
+        for c in corners:
+            pts = np.asarray(c, dtype=np.float64).reshape(-1, 1, 2)
+            ud = cv2.fisheye.undistortPoints(
+                pts, self.camera_matrix, self.dist_coeffs, P=self.camera_matrix
+            )
+            out.append(ud.reshape(1, -1, 2).astype(np.float32))
+        return out
 
     def estimate_pose(self, corners):
         marker_points = np.array(
@@ -972,8 +1007,14 @@ class MainClass:
 
         # INTER_LINEAR: ~half the cost of INTER_CUBIC; corner sub-pixel accuracy
         # comes from the detector's corner refinement, not the resampling kernel.
+        #
+        # skip_remap: undistort the four corners per marker instead of the whole
+        # frame (see _undistort_corners). Single-camera only — the dual path
+        # would also need cam1's own intrinsics, so it keeps the remap.
+        skip_remap = (not self._undistort_image) and not self._dual_camera
         if frame0 is not None:
-            frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
+            if not skip_remap:
+                frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
             self.video_frame = frame0
         if self._dual_camera and frame1 is not None:
             frame1 = cv2.remap(frame1, self.map1_1, self.map2_1, interpolation=cv2.INTER_LINEAR)
@@ -992,6 +1033,8 @@ class MainClass:
         corners0 = ids0 = None
         if frame0 is not None:
             corners0, ids0, _ = self.detector.detectMarkers(frame0)
+            if skip_remap:
+                corners0 = self._undistort_corners(corners0)
             corners0, ids0 = self._filter_markers(corners0, ids0)
         corners1 = ids1 = None
         if self._dual_camera and frame1 is not None:

@@ -3,6 +3,7 @@
 	"udp_port": 12345,
 	"calibration_file": "camera_calib.toml",
 	"corner_refine": "contour",
+	"undistort_image": true,
 	"opencv_threads": 2,
 	"adaptive_thresh_win_size": 15,
 	"corner_stability_threshold": 0.0,
