@@ -90,6 +90,9 @@ class MainClass:
             settings = {}
 
         self.debug = settings.get("debug", False)
+        # Preview window is independent of the timing output: debug=True with
+        # debug_preview=False gives the stage times at full speed.
+        self._debug_preview = bool(settings.get("debug_preview", True)) and self.debug
         self.udp_port        = settings.get("udp_port", 12345)
 
         filter_type = str(settings.get("filter_type", "ema")).lower()
@@ -1201,8 +1204,13 @@ class MainClass:
                         )
                     self._stage_times.clear()
                 self._dbg_last_print = now
-            self.video_frame = cv2.resize(self.video_frame, (350, 200))
-            cv2.imshow("frame", self.video_frame)
+            # The preview costs a resize, a window blit and the waitKey in run()
+            # — several ms per frame, and it lands *outside* t0..t4, so it never
+            # appears in the printed stage times while still capping the frame
+            # rate. debug_preview=False keeps the numbers without that cost.
+            if self._debug_preview:
+                self.video_frame = cv2.resize(self.video_frame, (350, 200))
+                cv2.imshow("frame", self.video_frame)
 
     def run(self) -> None:
         try:
@@ -1218,7 +1226,9 @@ class MainClass:
 
                 if self.received_message == b"STOP":
                     break
-                if self.debug and cv2.waitKey(1) & 0xFF == ord("q"):
+                # waitKey only exists to service the preview window; without a
+                # window it is a pure >=1 ms penalty per frame.
+                if self._debug_preview and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
             if self._camera_backend in ("rcam_single", "rcam_dual"):
