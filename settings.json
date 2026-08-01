@@ -4,6 +4,7 @@
 	"calibration_file": "camera_calib.toml",
 	"corner_refine": "contour",
 	"undistort_image": true,
+	"pipeline": false,
 	"opencv_threads": 2,
 	"adaptive_thresh_win_size": 15,
 	"corner_stability_threshold": 0.0,

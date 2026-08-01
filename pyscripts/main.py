@@ -128,6 +128,12 @@ class MainClass:
         # Either way the corners reaching solvePnP are pinhole-equivalent with
         # intrinsics = camera_matrix, so it is still called with np.zeros(5).
         self._undistort_image = bool(settings.get("undistort_image", True))
+        self._pipeline   = bool(settings.get("pipeline", False))
+        self._pipe_slot  = _LatestFrameSlot()   # newest undistorted frame, producer -> main loop
+        self._pipe_error = None                 # exception from the worker, re-raised on the main thread
+        self._pipe_stop  = threading.Event()
+        self._pipe_thread = None
+        self._pipelined  = False                # resolved after the backend is known
         if self._undistort_image:
             self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
                 self.camera_matrix, self.dist_coeffs, np.eye(3),
@@ -274,6 +280,28 @@ class MainClass:
         self._camera_backend = str(settings.get("camera_backend", "auto")).lower()
         self._dual_camera = self._camera_backend == "rcam_dual"
         self._init_camera_backend(settings)
+
+        # Pipelining: capture + undistort move onto their own thread, so frame
+        # N+1 is being prepared while frame N is still being detected. The loop
+        # period then follows the slower half instead of the sum of all four
+        # stages. Real parallelism despite the GIL, because picamera2's capture
+        # and cv2.remap both release it while they work.
+        #
+        # Restricted to the picamera2 single-camera path: rcam already has its
+        # own capture thread handing out the same frame repeatedly, which this
+        # loop would re-undistort for nothing.
+        self._pipelined = (
+            self._pipeline
+            and self._undistort_image
+            and not self._dual_camera
+            and self._camera_backend not in ("rcam_single", "rcam_dual")
+        )
+        if self._pipelined:
+            self._pipe_thread = threading.Thread(target=self._undistort_loop, daemon=True)
+            self._pipe_thread.start()
+            print("pipeline=True — capture+undistort on a worker thread")
+        elif self._pipeline:
+            print("pipeline requested but not applicable to this backend — running serial")
 
         self._init_udp_socket()
 
@@ -552,6 +580,29 @@ class MainClass:
         self.udp_socket.sendto(data_bytes, self.addr)
 
     # ── pose estimation ───────────────────────────────────────────────────────
+
+    def _undistort_loop(self) -> None:
+        """Producer half of the pipelined path — capture frame N+1 and undistort
+        it while the main thread is still detecting markers in frame N.
+
+        Newest-wins, like _capture_loop: if detection falls behind, intermediate
+        undistorted frames are overwritten rather than queued. Latency stays at
+        one frame instead of growing, and frames are dropped instead of going
+        stale. Exceptions are recorded and re-raised on the main thread rather
+        than dying silently in here."""
+        try:
+            while not self._pipe_stop.is_set():
+                frame = self._capture_single_frame()
+                if frame is None:
+                    time.sleep(0.001)
+                    continue
+                frame = cv2.remap(
+                    frame, self.map1, self.map2, interpolation=cv2.INTER_LINEAR
+                )
+                self._pipe_slot.put(frame, time.monotonic())
+                time.sleep(0)          # cooperative yield, same as _capture_loop
+        except Exception as exc:
+            self._pipe_error = exc
 
     def _undistort_corners(self, corners):
         """Map corners detected in the raw (still distorted) frame into the
@@ -1001,16 +1052,29 @@ class MainClass:
         t0 = time.perf_counter() if self.debug else 0.0
 
         # Capture frame(s)
-        if self._dual_camera:
+        if self._pipelined:
+            # Already captured and undistorted by _undistort_loop, in parallel
+            # with the previous frame's detection. capture and remap therefore
+            # time as ~0 here — the real cost moved to the worker thread, and
+            # the loop period is now whichever half is slower.
+            if self._pipe_error is not None:
+                raise self._pipe_error
+            frame0, _ts = self._pipe_slot.get_latest()
+            frame1 = None
+            if frame0 is None:
+                return
+            t1 = time.perf_counter() if self.debug else 0.0
+        elif self._dual_camera:
             frame0, frame1 = self._capture_dual_frames()
             if frame0 is None and frame1 is None:
                 return
+            t1 = time.perf_counter() if self.debug else 0.0
         else:
             frame0 = self._capture_single_frame()
             frame1 = None
             if frame0 is None:
                 return
-        t1 = time.perf_counter() if self.debug else 0.0
+            t1 = time.perf_counter() if self.debug else 0.0
 
         # INTER_LINEAR: ~half the cost of INTER_CUBIC; corner sub-pixel accuracy
         # comes from the detector's corner refinement, not the resampling kernel.
@@ -1020,7 +1084,7 @@ class MainClass:
         # would also need cam1's own intrinsics, so it keeps the remap.
         skip_remap = (not self._undistort_image) and not self._dual_camera
         if frame0 is not None:
-            if not skip_remap:
+            if not skip_remap and not self._pipelined:
                 frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
             self.video_frame = frame0
         if self._dual_camera and frame1 is not None:
