@@ -483,7 +483,14 @@ class MainClass:
                 raise self._cam_errors[0]
             return frame
         if platform.system() == "Linux":
-            return self.picam2.capture_array()
+            # YUV420 comes back as (h*3/2, w): the Y plane is the first h rows,
+            # then the quarter-resolution U and V planes. Y alone is the
+            # grayscale image everything downstream wants. Slicing here matters
+            # when undistort_image is False — with the remap in place the output
+            # was sized from the maps, which hid the extra rows; without it,
+            # detectMarkers would otherwise threshold 400 rows of chroma.
+            frame = self.picam2.capture_array()
+            return frame[:self.frame_size[1], :self.frame_size[0]]
         ret, frame = self.camera.read()
         if not ret or frame is None:
             return None
