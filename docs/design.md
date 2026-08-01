@@ -247,7 +247,7 @@ v2/Core/adaptive_manager.gd
 
 Heartbeat: Godot sends `CONNECTED` every 100 ms to port 12345 so the tracker learns Godot's reply address on startup.
 
-The full math derivation of every stage (pinhole projection, fisheye distortion, marker detection, corner refinement, solvePnP) is in [tracker-math.md](tracker-math.md).
+The full math derivation of every stage (pinhole projection, fisheye distortion, marker detection, corner refinement, solvePnP) is in [tracker-math.md](April-tag%20tracking.md).
 
 ---
 

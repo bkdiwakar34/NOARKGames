@@ -29,7 +29,7 @@ Main scene: `res://app/ui/main.tscn`. Tracker reads `settings.json` for camera c
 |---|---|
 | [docs/design.md](docs/design.md) | What the system is, architecture, current adaptive difficulty design (Fitts' Law), key conventions |
 | [docs/setup.md](docs/setup.md) | Hardware, calibration procedure, how to run on the Pi, common issues |
-| [docs/tracker-math.md](docs/tracker-math.md) | Deep math walkthrough of the tracker pipeline (pinhole, fisheye, PnP, refinement) |
+| [docs/tracker-math.md](April-tag%20tracking.md) | Deep math walkthrough of the tracker pipeline (pinhole, fisheye, PnP, refinement) |
 | [docs/todo.md](docs/todo.md) | Open TODOs and pre-deployment checklist |
 | [CLAUDE.md](CLAUDE.md) | Instructions for Claude Code / AI agents working in this repo |
 

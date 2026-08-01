@@ -3,7 +3,7 @@
 > **Scope.** This document is the *argument*: why the joint solve beats per-marker
 > averaging, derived from constraint counts and failure modes. For the full pipeline
 > in execution order (camera model → distortion → detection → refinement → pose →
-> origin lock → filters) see [tracker-math.md](tracker-math.md). Measured outcome:
+> origin lock → filters) see [tracker-math.md](April-tag%20tracking.md). Measured outcome:
 > median device wobble 3.27 mm → 0.78 mm across 43 workspace positions
 > (`tools/analyze_jitter.py`).
 
