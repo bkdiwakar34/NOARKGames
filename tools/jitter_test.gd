@@ -17,7 +17,8 @@ extends Control
 #   SPACE       start/stop recording at the current target+mode
 #   ESC         save the CSV and quit
 
-const CELL_SIZE: float = 120.0  # matches AdaptiveManager.SCAN_CELL_SIZE
+const CELL_SIZE: float = 60.0  # denser re-run for smoother jitter-heatmap interpolation
+                                # (was 120.0, matching AdaptiveManager.SCAN_CELL_SIZE)
 const RECORD_DURATION: float = 5.0  # fixed per-segment recording, so every segment
                                     # has the same sample count (fair variance comparison)
 
