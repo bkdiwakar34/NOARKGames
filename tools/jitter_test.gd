@@ -107,6 +107,8 @@ func _build_menu() -> void:
 func _on_start_pressed() -> void:
 	_do_calibration = _calib_check.button_pressed
 	_mode = "new" if _mode_option.selected == 0 else "old"
+	_apply_mode()  # switch the tracker BEFORE calibration records any corner,
+	               # so the affine fit matches whichever mode was actually chosen
 
 	_menu.queue_free()
 	_menu = null
@@ -137,7 +139,6 @@ func _enter_grid() -> void:
 	_state = State.GRID
 	_build_grid()
 	_open_log_file()
-	_apply_mode()
 	UDPReceiver.log_enabled = true
 
 
