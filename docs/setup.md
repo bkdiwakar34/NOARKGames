@@ -90,6 +90,31 @@ Then, from the repo root:
 
 If one camera loses its feed mid-session (occlusion, disconnect), the tracker automatically falls back to tracking with the surviving camera rather than stopping.
 
+#### Known hardware issue: onboard UFS storage freezes (run from an SSD)
+
+**Symptom.** About 10–15 s into a session the tracker exits with
+`No UDP packets from Godot for 3s`. It looks like a tracker bug, but it is not.
+
+**Cause.** The Q6A's onboard UFS storage module (KIOXIA `THGJFGT1E45BAILB`) periodically
+locks up, which stalls every process that touches the disk — Godot included. Confirmed
+2026-07 by running Godot alone with `pyscripts/` renamed away: the stall still happened.
+`dmesg` shows:
+
+```
+ufshcd-qcom 1d84000.ufshc: ufshcd_err_handler ... task management cmd timed-out
+```
+
+and, in one occurrence at the same moment, `msm_dpu: hangcheck detected gpu lockup rb 0!`.
+
+**Fix (2026-07-11).** Remove the onboard UFS module and boot/run from an SSD. No kernel or
+firmware change was needed. Tried first, did **not** help: pinning tracker and Godot to
+separate cores (`tracker_cpu_affinity` in settings.json, `taskset -c 0-3` for Godot),
+capping GPU frequency (`/sys/class/devfreq/3d00000.gpu/max_freq`), disabling the tracker's
+preview window.
+
+**Check on a new board:** `dmesg | grep -i ufshc` after a few minutes of running the game.
+Any `err_handler` / `timed-out` line means the same fault.
+
 ### 4. Calibrate sensor-to-screen mapping (one-time per workspace setup)
 
 Run the game and use the workspace calibration overlay. The patient (or you) touches the four screen corners (TL → TR → BL → BR) with the device. The 6-parameter affine transform is fitted via OLS and written to `user://workspace_config.json`.
