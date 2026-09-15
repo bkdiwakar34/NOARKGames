@@ -1378,10 +1378,14 @@ At runtime, one line does the work:
 frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
 ```
 
-`remap` looks up each output pixel's source coordinate in the table and samples the raw
-image there. But those coordinates are almost never whole numbers — §3.4 asked for
-$(1201.56,\, 751.15)$, and there is no pixel at $0.56$ of the way across. So the value must
-be **interpolated** from the neighbours that do exist.
+For each pixel of the new image, `remap` looks up its source coordinate in the table, reads
+the brightness at that location in the raw image, and writes it into the new image. To
+**sample** an image is exactly that: to read out its brightness value at a stated location.
+
+The complication is that those source coordinates are almost never whole numbers. §3.4
+asked for $(1201.56,\; 751.15)$, and no pixel sits at $0.56$ of the way across — so there
+is nothing to *copy*. The value has to be **constructed** from the neighboring pixels that
+do exist, and that construction is called **interpolation**.
 
 Let $(u_0, v_0)$ be the integer pixel below-left of the requested point and let
 
@@ -1429,137 +1433,151 @@ why every later `solvePnP` call passes `np.zeros(5)` for the distortion coeffici
 §3 handed over an image that behaves like a perfect pinhole camera. Every equation from
 here on can use §0's simple form and forget the lens entirely.
 
-But an image is still just a grid of brightness numbers. Nothing in it says "there is a
-marker at these pixels." This section is where the pipeline stops doing geometry and starts
-doing *search* — and where, for the first and only time, the maths is mostly decisions
-rather than equations.
+But an image is still a grid of a million brightness numbers, and nothing in it announces
+"there is a marker at these pixels." This section is where the pipeline stops doing
+geometry and starts doing **search**.
 
-### 4.1 Why square black-and-white tags at all
+### 4.0 The shape of the whole section: a funnel
 
-Before the algorithm, the design problem it solves. The tracker needs a target on the
-device that satisfies three things at once:
+Every stage below is a **rejection test**. That single idea is the spine of §4, and it is
+worth holding on to before any of the individual stages, because otherwise each one looks
+like an unrelated trick.
+
+The scene contains a handful of markers and an enormous number of things that are not
+markers — cable edges, shadows, the dark gap under the table, knuckles, printed text on
+equipment. The detector never "finds markers". It generates candidates cheaply, then
+applies progressively more expensive and more selective tests, discarding at every step:
+
+| § | Stage | What arrives | What it decides | What leaves |
+|---|---|---|---|---|
+| 4.2 | adaptive threshold | ~1,000,000 grey pixels | is this pixel ink or paper? | a black-and-white image |
+| 4.3 | contour extraction | black-and-white image | where does each black region end? | a few hundred closed outlines |
+| 4.4 | quad filtering | a few hundred outlines | does this outline have exactly four straight sides? | a few dozen quadrilaterals |
+| 4.5 | rectification | a few dozen quadrilaterals | — (no rejection; prepares the next test) | a head-on view of each |
+| 4.6 | cell reading | head-on views | is the border black and what are the 36 bits? | a code word per candidate |
+| 4.7 | dictionary lookup | code words | is this a legal code, and which one? | confirmed IDs + orientation |
+
+(The counts are indicative orders of magnitude for a cluttered scene, not measurements. If
+you want the real ones, they are easy to instrument at each stage.)
+
+Two things follow from reading it as a funnel. **The cheap tests come first** — a
+threshold costs a few operations per pixel and a dictionary lookup costs far more, so the
+ordering is not arbitrary. And **the survivors of the last test are markers by
+construction**: nothing later in the pipeline re-checks whether a detection is genuine,
+because by then the evidence has already been demanded and supplied.
+
+### 4.1 What makes a good target in the first place
+
+Before the stages, the design problem they exist to solve. The tracker needs something
+stuck to the device that satisfies three requirements at once:
 
 1. **Findable** — locatable without already knowing where it is, under whatever lighting
-   the clinic room has.
-2. **Identifiable** — the device carries eight of them, and confusing marker 12 with
-   marker 20 would put the grip point on the wrong side of the handle.
+   the clinic room happens to have.
+2. **Identifiable** — the device carries eight of them, and mistaking marker 12 for marker
+   20 would put the grip point on the wrong side of the handle.
 3. **Anchored** — it must supply points whose 3D position *on the device* is known
-   exactly, because §6 needs known 3D ↔ observed 2D pairs and nothing else will do.
+   exactly, because §6 needs known-3D ↔ observed-2D pairs and nothing else will do.
 
-A square with a thick black border and a coded interior hits all three. The border is the
-strongest possible edge for a thresholding step; the interior encodes identity; and the
-four corners are points whose marker-frame coordinates are exact by construction —
-$(\pm L/2, \pm L/2, 0)$ for a printed square of side $L$.
+A square with a thick black border and a coded interior meets all three, and each part of
+the design answers one of them. The plain black border is what survives §4.2 and §4.3 —
+the strongest, most lighting-independent boundary you can print. The coded interior answers
+identity in §4.6. And the four corners of that border answer the third requirement: for a
+printed square of measured side $L$, they sit at $(\pm L/2, \pm L/2, 0)$ in the marker's
+own frame, exactly, with no estimation involved.
 
-**Why corners rather than the centre or the edges.** This is worth being precise about,
-because it is the reason the whole pipeline is built around four points.
+**Why the corners specifically.** A corner is the only feature on the tag that can be
+pinned down in *both* image directions at once. An edge cannot: slide a point along a
+straight edge and the picture is unchanged, so an edge constrains you only across itself,
+never along it. (This is the aperture problem — the same reason a moving straight bar's
+velocity is ambiguous when seen through a small hole.) A corner is two edges running in
+different directions meeting at one place, so both directions are pinned. That it also
+happens to give the four most widely separated points on the tag is a bonus, and §5.1
+shows how much that bonus is worth.
 
-- An **edge** constrains position only *across* itself. Slide a point along a straight
-  edge and the image is unchanged, so an edge pixel tells you one number, not two. (This
-  is the aperture problem — the same effect that makes a moving straight bar's velocity
-  ambiguous when seen through a small hole.)
-- A **corner** is the intersection of two edges running in different directions, so it is
-  pinned in both image directions at once. It is the most precisely localisable feature a
-  black-and-white shape can offer.
-- The **centre** of the marker is precise too, but it is *one* point — and §6.1 already
-  showed that one point gives one ray and no depth. Four corners at known separations are
-  what break that.
+The corners are also never *chosen*. They fall out of §4.4 as the vertices of the fitted
+quadrilateral — finding the marker and locating its corners are one operation.
 
-### 4.2 Which dictionary — and what "36h11" means
+### 4.2 Adaptive thresholding — deciding ink from paper
 
-```python
-dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
-detector   = aruco.ArucoDetector(dictionary, params)
-```
+**What arrives:** a greyscale image, a million values between 0 and 255.
+**What has to be decided:** for each pixel, ink or paper.
 
-Two different things are being combined here, and the name of the doc reflects the first:
+Everything downstream works on regions and their boundaries, and a region needs a definite
+edge. So the first move is to commit: each pixel becomes black or white.
 
-- The **codebook** is AprilTag's `36h11` family (developed by Edwin Olson's group at
-  Michigan). It defines which bit patterns are legal marker IDs.
-- The **detector** is OpenCV's ArUco detector. It does the image work — thresholding,
-  contours, quads — and then asks the codebook to identify what it found.
-
-So the tags on the device are AprilTags; the code that finds them is the ArUco pipeline.
-Nothing is inconsistent about that: the detector is agnostic about which dictionary it is
-handed.
-
-**Decoding the name.** `36h11` means **36 data bits**, arranged as a $6 \times 6$ grid,
-with a guaranteed **minimum Hamming distance of 11** between any two codes in the family.
-Those two numbers are the whole design:
-
-- 36 bits could in principle label $2^{36}$ markers. The family keeps only 587 of them —
-  the rest are thrown away precisely so that the survivors are far apart.
-- "Far apart" is what buys the error correction in §4.7 and, more importantly, what makes
-  a random piece of clutter in the image extremely unlikely to decode as a valid ID.
-
-That trade — throwing away almost all the codes to make the few that remain unmistakable
-— is the same reasoning behind error-correcting codes in a communication link. A larger
-minimum distance costs you rate and buys you reliability.
-
-### 4.3 Adaptive thresholding — turning grey into black and white
-
-The first stage converts the greyscale frame into a strictly black-or-white one, because
-everything downstream works on regions and boundaries, not shades.
-
-**Why not one threshold for the whole image.** Model what the sensor records at a pixel as
+**Why a single cutoff for the whole image fails.** Model what the sensor records at a pixel
+as
 
 $$
 I(u,v) \;=\; R(u,v) \cdot L(u,v)
 $$
 
-where $R$ is the **reflectance** of the surface (the thing you care about: ~0.05 for the
-printed black, ~0.85 for the white) and $L$ is the **illumination** falling on it. In a
-room with a window on one side, $L$ might be four times larger at one edge of the frame
-than the other. Then white paper in the dim corner,
+where $R$ is the **reflectance** of the surface — the thing you care about, roughly 0.05
+for printed black and 0.85 for white — and $L$ is the **illumination** falling on it. In a
+room with a window on one side, $L$ can easily be four times larger at one edge of the
+frame than the other. Then white paper in the dim corner,
 
 $$
 0.85 \times L_{\text{dim}},
 $$
 
-can easily be *darker* than black ink in the bright corner,
+is genuinely darker than black ink in the bright corner,
 
 $$
-0.05 \times L_{\text{bright}},
+0.05 \times L_{\text{bright}}.
 $$
 
-and no single global threshold can separate them. The image is not badly exposed; the
-question is badly posed.
+No single global threshold can separate them. The image is not badly exposed; the question
+is badly posed.
 
-**The fix.** Compare each pixel against its own neighbourhood instead of against a global
+**The fix.** Compare each pixel against its own neighbourhood rather than against a global
 constant:
 
 $$
 T(u, v) \;=\; \frac{1}{w^2} \sum_{(i, j) \,\in\, \text{window}} I(i, j) \;-\; C
 $$
 
-and call the pixel black if $I(u,v) < T(u,v)$.
+and call the pixel black when $I(u,v) < T(u,v)$.
+
+| Symbol | Meaning |
+|---|---|
+| $I(u,v)$ | recorded brightness at the pixel being classified, 0–255 |
+| $w$ | side length of the square window centred on that pixel, in pixels (`adaptiveThreshWinSize`, set to 15 here) |
+| $T(u,v)$ | the threshold computed *for this pixel*, in the same 0–255 units |
+| $C$ | a constant offset in brightness units, subtracted from the local mean (`adaptiveThreshConstant`, OpenCV default 7 — `main.py` leaves it there) |
+| $\bar{R}$ | mean reflectance over the window |
+| $L_0$ | illumination over the window, taken as constant across it |
+
+**What $C$ is for.** Without it, a pixel is called black whenever it falls even marginally
+below its neighbourhood average — so across a uniform patch of white paper, sensor noise
+alone would turn roughly half the pixels black. $C$ creates a dead band: a pixel must be
+*meaningfully* darker than its surroundings before it counts as ink. Larger $C$ means
+fewer, more confident black pixels; too large and the marker's border starts to erode.
 
 Why this works falls straight out of the model. Over a window small enough that $L$ is
-essentially constant at $L_0$, the local mean is $L_0 \cdot \bar{R}$, so the comparison
-$I < T$ becomes
+essentially constant at $L_0$, the local mean is $L_0\bar{R}$, so the test $I < T$ becomes
 
 $$
-R(u,v) \, L_0 \;<\; \bar{R} \, L_0 - C
+R(u,v)\,L_0 \;<\; \bar{R}\,L_0 - C
 \qquad\Longleftrightarrow\qquad
 R(u,v) \;<\; \bar{R} - \frac{C}{L_0}
 $$
 
-The illumination **divides out**. What is left is a comparison of reflectances — exactly
-the quantity that distinguishes ink from paper. The lighting has been cancelled rather
-than fought.
+The illumination **divides out**. What remains is a comparison of reflectances — precisely
+the quantity that distinguishes ink from paper. The lighting has been cancelled rather than
+fought.
 
-**Choosing the window size $w$.** The derivation above shows the two-sided constraint:
+**Choosing the window size $w$.** The derivation shows the constraint is two-sided:
 
-- $w$ must be **small enough** that $L$ really is constant across it, otherwise the
-  cancellation is only approximate.
+- $w$ must be **small enough** that $L$ really is constant across it, or the cancellation
+  is only approximate.
 - $w$ must be **large enough** to contain both ink and paper. A window sitting entirely
-  inside a thick black border has $\bar{R} \approx R$, so the comparison reduces to
-  $0 < -C/L_0$, which is false everywhere — the interior of a large black region comes out
-  uniformly white. The window must be wider than the widest all-black feature you need to
-  survive.
+  inside a thick black border has $\bar{R} \approx R$, so the test collapses to
+  $0 < -C/L_0$, false everywhere — and the interior of a large black region comes out
+  uniformly white. The window must exceed the widest all-black feature you need to survive.
 
-OpenCV's default hedges by sweeping three window sizes (3, 13, 23) and attempting
-detection at each. `main.py` replaces that with a single pass:
+OpenCV's default hedges by sweeping three window sizes (3, 13, 23) and attempting detection
+at each. `main.py` replaces that with a single pass:
 
 ```python
 params.adaptiveThreshWinSizeMin  = 15
@@ -1567,103 +1585,228 @@ params.adaptiveThreshWinSizeMax  = 15
 params.adaptiveThreshWinSizeStep = 1
 ```
 
-That is legitimate here only because the geometry is pinned down: the camera is fixed, the
-device moves in a bounded workspace, so the marker's apparent size lives in a known narrow
+That is legitimate only because the geometry is pinned down: the camera is fixed and the
+device moves in a bounded workspace, so the markers' apparent size stays in a known narrow
 range. The debug print exists to confirm exactly this —
 
 ```
 marker side: avg 88.4 px  (n=3 markers)
 ```
 
-— and it is the number to check before trusting the single-window shortcut. The saving is
-real: roughly one third of the thresholding cost, on a Pi that also has a game to render.
+— and it is the number to check before trusting the shortcut. The saving is roughly two
+thirds of the thresholding cost, on a Pi that is also rendering a game.
 
-`params.useAruco3Detection = True` adds a second speed idea from the same direction: run
-the candidate search on a downscaled copy of the image, where there are far fewer pixels to
-threshold and trace, then return to the full-resolution frame only for the corners of the
-candidates that survived. Accuracy is unaffected because accuracy comes from §5, which
-always works at full resolution.
+`params.useAruco3Detection = True` is a second speed idea from the same direction: run the
+candidate search on a downscaled copy, where there are far fewer pixels to threshold and
+trace, and return to full resolution only for the candidates that survive. Accuracy is
+unaffected, because accuracy comes from §5, which always works at full resolution.
 
-### 4.4 Contour extraction
+### 4.3 Contour extraction — from regions to shapes
 
-The binary image is now walked to find the boundary of every connected black region
-(OpenCV uses the Suzuki–Abe border-following algorithm). Each contour comes back as an
-ordered list of integer pixel coordinates forming a closed loop.
+**What arrives:** a black-and-white image.
+**What has to be decided:** where each black region ends.
 
-There is no equation here, and one practical consequence worth carrying forward: contours
-are lists of *many* pixels along each side of a marker — typically 80–90 of them per side
-at our working distance. §5 will use every one of them.
+A black region is a set of pixels, but the tests that follow are about *shape*, and shape
+lives in the boundary. So the binary image is walked and the boundary of every connected
+black region is traced out (OpenCV uses the Suzuki–Abe border-following algorithm). Each
+contour comes back as an ordered list of integer pixel coordinates forming a closed loop.
 
-### 4.5 Quad filtering — Douglas–Peucker
+There is no equation here, and nothing is rejected yet — a cluttered frame yields a few
+hundred contours, of which at most a handful are markers.
 
-Most contours are not markers. They are cable edges, table joins, shadow boundaries,
-knuckles. The filter that survives them is simple: a marker's outline, once simplified,
-must be exactly four straight sides.
+Two facts to carry forward. Each side of a marker's outline is made of **many** contour
+pixels — typically 80–90 at our working distance — and §5 will use every one of them. And
+the contour of a marker is traced around the *outside* of its black border, which is why
+the vertices found in the next stage are the corners of the whole tag rather than of
+anything inside it.
 
-**The simplification.** `approxPolyDP` implements the Douglas–Peucker algorithm, which is
-worth stating in full because the doc previously just named it:
+### 4.4 Quad filtering — the first real rejection
 
-1. Take the two endpoints of the contour segment and draw the straight chord between them.
-2. Find the contour point $\mathbf{p}^\ast$ with the greatest perpendicular distance from
-   that chord. For a chord from $\mathbf{a}$ to $\mathbf{b}$, the distance of a point
-   $\mathbf{p}$ is
+**What arrives:** a few hundred closed contours.
+**What has to be decided:** does this outline have exactly four straight sides?
+
+#### The problem, before any algorithm
+
+A contour is not a shape yet. It is a list of perhaps 400 integer pixel coordinates walking
+around a black region, and at that level of detail it has no corners to count — *every*
+pixel is a tiny turn, because a diagonal line drawn on a pixel grid is a staircase. Asking
+"how many corners does this contour have?" gives the useless answer "about 400."
+
+So the question has to be asked differently. Not *where are the corners*, but:
+
+> **How few straight lines can I get away with, and still describe this outline to within
+> a tolerance?**
+
+If the answer is four, it is a candidate. If it is 47, it was a cable.
+
+#### The idea
+
+Here is the trick, and it is the thing to hold on to: **the algorithm never looks for
+corners. It looks for departures from straightness — and the point that departs most is a
+corner.**
+
+Take any stretch of contour and draw the straight chord between its two ends. If every
+point in between lies close to that chord, the stretch really is a straight line and every
+point between the ends can be thrown away. If some point strays far from the chord, then
+the stretch is *not* a line — and that worst-offending point is exactly where the outline
+bends, so keep it as a vertex and ask the same question again about the two shorter
+stretches either side of it.
+
+That is Douglas–Peucker, and `approxPolyDP` implements it.
+
+#### Measuring "strays from the chord"
+
+For a chord from $\mathbf{a}$ to $\mathbf{b}$, the perpendicular distance of a point
+$\mathbf{p}$ is
 
 $$
 d(\mathbf{p}) \;=\; \frac{\left| (\mathbf{b} - \mathbf{a}) \times (\mathbf{p} - \mathbf{a}) \right|}{\|\mathbf{b} - \mathbf{a}\|}
 $$
 
-   where the 2D cross product is the scalar
-   $(b_x - a_x)(p_y - a_y) - (b_y - a_y)(p_x - a_x)$.
-3. If $d(\mathbf{p}^\ast) \le \epsilon$, **discard every interior point** — the whole
-   stretch is within tolerance of a straight line.
-4. Otherwise **keep** $\mathbf{p}^\ast$ as a vertex and recurse on the two halves
-   $[\mathbf{a}, \mathbf{p}^\ast]$ and $[\mathbf{p}^\ast, \mathbf{b}]$.
+where the 2D cross product is the scalar
+$(b_x - a_x)(p_y - a_y) - (b_y - a_y)(p_x - a_x)$.
 
-The recursion terminates because each call strictly shortens the segment. What survives is
-the smallest set of vertices that reproduces the contour to within $\epsilon$ everywhere.
+> **Note on the "2D cross product."** A cross product proper is a vector, and it is defined
+> in 3D. Embed the two 2D vectors in the plane $z = 0$, so $\mathbf{a} = (a_x, a_y, 0)$ and
+> $\mathbf{b} = (b_x, b_y, 0)$; then
+> $\mathbf{a} \times \mathbf{b} = (0,\; 0,\; a_x b_y - a_y b_x)$. The $x$ and $y$ components
+> vanish identically, because the result must be perpendicular to the plane both vectors lie
+> in and so can only point along $z$. "The 2D cross product" is that single surviving
+> component. Its magnitude is $|\mathbf{a}||\mathbf{b}|\sin\theta$ — the area of the
+> parallelogram they span — and its **sign** gives the direction of the turn, which is what
+> the convexity test below reads.
 
-**Why $\epsilon$ is a fraction of the perimeter, not a fixed pixel count:**
+Why this expression is the perpendicular distance: the numerator is the area of the
+parallelogram spanned by the chord and the vector out to $\mathbf{p}$, and a parallelogram's
+area is base × height. Dividing by the base $\|\mathbf{b} - \mathbf{a}\|$ therefore leaves
+the height — which is the perpendicular distance.
+
+#### The recursion
+
+1. Draw the chord between the two endpoints of the current stretch.
+2. Find the contour point $\mathbf{p}^\ast$ with the largest $d(\mathbf{p})$.
+3. If $d(\mathbf{p}^\ast) \le \epsilon$: **discard every point strictly between the two
+   endpoints.** The stretch is a straight line to within tolerance.
+4. Otherwise: **keep $\mathbf{p}^\ast$ as a vertex**, and repeat the whole procedure on the
+   two shorter stretches $[\mathbf{a}, \mathbf{p}^\ast]$ and $[\mathbf{p}^\ast, \mathbf{b}]$.
+
+It terminates because every recursive call is handed a strictly shorter stretch. What
+survives is the smallest set of vertices that reproduces the contour to within $\epsilon$
+everywhere.
+
+#### Watching it run on a real marker
+
+Take a marker of side $s = 90$ px, so its contour has perimeter $4s = 360$ px and
+$\epsilon = 0.05 \times 360 = 18$ px. Label the true corners A, B, C, D going round.
+
+**Start.** The routine begins by splitting the closed loop at two far-apart points; say it
+starts with A and C, which are diagonally opposite. That leaves two stretches, A→B→C and
+C→D→A.
+
+**First stretch, A→C.** The chord is the marker's diagonal. The contour point furthest from
+that diagonal is corner B, at a perpendicular distance of
+
+$$
+\frac{s}{\sqrt{2}} = \frac{90}{1.414} = 63.6 \text{ px}
+$$
+
+Since $63.6 > 18$, **B is kept as a vertex**, and the routine recurses on A→B and B→C.
+
+**Stretch A→B.** This is one side of the marker, a genuine straight edge. The contour
+wobbles off it by a pixel or two from thresholding noise, so
+$d(\mathbf{p}^\ast) \approx 2$ px. Since $2 \le 18$, **every point between A and B is
+discarded** and the side collapses to a clean two-vertex line. Same for B→C.
+
+**Second stretch, C→A.** Identical, finding D.
+
+**Result:** four vertices, A B C D — the marker's corners, recovered without ever having
+looked for a corner. Note what the tolerance is doing: 18 px is loose enough to swallow the
+staircase noise along the sides (2 px) yet nowhere near loose enough to swallow a real
+corner (64 px). The two scales are a factor of thirty apart, which is why this test is
+robust rather than delicate.
+
+#### Why $\epsilon$ is a fraction of the perimeter
 
 $$
 \epsilon \;=\; 0.05 \cdot \text{perimeter}
 $$
 
-A marker 300 px across when the hand is near the camera and 60 px across when it is far
-away is the *same square*, and must simplify to four vertices in both cases. Tying
-$\epsilon$ to the contour's own size makes the tolerance scale-invariant: 5 % of the
-perimeter is 5 % whether the marker is near or far. A fixed 3 px tolerance would either
-over-simplify the small one or under-simplify the large one.
+A marker 300 px across when the hand is near, and 60 px across when it is far, is the *same
+square* and must simplify to four vertices in both cases. Tying $\epsilon$ to the contour's
+own size makes the tolerance **scale-invariant**: 5 % of the perimeter is 5 % whether the
+marker is near or far. A fixed 3 px tolerance would either over-simplify the small marker or
+fail to simplify the large one.
 
-**Worked example.** Take a contour running along the bottom edge of a marker from
-$\mathbf{a} = (100, 400)$ to $\mathbf{b} = (200, 400)$, with a thresholding artefact
-bulging one pixel out at $\mathbf{p} = (150, 403)$. The chord is horizontal with length
-100, so
+The tolerance is deliberately generous, because this stage only has to answer *"is this
+shape a quadrilateral?"* — §5 re-measures the corners properly afterwards, so nothing is
+lost by being loose here.
+
+#### The three tests
+
+A candidate survives only if all three hold.
+
+| Test | Why |
+|---|---|
+| exactly **4** vertices after simplification | a square has four sides, and so does its image under any pinhole camera |
+| **convex** | projection preserves convexity, so a square can never image as a dart or arrowhead. Checked by walking the four edges and requiring the 2D cross product of consecutive edge vectors to keep the same sign all the way round; a sign flip is a reflex corner |
+| above a **minimum size** | below a certain size the interior cannot carry 8 readable cells across, and the corners would be too coarse to be worth solving with. OpenCV expresses this as `minMarkerPerimeterRate`, a fraction of the larger image dimension, rather than as an absolute area — so it scales with resolution |
+
+Note what is *not* tested: **squareness**. A square in the world is almost never a square in
+the image, and requiring one would reject every marker not viewed head-on — which, on a
+device with markers on eight angled faces, is nearly all of them. More than that, the
+departure from squareness is not noise to be filtered out; it **is** the measurement. §6
+recovers the pose precisely from how the square has been distorted. Testing for squareness
+would mean discarding the signal.
+
+Put the other way round: the possible images of a square, under any pinhole camera from any
+pose, are essentially exactly the convex quadrilaterals. So "convex quadrilateral" is not a
+cautious guess — it is the tightest test that is guaranteed never to reject a real marker.
+
+#### How selective is it, honestly
+
+Most junk dies here — cable edges meander into a dozen vertices, shadow boundaries are soft
+and irregular, text simplifies into many segments. But the test is coarser than it looks,
+and it is worth knowing where it fails.
+
+Run the numbers on a **circle** of radius $r$, which is roughly what a knuckle or a
+lens-cap gives you. Its perimeter is $2\pi r$, so $\epsilon = 0.05 \times 2\pi r = 0.314r$.
+Splitting the circle across a diameter, the furthest arc point is $r$ from the chord, and
+$r > 0.314r$, so a vertex is kept. Recursing onto the quarter arcs, the chord has length
+$r\sqrt{2}$ and the furthest arc point sits
 
 $$
-d(\mathbf{p}) = \frac{|(100)(3) - (0)(50)|}{100} = 3 \text{ px}
+r - r\cos 45^\circ = r(1 - 0.707) = 0.293r
 $$
 
-If this side belongs to a marker of perimeter 400 px, then $\epsilon = 20$ px and
-$3 \le 20$: the bulge is discarded and the side collapses to a clean two-vertex line. A
-genuine corner, sitting 50–100 px off its chord, survives easily. The tolerance is
-generously wide because §5 will re-measure the corners properly anyway — this stage only
-has to answer *"is this shape a quadrilateral?"*, not *"where exactly are its corners?"*
+from it. Since $0.293r \le 0.314r$, the recursion **stops** — and a circle simplifies to a
+convex quadrilateral that passes all three tests.
 
-**The surviving tests.** A candidate is kept only if the simplified polygon has exactly
-4 vertices, is **convex**, and exceeds a minimum area. Convexity is checked by walking the
-four edges and requiring the 2D cross product of consecutive edge vectors to keep the same
-sign all the way round — a sign flip means the outline turns back on itself, which a
-square photographed through *any* pinhole camera can never do.
+That is not a bug, and it is why §4.0 insists the section is a funnel rather than a single
+test. This stage is cheap and removes the bulk; the border-black check and the dictionary
+lookup in §4.6 and §4.7 are what finish the job. No stage here is complete on its own.
 
-### 4.6 Perspective rectification — the homography
+#### What leaves this stage
 
-Each surviving quadrilateral is a distorted view of a square. To read the bits inside, it
-must first be un-distorted back into a square. **This subsection is the most important
-piece of maths in §4, because the same object comes back in §6 as the pose solver itself.**
+For each survivor, four vertices accurate to about a pixel — **and these are the corners
+that §6 will eventually consume.** They were never selected from a set of candidate points;
+they are simply where the simplified outline turns. Finding the marker and locating its
+corners are one operation.
 
-**Why a marker's image is governed by a $3\times3$ matrix.** Take §0.6's projection and
-feed it a point on the marker. The marker is *flat*, so in the marker's own frame every
-point has $Z = 0$:
+Everything remaining in §4 exists to decide whether those four vertices belong to a real
+marker, and if so, to which one.
+
+### 4.5 Perspective rectification — the homography
+
+**What arrives:** a few dozen quadrilaterals.
+**What has to be done:** look inside each one — but it is being viewed at an angle.
+
+To test a candidate we must read the pattern printed inside it, and to read it we need a
+head-on view. This subsection produces that view, and **it is the most important piece of
+maths in §4**, because the same object returns in §6 as the pose solver itself.
+
+**Why a flat marker's image is governed by a $3\times3$ matrix.** Take §0.6's projection
+and feed it a point on the marker. The marker is flat, so in its own frame every point has
+$Z = 0$:
 
 $$
 \lambda \begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
@@ -1671,9 +1814,9 @@ $$
 $$
 
 Write $\mathbf{R}$ by its columns, $\mathbf{R} = [\,\mathbf{r}_1 \mid \mathbf{r}_2 \mid \mathbf{r}_3\,]$.
-Then $\mathbf{R}(x, y, 0)^\top = x\,\mathbf{r}_1 + y\,\mathbf{r}_2 + 0 \cdot \mathbf{r}_3$
-— **the third column drops out entirely**, because there is no third coordinate to
-multiply it. So
+Then $\mathbf{R}(x, y, 0)^\top = x\,\mathbf{r}_1 + y\,\mathbf{r}_2 + 0\cdot\mathbf{r}_3$ —
+**the third column drops out entirely**, because there is no third coordinate to multiply
+it. So
 
 $$
 \lambda \begin{bmatrix} u \\ v \\ 1 \end{bmatrix}
@@ -1682,17 +1825,19 @@ $$
 \begin{bmatrix} x \\ y \\ 1 \end{bmatrix}
 $$
 
-$\mathbf{H}$ is a $3 \times 3$ matrix called the **homography**. What has just been proved
-is a strong statement: *any* flat object, viewed by *any* pinhole camera, from *any* pose,
-maps to the image through a single $3 \times 3$ matrix. Flatness is the whole reason — the
-$Z = 0$ that killed $\mathbf{r}_3$.
+$\mathbf{H}$ is the **homography**. What has been proved is strong: *any* flat object,
+viewed by *any* pinhole camera, from *any* pose, maps into the image through a single
+$3\times3$ matrix. Flatness is the entire reason — the $Z = 0$ that killed $\mathbf{r}_3$.
 
-**How many numbers does it really have?** $\mathbf{H}$ has 9 entries, but it appears inside
-an equality-up-to-scale (the $\lambda$, §0.6). Multiplying every entry by 5 multiplies
-$\lambda$ by 5 and leaves $(u, v)$ untouched. So one degree of freedom is meaningless and
+**How many numbers it really has.** $\mathbf{H}$ has 9 entries but appears inside an
+equality-up-to-scale (the $\lambda$, §0.6). Multiplying every entry by 5 multiplies
+$\lambda$ by 5 and leaves $(u,v)$ untouched, so one degree of freedom is meaningless and
 $\mathbf{H}$ carries **8** — conventionally fixed by setting $h_{33} = 1$.
 
-**Solving for it from four corners.** Expand the matrix equation into scalars and divide
+**Solving for it from four corners.** Write $h_{ij}$ for the entry of $\mathbf{H}$ in row
+$i$, column $j$ — nine numbers, of which eight are free. Here $(x, y)$ is a corner's known
+position in the marker's own frame and $(u, v)$ is where that corner was observed in the
+image, so both are known and only the $h_{ij}$ are unknown. Expand into scalars and divide
 out $\lambda$ by taking ratios against the third row:
 
 $$
@@ -1701,7 +1846,7 @@ u = \frac{h_{11}x + h_{12}y + h_{13}}{h_{31}x + h_{32}y + h_{33}},
 v = \frac{h_{21}x + h_{22}y + h_{23}}{h_{31}x + h_{32}y + h_{33}}
 $$
 
-These look hopeless — the unknowns are in the denominator. But multiply through by the
+The unknowns are in the denominator, which looks hopeless. But multiply through by that
 denominator and every $h$ appears to the first power only:
 
 $$
@@ -1711,63 +1856,97 @@ $$
 h_{21}x + h_{22}y + h_{23} - v\,h_{31}x - v\,h_{32}y - v\,h_{33} = 0
 $$
 
-**Two linear equations per corner.** This is the same trick as §0.6's homogeneous
-coordinates, used again: cross-multiplying moves a division out of the unknowns and leaves
-a linear system. Four corners give $4 \times 2 = 8$ equations for 8 unknowns — exactly
-determined, no least squares needed. That is why the detector wants exactly four vertices
-and why `cv2.getPerspectiveTransform` takes exactly four point pairs.
+**Two linear equations per corner.** This is §0.6's homogeneous-coordinate trick used
+again: cross-multiplying moves a division out of the unknowns and leaves a linear system.
+Four corners give $4 \times 2 = 8$ equations for 8 unknowns — exactly determined, no least
+squares needed. That is why the previous stage had to deliver exactly four vertices, and
+why `cv2.getPerspectiveTransform` takes exactly four point pairs.
 
-**Concretely, for one corner.** Marker-frame corner $(x, y) = (0, 0)$ observed at pixel
+*Concretely, for one corner.* Marker-frame corner $(x, y) = (0,0)$ observed at pixel
 $(u, v) = (612, 344)$, with $h_{33}$ fixed to 1, contributes the two rows
 
 $$
 h_{13} = 612, \qquad h_{23} = 344
 $$
 
-(every term carrying $x$ or $y$ vanishes). The other three corners fill in the remaining
-six rows, and an $8 \times 8$ solve finishes it.
+(every term carrying $x$ or $y$ vanishes). The other three corners fill the remaining six
+rows, and an $8\times8$ solve finishes it.
 
 **Then the resampling.** With $\mathbf{H}$ known, `warpPerspective` fills a small canonical
 image by running the map backwards — for each output cell, ask which input pixel it came
-from — the same output-first strategy, and for the same reason, as §3's undistortion map.
-For `36h11` the canonical view is $8 \times 8$ cells (6 data cells plus a one-cell black
-border all round) at `perspectiveRemovePixelPerCell = 4` pixels per cell, so a $32 \times 32$
-image.
+from. That is the same output-first strategy, for the same reason, as §3.6's undistortion
+map. For `36h11` the canonical view is $8 \times 8$ cells at
+`perspectiveRemovePixelPerCell = 4` pixels per cell, so a $32 \times 32$ image.
 
 **Hold on to this.** $\mathbf{H} = \mathbf{K}[\,\mathbf{r}_1 \mid \mathbf{r}_2 \mid \mathbf{t}\,]$
-has $\mathbf{R}$ and $\mathbf{t}$ sitting inside it — the very quantities the tracker is
-trying to find. The detector computes $\mathbf{H}$ only to read the bits and then throws it
-away. §6.3 computes the same object and **decodes it into a pose** instead. The detection
-stage and the pose stage are the same equation read in two directions.
+has $\mathbf{R}$ and $\mathbf{t}$ inside it — the very quantities the tracker is trying to
+find. The detector computes $\mathbf{H}$ only to read the bits and then throws it away.
+§6.3 computes the same object and **decodes it into a pose**. Detection and pose estimation
+are the same equation read in two directions.
 
-### 4.7 Bit decoding
+### 4.6 Reading the cells — and what the dictionary is
 
-Divide the canonical view into its $8 \times 8$ cells and average the pixels inside each
-one, trimming a margin from every cell edge before averaging
+**What arrives:** a head-on $32\times32$ view of each candidate.
+**What has to be decided:** what code word, if any, is printed on it.
+
+**Two things are being combined in this pipeline,** and this is where the second one
+finally enters:
+
+```python
+dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+detector   = aruco.ArucoDetector(dictionary, params)
+```
+
+- The **codebook** is AprilTag's `36h11` family (developed by Edwin Olson's group at
+  Michigan). It defines which bit patterns are legal marker IDs — and nothing else. It has
+  played no part in §4.2 to §4.5.
+- The **detector** is OpenCV's ArUco detector: everything above, plus the lookup below.
+
+So the tags on the device are AprilTags and the code that finds them is the ArUco pipeline.
+Nothing is inconsistent about that — the image stages are agnostic about which dictionary
+they are eventually handed.
+
+**Decoding the name.** `36h11` means **36 data bits**, arranged as a $6\times6$ grid, with
+a guaranteed **minimum Hamming distance of 11** between any two codes in the family. The
+Hamming distance between two equal-length bit strings is simply the number of positions at
+which they differ. Those two numbers are the entire design:
+
+- 36 bits could in principle label $2^{36}$ markers. The family keeps only **587** — the
+  rest are discarded precisely so the survivors are far apart from one another.
+- "Far apart" is what buys the error correction in §4.7 and, just as importantly, what
+  makes a random piece of clutter that got this far extremely unlikely to decode as a
+  legal ID. It is the last and most selective filter in the funnel.
+
+That trade — throwing away almost all the codes so the few remaining are unmistakable — is
+the same reasoning as error-correcting codes in a communication link: a larger minimum
+distance costs rate and buys reliability.
+
+**Reading the cells.** Divide the canonical view into its $8 \times 8$ cells and average
+the pixels inside each one, trimming a margin from every cell edge before averaging
 (`perspectiveRemoveIgnoredMarginPerCell = 0.13`, so only the central 74 % of each cell
 counts). The margin matters: cell boundaries are exactly where the resampling is least
-trustworthy and where a fraction of a pixel of homography error does the most damage.
-Threshold each cell mean → a bit.
+trustworthy, and where a fraction of a pixel of homography error does the most damage.
+Threshold each cell mean, and each cell becomes one bit.
 
-The 28 border cells must all come out black. A candidate that fails this is rejected
-immediately, before any dictionary lookup — cheap, and it kills most surviving clutter.
-The 36 interior cells become the observed code word.
+The 28 border cells must all come out black. A candidate failing that is rejected
+immediately, before any dictionary lookup — cheap, and it kills most of the clutter that
+survived §4.4. The 36 interior cells become the observed code word.
 
-### 4.8 Dictionary lookup, error correction, and orientation
+### 4.7 Dictionary lookup — identity, error correction, orientation
 
-**Hamming distance** between two bit strings is simply the number of positions where they
-differ. The `36h11` family guarantees that any two of its 587 valid codes differ in at
-least 11 of the 36 positions.
+**What arrives:** a 36-bit observed code word per surviving candidate.
+**What has to be decided:** is it legal, which marker is it, and which way up.
 
-**Why that corrects up to 5 errors.** Suppose the true marker's code is $c$, and glare,
-blur, or a smudge flipped $e$ of the observed bits, giving $c'$ with $d(c, c') = e$. Take
-any *other* valid code $c''$. By the triangle inequality for Hamming distance,
+**Why a minimum distance of 11 corrects up to 5 errors.** Suppose the true marker's code is
+$c$, and glare, blur or a smudge flipped $e$ of the observed bits, giving $c'$ with
+$d(c, c') = e$. Take any *other* legal code $c''$. By the triangle inequality for Hamming
+distance,
 
 $$
 d(c', c'') \;\ge\; d(c, c'') - d(c, c') \;\ge\; 11 - e
 $$
 
-So $c$ is the strictly nearest valid code to what was observed whenever
+So $c$ is the strictly nearest legal code to what was observed whenever
 
 $$
 e \;<\; 11 - e
@@ -1777,21 +1956,21 @@ e \;<\; 5.5
 e \;\le\; 5
 $$
 
-Up to 5 flipped bits out of 36 — one bit in seven — and the ID is still recovered
-*uniquely*, not merely plausibly. The general statement is that a minimum distance $d$
-corrects $\lfloor (d-1)/2 \rfloor$ errors; here $\lfloor 10/2 \rfloor = 5$. The detector
-reports the ID when the nearest valid code is within that radius and rejects the candidate
-otherwise.
+Up to 5 flipped bits out of 36 — one bit in seven — and the ID is recovered *uniquely*,
+not merely plausibly. The general statement is that a minimum distance $d$ corrects
+$\lfloor (d-1)/2 \rfloor$ errors; here $\lfloor 10/2 \rfloor = 5$. The detector reports the
+ID when the nearest legal code lies within that radius, and rejects the candidate
+otherwise. **That rejection is the last gate in the funnel.**
 
-**Orientation falls out of the same lookup, and this matters more than it looks.** The
-detector does not know which side of the quadrilateral is the marker's "top". So it tests
-the observed 36 bits in all four 90° rotations against the dictionary. Only one rotation
-matches a valid code — the family is built so that no code is a rotation of another — and
-that tells you which detected vertex is the marker's top-left.
+**Orientation falls out of the same lookup, and it matters more than it looks.** Nothing so
+far knows which side of the quadrilateral is the marker's "top". So the observed 36 bits are
+tested in all four 90° rotations against the dictionary. Exactly one rotation matches —
+the family is constructed so that no legal code is a rotation of another — and that tells
+you which detected vertex is the marker's top-left.
 
 This is what makes the corner order **consistent**, and §6 depends on it completely.
-`solvePnP` pairs object point $k$ with image point $k$; `board.py` lists the object points
-in ArUco's detection order:
+`solvePnP` pairs object point $k$ with image point $k$, and `board.py` lists the object
+points in ArUco's detection order:
 
 ```python
 def marker_object_points(length):
@@ -1802,19 +1981,22 @@ def marker_object_points(length):
                      [-h, -h, 0]])    # bottom-left
 ```
 
-Get that order wrong and `solvePnP` still returns a pose, confidently, and it is wrong by
-a 90° rotation.
+Get that order wrong and `solvePnP` still returns a pose, confidently, wrong by a 90°
+rotation.
 
-### 4.9 What comes out
+### 4.8 What comes out of the funnel
 
 ```python
 corners, ids, _ = self.detector.detectMarkers(frame0)
 ```
 
 `ids` is an $(N, 1)$ array of integers; `corners` is a tuple of $N$ arrays of shape
-$(1, 4, 2)$, in the order TL, TR, BR, BL. Corner accuracy at this point is about
-$\pm 1$ pixel — they came from a polygon fitted to integer contour points on a
-thresholded image, and nothing so far has done better than whole pixels.
+$(1, 4, 2)$, ordered TL, TR, BR, BL. For this device $N$ is typically 1 to 3.
+
+A million grey pixels have become a few numbers, and every one of the rejection tests above
+had to pass for them to be there. Corner accuracy at this point is about $\pm 1$ pixel —
+they came from a polygon fitted to integer contour points on a thresholded image, and
+nothing so far has done better than whole pixels.
 
 The next section explains why $\pm 1$ pixel is nowhere near good enough.
 
@@ -1883,7 +2065,7 @@ are long straight high-contrast edges, and the method below exploits exactly tha
 
 ### 5.3 Fitting a line to one side — total least squares
 
-For each of the four sides, collect the contour pixels lying along it (§4.4 — around 80–90
+For each of the four sides, collect the contour pixels lying along it (§4.3 — around 80–90
 of them) and fit a straight line.
 
 **Why not ordinary least squares.** The familiar fit minimises $\sum (y_k - m x_k - c)^2$,
@@ -2221,7 +2403,7 @@ with $n = 4$.
 **Why it is now solvable — count.** $\mathbf{R}$ carries 3 degrees of freedom and
 $\mathbf{t}$ carries 3, so there are **6 unknowns**. Each corner contributes 2 equations
 (its $u$ and its $v$; the $\lambda_i$ are eliminated by the same cross-multiplication as
-§4.6), so four corners give **8 equations**. Overdetermined by 2.
+§4.5), so four corners give **8 equations**. Overdetermined by 2.
 
 The surplus is not waste — it is the whole reason the pipeline can check itself. With
 exactly 6 equations any pose could be made to fit, and there would be no such thing as a
@@ -2242,7 +2424,7 @@ if $L$ is wrong, every distance the tracker reports is scaled by the same factor
 
 ### 6.3 Solving the planar case by decomposing a homography
 
-Here is the payoff for §4.6. That section proved that a flat marker's image is governed by
+Here is the payoff for §4.5. That section proved that a flat marker's image is governed by
 
 $$
 \mathbf{H} = \mathbf{K}\,[\,\mathbf{r}_1 \mid \mathbf{r}_2 \mid \mathbf{t}\,]
@@ -2261,7 +2443,7 @@ $$
 $$
 
 The unknown scalar $s$ survives because $\mathbf{H}$ was only ever defined up to scale
-(§4.6). Write $\mathbf{M}$'s columns as $\mathbf{m}_1, \mathbf{m}_2, \mathbf{m}_3$.
+(§4.5). Write $\mathbf{M}$'s columns as $\mathbf{m}_1, \mathbf{m}_2, \mathbf{m}_3$.
 
 **Step 2 — recover the scale from the fact that $\mathbf{R}$ is a rotation.** The columns
 of a rotation matrix are unit vectors. So $\|\mathbf{m}_1\| = s\|\mathbf{r}_1\| = s$, and
@@ -2285,7 +2467,7 @@ $$
 \mathbf{r}_3 = \mathbf{r}_1 \times \mathbf{r}_2
 $$
 
-The third column is *recovered*, not measured — it was annihilated back in §4.6 when
+The third column is *recovered*, not measured — it was annihilated back in §4.5 when
 $Z = 0$ killed it, and the cross product puts it back using the fact that a rotation
 matrix's columns are mutually perpendicular and right-handed. The sign of $s$ is chosen so
 that $t_z > 0$: the marker must be in front of the camera, not behind it.
@@ -3233,7 +3415,7 @@ $$
 workspace surface) to another (the screen). Unlike every earlier stage, **no camera is
 involved** — the perspective was already inverted back in §6, and what remains is a
 correspondence between two flat coordinate systems related by rotation, scale, shear and
-offset. That is exactly what an affine map expresses. A full homography (§4.6) would add
+offset. That is exactly what an affine map expresses. A full homography (§4.5) would add
 two perspective terms that have nothing physical to represent here, and would fit noise
 with them.
 
@@ -3251,6 +3433,61 @@ consistent sign or scale convention upstream. That is a convenience and a hazard
 systematic scale error introduced back in §2 (a mis-measured chessboard square) is absorbed
 here too, invisibly, and the cursor still lands where the patient expects while every
 number in the recorded CSV is wrong by the same percentage.
+
+---
+
+## Performance — the per-frame budget
+
+Measured on a Raspberry Pi 5 at 1280×800 with `debug: true`, 2026-08-01. `main.py` prints
+per-stage means once a second; the figures below are from that output.
+
+**The starting point** — four stages running in series, so the loop period was their sum:
+
+| Stage | Time | What it is |
+|---|---|---|
+| capture | 1.5 ms | `picam2.capture_array()` — the buffer read, **not** the 5 ms exposure, which overlaps the previous frame |
+| remap | 3.25 ms | `cv2.remap` over 1,024,000 pixels |
+| detect | 8.3 ms | `detectMarkers` — adaptive threshold over the whole frame, then contours, quads, decode, refine |
+| pose + send | 0.78 ms | `solvePnP`, board solve, filter, UDP |
+| **total** | **13.83 ms** | ≈ 72 fps |
+
+`detect` is 60% of the budget. `remap` is memory-bound rather than compute-bound — the
+`CV_16SC2` lookup table is ~6 MB per frame, larger than the image it is warping.
+
+**What actually changed it:**
+
+| Setting | Value | Effect |
+|---|---|---|
+| `debug_preview` | `false` | Removes `cv2.resize`, `cv2.imshow` and `waitKey(1)`. These cost 3.8–8.9 ms per frame and sit **outside** the `t0`…`t4` timing window, so they capped the rate at 51–71 fps while never appearing in the printed totals. |
+| `pipeline` | `true` | Moves capture + undistort to a worker thread. The period becomes the slower half instead of the sum: `max(1.5+3.25, 8.3+0.78) = 9.08 ms`. Costs one frame (~9 ms) of extra latency. |
+| `opencv_threads` | `2` | Caps OpenCV's parallelism so it cannot starve Godot's render thread. Raising it is the remaining lever on `detect`. |
+
+**Result: ~98–101 fps**, which is the sensor's target rate. The loop is now sensor-limited
+rather than compute-limited — main-thread work sits at ~10.3 ms against a 10 ms frame
+interval, with no margin, which is why the count varies by a frame or two.
+
+**Tried and rejected:** `undistort_image: false` detects on the raw frame and undistorts only
+the four corners per marker (`cv2.fisheye.undistortPoints`), replacing a megapixel remap with
+a few dozen point transforms. It saves the full 3.25 ms, but introduced visible jitter —
+`CORNER_REFINE_CONTOUR` fits straight lines to marker edges, and on the raw frame those edges
+are slightly curved. The flag stays `true`. Worth revisiting only if a wider lens ever makes
+the remap unaffordable.
+
+**Two traps when reading the debug line:**
+
+1. **With `pipeline: true`, `total` is not the loop period.** Capture and remap time as ~0
+   because that work is on the other thread. The real rate is the `(N frames)` count at the
+   end of the line — the print is throttled to once a second and the buffer cleared each time,
+   so that number *is* frames per second.
+2. **The first line printed is a single frame, not an average.** `_dbg_last_print` starts at
+   `0.0` while `now` is epoch seconds, so the throttle trivially passes on frame one. Ignore
+   it.
+
+Also note `detect` varies with what the camera is looking at, not just with resolution.
+Adaptive thresholding is fixed per pixel, but contour extraction, quad filtering and corner
+refinement all scale with how many *candidates* the threshold produces — so more markers,
+clutter, or a darker scene all cost more. Correlate it against the marker count printed on
+the same line before treating a change as a regression.
 
 ---
 
