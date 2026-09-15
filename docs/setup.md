@@ -140,8 +140,7 @@ Or open `project.godot` in the Godot editor and press F5.
 
 ### Main scene
 
-`res://app/ui/main.tscn`. Display: fullscreen, `canvas_items` stretch mode, OpenGL compatibility renderer (Raspberry Pi requirement). (`res://v2/Scenes/main.tscn` still launches the frozen pre-v1 build.)
-
+`res://app/ui/main.tscn`. Display: fullscreen, `canvas_items` stretch mode, OpenGL compatibility renderer (Raspberry Pi requirement).
 ### Game flow
 
 1. Main screen — type hospital ID → press **Enter** (not Play button) → enters game selection.

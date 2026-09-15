@@ -49,7 +49,7 @@ A single reaching game wired to the adaptive controller. Each apple is a target;
 
 ## 4. Adaptive Controller (current — Fitts' Law)
 
-The deployed `v2/Core/adaptive_manager.gd` uses Fitts' Law to drive difficulty. It replaced an earlier PI controller (preserved as `adaptive_manager_pid.gd` for reference).
+The deployed `app/platform/adaptive_manager.gd` uses Fitts' Law to drive difficulty. It replaced an earlier PI controller (`v2/Core/adaptive_manager_pid.gd`, kept at git tag `archive-before-cleanup`).
 
 ### 4.1 Calibration phases (full run: first session, then weekly)
 
@@ -157,7 +157,7 @@ from the pair's nominal $A$; logged difficulty uses the nominal value — known 
 
 ## 5. Earlier Controller (PI on lifetime / workspace) — historical
 
-Replaced 2026-06-10. Preserved as `v2/Core/adaptive_manager_pid.gd`. Two interchangeable modes:
+Replaced 2026-06-10. Preserved as `v2/Core/adaptive_manager_pid.gd` at git tag `archive-before-cleanup`. Two interchangeable modes:
 
 - **Lifetime mode** — controlled the centre of a lifetime-sampling window around a per-patient threshold `t` (in seconds). PI update: `Δ ← Δ − (K_p·e + K_i·I)`, with dead band ±0.05.
 - **Workspace mode** — same controller template, but on the rect-scale of the spawn position (0 = workspace centre, 1 = workspace edge).
@@ -171,9 +171,9 @@ The full historical maths walkthrough is in [presentation_notes.md](presentation
 ## 6. Architecture
 
 All active code is in `app/`, split platform / games / ui / installer (see
-[v1_plan.md](v1_plan.md)). `v2/` is the frozen fallback `app/` was copied from,
-still launchable via `--main-scene res://v2/Scenes/main.tscn`. The pre-v2
-codebase is retired in `legacy/` (`.gdignore`d, see `legacy/README.md`).
+[v1_plan.md](v1_plan.md)). It is the only version: the `v2/` codebase it was copied
+from and the older `legacy/` games were deleted 2026-09-15 and are kept at git tag
+`archive-before-cleanup`.
 
 ### Autoloads (order matters; see `project.godot`)
 
@@ -235,12 +235,12 @@ pyscripts/main.py
     - corner stability gate (skip solvePnP if corners haven't moved)
     - temporal filter (EMA / Kalman / OneEuro, selectable)
     ↓ UDP 4-float packet
-v2/Core/udp_receiver.gd  (port 12345)
+app/platform/udp_receiver.gd  (port 12345)
     - background thread reads packets
     - sensor-to-screen 2D affine transform (4 corners → 6-parameter fit)
     - exposes screen_pos as global state
     ↓
-v2/Core/adaptive_manager.gd
+app/platform/adaptive_manager.gd
     - sets per-apple (A, W) and lifetime via Fitts' formula
     - updates (a, b) via RLS, σ_k via Welford after each catch
 ```
@@ -309,7 +309,7 @@ Data sync to a researcher server and a researcher dashboard are planned but not 
 
 ## 12. Key design conventions (do not violate)
 
-- All UI is **programmatic GDScript** — no `.tscn` files for v2 game scenes.
+- All UI is **programmatic GDScript** — no `.tscn` files for game scenes.
 - Always use `get_viewport_rect().size`; never `DisplayServer.screen_get_size()`.
 - Type inference breaks on autoload properties: use `var x: float = AutoLoad.value`, not `:=`.
 - Mouse fallback is active when `UDPReceiver.connected == false` — dev only.

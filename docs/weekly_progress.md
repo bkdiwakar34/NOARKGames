@@ -60,7 +60,7 @@ Key commits:
 
 ### 2026-06-04 (simulator)
 - Use sheep position at spawn time for speed estimation
-- **Interactive PID simulator** (`legacy/simulate.py`, retired with the PID controller): per-apple update frequency control
+- **Interactive PID simulator** (`legacy/simulate.py`, retired with the PID controller; at git tag `archive-before-cleanup`): per-apple update frequency control
 - Simulator redesign: r-space (`r = distance / (lifetime × speed)`), principled init, deterministic analytic catch rate, healthy user model with separate `actual_speed` vs `estimated_speed`
 
 **Theme**: built the adaptive difficulty system end-to-end (PI → PID → staircase calibration → simulator for validation).
@@ -72,7 +72,7 @@ Key commits:
 **Major pivot: PID → Fitts' Law. Hardware integration.**
 
 ### 2026-06-10 (Fitts' Law replacement)
-- **Replace PID adaptive manager with Fitts' Law ADA system** *(see [v2/Core/adaptive_manager_pid.gd](v2/Core/adaptive_manager_pid.gd) — kept as reference, no longer autoloaded)*
+- **Replace PID adaptive manager with Fitts' Law ADA system** *(see `v2/Core/adaptive_manager_pid.gd` at git tag `archive-before-cleanup` — kept as reference, no longer autoloaded)*
 - Fix Pi-specific type inference bug *(explicit type annotation for phase_str)*
 
 ### 2026-06-11 (hardware integration sprint)

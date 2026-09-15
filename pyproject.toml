@@ -14,7 +14,7 @@ dependencies = [
 
 # This is a Godot project, not a Python package — pyproject.toml exists only
 # to declare pyscripts/'s dependencies. Without this, setuptools' automatic
-# package discovery finds every top-level folder (v2/, rcam/, Games/, ...)
+# package discovery finds every top-level folder (app/, rcam/, pyscripts/, ...)
 # and refuses to build.
 [tool.setuptools]
 packages = []
