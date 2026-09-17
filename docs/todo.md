@@ -8,6 +8,9 @@ The v1 product build order (logging, game feel, kiosk, installer mode, upload) i
 
 ## Tracker pipeline
 
+- **Auto-load the `ov9282` driver at boot.** Currently `sudo modprobe ov9282` is needed after every reboot (a `/etc/modules-load.d/` entry should do it, untested).
+- **Back up the per-device calibration files off the board** — `camera_calib_1.toml`, `board_geometry.json`, `stereo_extrinsics.json` are git-ignored, and the 2026-09-17 reinstall lost them.
+
 - **Dragon Q6A dual-camera tracking** is implemented (`camera_backend: "rcam_dual"` in settings.json, see [setup.md §3c](setup.md)). Needs on-device verification: run `calibrate_stereo.py`, confirm origin-lock timing and grip-point smoothness are comparable to single-camera, and confirm the single-camera fallback (occlude one camera) behaves cleanly. **If either camera is physically moved or re-mounted, re-run `calibrate_stereo.py`** — the extrinsic transform is only valid for the rig's exact mounted geometry (same caveat as the existing single-camera origin-lock note below).
 - **Re-run the 4-corner sensor-to-screen calibration.** The removal of `cv2.flip(frame, 1)` and the switch to a properly-fit `camera_calib.toml` changed the raw values the tracker reports. The old screen-mapping coefficients are invalid; redo via `workspace_calibration_overlay.gd`.
 - **Resolution alignment audit.** `Config.FRAME_SIZE` is now `(1280, 800)` (OV9281 native). Confirm everything downstream in Godot is happy at this resolution.

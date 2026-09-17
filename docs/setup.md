@@ -28,14 +28,42 @@ now; it is unused here and comes out once a Q6A run confirms the tracker is heal
 
 Download the ARM64 Linux Godot binary and place it at the path above. The project targets Godot 4.5.
 
-### 2. Install Python deps
+### 2. System packages and Python
+
+RadxaOS ships Python 3.12; `rcam` needs **3.13+**. Do not replace the system
+Python - install 3.13 alongside it with `uv`.
 
 ```bash
-cd ~/Documents/NOARKGames
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+sudo apt update
+sudo apt install -y git curl build-essential clang libclang-dev                     linux-headers-$(uname -r) device-tree-compiler v4l-utils
 ```
+
+| Package | Needed for |
+|---|---|
+| `build-essential`, `clang`, `libclang-dev` | `rcam`'s Rust extension (bindgen reads the kernel's C headers through libclang) |
+| `linux-headers-$(uname -r)` | building the out-of-tree `ov9282` sensor driver |
+| `device-tree-compiler` | `dtc` / `fdtoverlay`, used when checking or merging the camera overlay |
+| `v4l-utils` | `media-ctl`, which `rcam` shells out to; without it `list_cameras()` raises |
+
+Then Python and the project venv:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.local/bin/env
+uv python install 3.13
+cd ~/Documents/NOARKGames
+uv venv --python 3.13 .venv
+source .venv/bin/activate
+uv pip install -e .          # tracker deps (opencv <5, scipy, toml)
+uv pip install -e ./rcam     # camera package, INTO THE SAME venv
+```
+
+`uv pip`, not bare `pip`: a uv-created venv has no pip, and a bare `pip install`
+would hit the system Python instead.
+
+`uv pip install -e ./rcam` (not `cd rcam && uv sync`): `main.py` imports `rcam`
+into its own process, so both must live in **one** venv. `uv sync` inside
+`rcam/` builds a second, separate venv that the tracker cannot import from.
 
 Dependencies declared in `pyproject.toml`; `uv.lock` pins exact versions.
 
@@ -71,24 +99,101 @@ flags any marker whose `MARKER_OFFSETS` entry disagrees by > 5 mm.
 it falls back to the old per-marker method. Redo only if a marker is re-glued.
 Disable via `"use_board_pnp": false` in settings.json.
 
-### 3c. Dual-camera setup (the normal path on this board)
+### 3c. Cameras: driver + device-tree overlay
 
-Requires Python ≥3.13 and a Rust toolchain on the Q6A for `uv sync` to build `rcam._native` — see [`rcam/README.md`](../rcam/README.md). `main.py` imports `rcam` directly into its own process (not a subprocess), so **the main project's own venv** (step 2 above), not just `rcam/`'s, must be created with Python ≥3.13 — check with `python3 --version` before `python -m venv .venv` on the Q6A.
+Two OV9281 on `CAM2` (cam0) and `CAM3` (cam1). Neither the sensor driver nor the
+board's description of the cameras is in the stock image, so both are built and
+installed once per fresh OS.
+
+**Connect the cameras with the board powered off.** Which camera goes in which
+port matters: `stereo_extrinsics.json` encodes the cam1 -> cam0 transform, so
+swapping the ports invalidates it.
+
+#### Build and install the sensor driver
 
 ```bash
-sudo modprobe ov9282        # out-of-tree driver; once per boot unless persisted
-                             # (see rcam/ov9281/README.md for a persistent option)
-cd rcam && uv sync           # builds rcam._native for this machine
+cd ~/Documents/NOARKGames/rcam/ov9281
+make -C module
+sudo install -D -m0644 module/ov9282.ko /lib/modules/$(uname -r)/updates/ov9282.ko
+sudo depmod -a
+sudo modprobe ov9282
+lsmod | grep ov9282      # loaded, 0 users until the overlay lands
 ```
 
-Then, from the repo root:
+`ov9282` is the mainline driver that covers the OV9281; RadxaOS ships without it
+enabled. The source in `module/` is unmodified mainline (6.18 series), so it
+builds against a 6.18.x kernel as-is.
 
-1. Run `calibrate_camera.py` once per camera — the default `camera_calib.toml` for cam0 (`CAM2`), and again with `"calibration_file"` overridden (or renamed after) to produce `camera_calib_1.toml` for cam1 (`CAM3`).
-2. Run `calibrate_board.py` as usual (one board, either camera) if `board_geometry.json` doesn't exist yet.
-3. Run `python pyscripts/calibrate_stereo.py` — solves the fixed rigid transform between the two cameras by watching both independently track the same board simultaneously (no separate checkerboard needed). Move the device around until the sample counter passes 60, press **S** to save `pyscripts/stereo_extrinsics.json`.
-4. Set `"camera_backend": "rcam_dual"` in `settings.json` (leave it `"auto"` to keep using the Pi/picamera2 path unchanged).
+#### Enable the camera overlay (RadxaOS r2 images - `rsetup`)
 
-If one camera loses its feed mid-session (occlusion, disconnect), the tracker automatically falls back to tracking with the surviving camera rather than stopping.
+```bash
+sudo cp overlay/qcs6490-radxa-dragon-q6a-dual-ov9281.dtbo /boot/dtbo/
+sudo rsetup      # Overlays -> Yes -> Manage overlays -> tick
+                 # "Enable two Waveshare OV9281 cameras (CAM2 + CAM3)"
+                 # -> Ok -> Rebuild overlays -> exit
+sudo reboot
+```
+
+Copying the file alone is **not** enough - the firmware only picks up overlays
+after `rsetup`'s *Rebuild overlays* step. Navigation: arrows move, space toggles,
+Tab reaches `<Ok>`, Esc goes back.
+
+> **`scripts/deploy_efi_dtb.sh` does not work on r2 images.** It merges into
+> `/boot/efi/RadxaOS/<ver>/qcs6490-radxa-dragon-q6a.dtb`, which does not exist
+> here: the loader entry carries no `devicetree` line and the firmware supplies
+> its own tree. The script and `rcam/ov9281/README.md`'s TL;DR describe the older
+> image. Use `rsetup`.
+
+To sanity-check an overlay before rebooting, merge it against the *running*
+firmware tree - this fails loudly if it would not apply:
+
+```bash
+sudo cp /sys/firmware/fdt /tmp/base.dtb && sudo chmod 644 /tmp/base.dtb
+fdtoverlay -i /tmp/base.dtb -o /tmp/merged.dtb     overlay/qcs6490-radxa-dragon-q6a-dual-ov9281.dtbo
+dtc -I dtb -O dts /tmp/merged.dtb 2>/dev/null | grep -c 'ovti,ov9281'   # expect 2
+```
+
+#### Verify, in this order
+
+```bash
+ls /dev/media*                                            # /dev/media0 exists
+media-ctl -d /dev/media0 -p | grep ov9281                 # two sensors
+cd ~/Documents/NOARKGames && source .venv/bin/activate
+python -c "from rcam import list_cameras; print(list_cameras())"   # ['CAM2','CAM3']
+python rcam/main.py                                       # writes cam2.png, cam3.png
+```
+
+Each step localises a different failure:
+
+| Symptom | Meaning |
+|---|---|
+| no `/dev/media*` | overlay not applied - `rsetup` rebuild missing, or it did not boot |
+| `/dev/video0,1` only | those are the Venus encoder, not cameras - same cause as above |
+| `media-ctl not found` | `v4l-utils` missing |
+| `list_cameras()` returns `[]` | pipeline up, sensor silent - check the ribbon orientation |
+
+`sudo modprobe ov9282` is still needed after **every boot**; auto-loading it is
+open work (see [todo.md](todo.md)).
+
+#### Calibration and settings
+
+1. `calibrate_camera.py` once per camera - default `camera_calib.toml` for cam0
+   (`CAM2`), then again with `"calibration_file"` overridden (or renamed after)
+   to produce `camera_calib_1.toml` for cam1 (`CAM3`).
+2. `calibrate_board.py` (one board, either camera) if `board_geometry.json`
+   does not exist yet.
+3. `python pyscripts/calibrate_stereo.py` - the fixed rigid transform between the
+   two cameras, from both tracking the same board simultaneously (no separate
+   checkerboard). Move the device until the sample counter passes 60, press **S**
+   to save `pyscripts/stereo_extrinsics.json`.
+4. `settings.json` already sets `"camera_backend": "rcam_dual"` in this repo.
+
+`camera_calib_1.toml`, `board_geometry.json` and `stereo_extrinsics.json` are
+git-ignored (per-device) - **back them up off the board**, or a reinstall costs a
+full recalibration.
+
+If one camera loses its feed mid-session (occlusion, disconnect), the tracker
+falls back to the surviving camera rather than stopping.
 
 #### Known hardware issue: onboard UFS storage freezes (run from an SSD)
 

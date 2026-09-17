@@ -39,6 +39,7 @@ Main scene: `res://app/ui/main.tscn`. Tracker reads `settings.json` for camera c
 | [docs/v1_plan.md](docs/v1_plan.md) | v1 product plan and build order |
 | [docs/todo.md](docs/todo.md) | Open TODOs and pre-deployment checklist |
 | [docs/resume.md](docs/resume.md) | Where work last stopped and the next action — read first after a break |
+| [docs/journal.md](docs/journal.md) | Dated record of what was done and why, with the commands and the dead ends |
 | [CLAUDE.md](CLAUDE.md) | Instructions for Claude Code / AI agents working in this repo |
 
 Earlier codebases (the original mini-game collection, and the `v2/` rewrite that `app/` was copied from) were deleted on 2026-09-15. They are preserved at the git tag `archive-before-cleanup` — `git checkout archive-before-cleanup` restores them.

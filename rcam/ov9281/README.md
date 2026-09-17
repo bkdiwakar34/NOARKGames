@@ -8,6 +8,14 @@ Status: **working** — verified by capturing frames and viewing the preview.
 
 ---
 
+> **Applies to the pre-r2 image only.** On current RadxaOS r2 images the overlay
+> is installed with `rsetup` (copy the `.dtbo` into `/boot/dtbo/`, enable it, then
+> **Rebuild overlays**) — `scripts/deploy_efi_dtb.sh` fails there because the boot
+> entry carries no `devicetree` line and no DTB exists on the EFI partition.
+> See [../../docs/setup.md](../../docs/setup.md) §3c and the 2026-09-17 entry in
+> [../../docs/journal.md](../../docs/journal.md). The driver build (step 1) is
+> unchanged.
+
 ## TL;DR rebuild (fresh image)
 
 ```bash

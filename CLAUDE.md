@@ -8,6 +8,7 @@ All game code is in `app/` (platform/games/ui/installer split) — the only vers
 codebases (`v2/`, `legacy/`) were deleted 2026-09-15 and live only at git tag
 `archive-before-cleanup`.
 Read [docs/resume.md](docs/resume.md) first — where work last stopped and the next action.
+Read [docs/journal.md](docs/journal.md) for the dated build log (what was done, why, and the dead ends); add an entry at the top after any hands-on session.
 Read [docs/design.md](docs/design.md) for the architecture + current Fitts'-Law adaptive design.
 Read [docs/v1_plan.md](docs/v1_plan.md) for the v1 product plan and build order.
 Read [docs/setup.md](docs/setup.md) for hardware and how to run.
