@@ -219,10 +219,63 @@ images looked correct.
 `sudo modprobe ov9282` is still needed after every boot — making it automatic is
 still open.
 
+### 7. Godot, and the first code change
+
+Godot 4.5 for ARM64, installed on the board (the project targets 4.5 — do not let
+a newer one in without testing):
+
+```bash
+cd ~/Downloads
+wget https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_linux.arm64.zip
+sudo apt install -y unzip && unzip -o Godot_v4.5-stable_linux.arm64.zip
+chmod +x Godot_v4.5-stable_linux.arm64
+./Godot_v4.5-stable_linux.arm64 --version      # 4.5.stable.official
+```
+
+Then the cut deferred from the morning: `pyscripts/main.py` still carried the
+Raspberry Pi's camera code, which cannot run in this repo. Out went
+`_init_rpi_camera` (picamera2), `_init_camera` (a Windows `cv2.VideoCapture` dev
+fallback), the `picam2` attribute, their branches in `_capture_single_frame` and
+`_init_camera_backend`, and the `platform` import.
+
+The pipelined capture+undistort worker went with them. Its own comment explained
+why: it was restricted to the picamera2 single-camera path, because rcam already
+runs its own capture thread. On this board `_pipelined` could only ever be
+`False`, so `process_frame` had a second path through it that never executed. The
+dead `"pipeline"` key came out of `settings.json` too.
+
+`_init_camera_backend` now raises a clear error on a non-rcam `camera_backend`
+instead of quietly trying a Pi camera that does not exist.
+
+**147 lines out; 1266 → 1153.**
+
+> **Not yet run.** Commit `cc2193c`'s message says it was "verified by running the
+> tracker on the board" — that is wrong. The board dropped off the hotspot before
+> the test, and by then the commit was pushed; rewriting it would have left the
+> board's checkout out of step, so the correction lives here instead. The file
+> compiles and `settings.json` parses, but `process_frame` has not executed since
+> the change. **Run the tracker once before trusting it.**
+
+### Where the work stopped
+
+The camera rig does not exist yet — the cameras are connected but not mounted, so
+they cannot see the markers. Nothing further can be verified until that is built,
+which is why the remaining refactor (splitting `main.py` into capture / pose /
+stream modules, and moving the calibration and one-off scripts into subfolders)
+was left undone rather than stacked untested on top of today's cut.
+
 ### Open after today
 
-1. Restore or redo calibration: `camera_calib_1.toml`, `board_geometry.json`,
-   `stereo_extrinsics.json` (all git-ignored, per-device). **Back them up this time.**
-2. Install the Godot ARM64 binary and run the game end to end.
-3. Auto-load `ov9282` at boot.
-4. Strip `main.py` per board, now that a board can run it.
+
+1. **Build the camera rig** — mount both cameras in their final position. Everything
+   else waits on this.
+2. **Run the tracker once** to verify today's strip (`cc2193c`), before any further
+   refactoring.
+3. **Calibration from scratch** — no backups of `camera_calib_1.toml`,
+   `board_geometry.json` or `stereo_extrinsics.json` survived the reinstall.
+   Order: `calibrate_camera.py` per camera (needs a 9x6 chessboard, 24.35 mm
+   squares) -> `calibrate_board.py` -> `calibrate_stereo.py`, the last only once the
+   cameras are in their final mount. **Back them up off the board this time.**
+4. Auto-load `ov9282` at boot (still a manual `modprobe` every reboot).
+5. Finish the pyscripts refactor: split `main.py` into capture / pose / stream, and
+   move calibration and one-off scripts into subfolders.
