@@ -1,7 +1,6 @@
 # Work journal
 
-A dated record of what was actually done, in plain language, with every command
-and what it was for — including the things that failed and why. Written to be
+A dated record of what was actually done. Written to be
 readable months later, by you or by someone you hand the board to.
 
 **How this differs from the other docs**

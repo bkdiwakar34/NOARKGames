@@ -1,7 +1,6 @@
 import csv
 import json
 import os
-import platform
 import socket
 import struct
 import threading
@@ -131,12 +130,6 @@ class MainClass:
         # Either way the corners reaching solvePnP are pinhole-equivalent with
         # intrinsics = camera_matrix, so it is still called with np.zeros(5).
         self._undistort_image = bool(settings.get("undistort_image", True))
-        self._pipeline   = bool(settings.get("pipeline", False))
-        self._pipe_slot  = _LatestFrameSlot()   # newest undistorted frame, producer -> main loop
-        self._pipe_error = None                 # exception from the worker, re-raised on the main thread
-        self._pipe_stop  = threading.Event()
-        self._pipe_thread = None
-        self._pipelined  = False                # resolved after the backend is known
         if self._undistort_image:
             self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
                 self.camera_matrix, self.dist_coeffs, np.eye(3),
@@ -221,7 +214,6 @@ class MainClass:
             os.path.dirname(os.path.abspath(__file__)), "origin_lock.json"
         )
 
-        self.picam2 = None                          # Pi camera object (set in _init_rpi_camera)
         self.video_frame  = None                    # latest captured image, refreshed every frame
         self.first_frame  = True                    # True until the world origin has been locked (see _maybe_lock_origin)
         self.save_path    = None                    # folder for this patient's CSV, created on first USER: message
@@ -284,28 +276,6 @@ class MainClass:
         self._dual_camera = self._camera_backend == "rcam_dual"
         self._init_camera_backend(settings)
 
-        # Pipelining: capture + undistort move onto their own thread, so frame
-        # N+1 is being prepared while frame N is still being detected. The loop
-        # period then follows the slower half instead of the sum of all four
-        # stages. Real parallelism despite the GIL, because picamera2's capture
-        # and cv2.remap both release it while they work.
-        #
-        # Restricted to the picamera2 single-camera path: rcam already has its
-        # own capture thread handing out the same frame repeatedly, which this
-        # loop would re-undistort for nothing.
-        self._pipelined = (
-            self._pipeline
-            and self._undistort_image
-            and not self._dual_camera
-            and self._camera_backend not in ("rcam_single", "rcam_dual")
-        )
-        if self._pipelined:
-            self._pipe_thread = threading.Thread(target=self._undistort_loop, daemon=True)
-            self._pipe_thread.start()
-            print("pipeline=True — capture+undistort on a worker thread")
-        elif self._pipeline:
-            print("pipeline requested but not applicable to this backend — running serial")
-
         self._init_udp_socket()
 
     # ── detector ─────────────────────────────────────────────────────────────
@@ -336,54 +306,21 @@ class MainClass:
 
     # ── cameras ──────────────────────────────────────────────────────────────
 
-    def _init_rpi_camera(self) -> None:
-        from picamera2 import Picamera2
-
-        self.picam2 = Picamera2()
-        config = self.picam2.create_video_configuration(
-            # YUV420 is the camera's native format → no conversion cost.
-            # Y plane is already grayscale, which is what marker detection uses.
-            {"format": "YUV420", "size": self.frame_size},
-            controls={
-                "FrameRate": self._framerate,  # target rate; real-world rate may be lower
-                "ExposureTime": 5000,          # 5 ms — short enough to freeze hand motion (no blur on marker corners)
-                "AeEnable": False,             # lock auto-exposure off so the camera can't override ExposureTime
-            },
-        )
-        self.picam2.configure(config)
-        self.picam2.start()
-
-        # Auto-exposure tune-then-lock disabled for now — the 1-second AE convergence
-        # was adding noticeable lag and the chosen exposure caused lag during gameplay.
-        # Re-enable later if room lighting becomes an issue.
-        # time.sleep(1.0)
-        # meta = self.picam2.capture_metadata()
-        # exposure = min(int(meta.get("ExposureTime", 5000)), 20_000)
-        # gain     = float(meta.get("AnalogueGain", 1.0))
-        # self.picam2.set_controls({"AeEnable": False, "ExposureTime": exposure, "AnalogueGain": gain})
-        # print(f"Camera exposure locked at {exposure} us, gain {gain:.2f}")
-
-    def _init_camera(self) -> None:
-        self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        self.camera.set(cv2.CAP_PROP_FPS, 30)
-
     def _init_camera_backend(self, settings: dict) -> None:
-        """Dispatches to legacy picamera2, the new rcam backend (single or
-        dual OV9281), or the Windows cv2.VideoCapture dev fallback.
+        """Dragon Q6A only: two OV9281 via rcam, or one for bring-up.
 
-        "auto" reproduces today's exact platform.system()=="Linux" -> picamera2
-        behavior — existing Pi deployments need no settings.json changes at
-        all. Dragon Q6A deployments opt in explicitly via camera_backend."""
+        The Raspberry Pi's picamera2 path lives in the NOARKGames-pi repo;
+        anything but an rcam backend is a settings.json mistake on this board,
+        so say so instead of failing later inside the capture loop."""
         if self._camera_backend == "rcam_dual":
             self._init_rcam_dual(settings)
         elif self._camera_backend == "rcam_single":
             self._init_rcam_single(settings)
-        elif platform.system() == "Linux":
-            self._init_rpi_camera()
         else:
-            self._init_camera()
+            raise ValueError(
+                f'camera_backend={self._camera_backend!r} is not supported in the '
+                f'Dragon Q6A repo — use "rcam_dual" (two cameras) or "rcam_single".'
+            )
 
     def _rcam_controls(self, settings: dict) -> dict:
         """Exposure/gain/framerate controls for an rcam Camera — mirrors the
@@ -402,8 +339,8 @@ class MainClass:
         self._cam_threads[cam_index].start()
 
     def _init_rcam_single(self, settings: dict) -> None:
-        """One rcam camera (Dragon Q6A, single-camera mode) — same shape as
-        _init_rpi_camera but for the new V4L2-direct backend."""
+        """One rcam camera (Dragon Q6A, single-camera mode) — bring-up and
+        fallback; rcam_dual is the normal path on this board."""
         from rcam import Camera
 
         cam_id = settings.get("rcam_id_0", "CAM2")
@@ -505,26 +442,11 @@ class MainClass:
             self._cam_errors[cam_index] = exc
 
     def _capture_single_frame(self):
-        """One frame from whichever single-camera backend is active. Returns
-        None if a frame isn't available this iteration (dev cv2 fallback, or
-        an rcam capture thread that hasn't produced a frame yet)."""
-        if self._camera_backend == "rcam_single":
-            frame, _ts = self._frame_slots[0].get_latest()
-            if self._cam_errors[0] is not None:
-                raise self._cam_errors[0]
-            return frame
-        if platform.system() == "Linux":
-            # YUV420 comes back as (h*3/2, w): the Y plane is the first h rows,
-            # then the quarter-resolution U and V planes. Y alone is the
-            # grayscale image everything downstream wants. Slicing here matters
-            # when undistort_image is False — with the remap in place the output
-            # was sized from the maps, which hid the extra rows; without it,
-            # detectMarkers would otherwise threshold 400 rows of chroma.
-            frame = self.picam2.capture_array()
-            return frame[:self.frame_size[1], :self.frame_size[0]]
-        ret, frame = self.camera.read()
-        if not ret or frame is None:
-            return None
+        """Newest frame from the single rcam camera's capture thread. Returns
+        None when that thread hasn't produced one yet."""
+        frame, _ts = self._frame_slots[0].get_latest()
+        if self._cam_errors[0] is not None:
+            raise self._cam_errors[0]
         return frame
 
     def _capture_dual_frames(self):
@@ -583,29 +505,6 @@ class MainClass:
         self.udp_socket.sendto(data_bytes, self.addr)
 
     # ── pose estimation ───────────────────────────────────────────────────────
-
-    def _undistort_loop(self) -> None:
-        """Producer half of the pipelined path — capture frame N+1 and undistort
-        it while the main thread is still detecting markers in frame N.
-
-        Newest-wins, like _capture_loop: if detection falls behind, intermediate
-        undistorted frames are overwritten rather than queued. Latency stays at
-        one frame instead of growing, and frames are dropped instead of going
-        stale. Exceptions are recorded and re-raised on the main thread rather
-        than dying silently in here."""
-        try:
-            while not self._pipe_stop.is_set():
-                frame = self._capture_single_frame()
-                if frame is None:
-                    time.sleep(0.001)
-                    continue
-                frame = cv2.remap(
-                    frame, self.map1, self.map2, interpolation=cv2.INTER_LINEAR
-                )
-                self._pipe_slot.put(frame, time.monotonic())
-                time.sleep(0)          # cooperative yield, same as _capture_loop
-        except Exception as exc:
-            self._pipe_error = exc
 
     def _undistort_corners(self, corners):
         """Map corners detected in the raw (still distorted) frame into the
@@ -1055,19 +954,7 @@ class MainClass:
         t0 = time.perf_counter() if self.debug else 0.0
 
         # Capture frame(s)
-        if self._pipelined:
-            # Already captured and undistorted by _undistort_loop, in parallel
-            # with the previous frame's detection. capture and remap therefore
-            # time as ~0 here — the real cost moved to the worker thread, and
-            # the loop period is now whichever half is slower.
-            if self._pipe_error is not None:
-                raise self._pipe_error
-            frame0, _ts = self._pipe_slot.get_latest()
-            frame1 = None
-            if frame0 is None:
-                return
-            t1 = time.perf_counter() if self.debug else 0.0
-        elif self._dual_camera:
+        if self._dual_camera:
             frame0, frame1 = self._capture_dual_frames()
             if frame0 is None and frame1 is None:
                 return
@@ -1087,7 +974,7 @@ class MainClass:
         # would also need cam1's own intrinsics, so it keeps the remap.
         skip_remap = (not self._undistort_image) and not self._dual_camera
         if frame0 is not None:
-            if not skip_remap and not self._pipelined:
+            if not skip_remap:
                 frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
             self.video_frame = frame0
         if self._dual_camera and frame1 is not None:
