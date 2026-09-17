@@ -1,6 +1,6 @@
 # NOARKGames — Setup
 
-How to set up the hardware and run the system on a Raspberry Pi. For what the system does and how it works, see [design.md](design.md).
+How to set up the hardware and run the system on the Radxa Dragon Q6A. For what the system does and how it works, see [design.md](design.md).
 
 ---
 
@@ -8,21 +8,21 @@ How to set up the hardware and run the system on a Raspberry Pi. For what the sy
 
 | Component | Detail |
 |---|---|
-| Computer | Raspberry Pi 5 (Linux ARM64) |
-| Camera | OV9281 monochrome fisheye camera (160° FOV), CSI ribbon |
+| Computer | Radxa Dragon Q6A (QCS6490, Linux ARM64), booting from SSD — see the UFS note in §3c |
+| Camera | Two OV9281 monochrome fisheye cameras (160° FOV), via the `rcam` package |
 | Input device | NOARK device with ArUco markers (IDs 12, 14, 20 active) |
 | Display | Monitor connected to Pi |
-| Repo on Pi | `/home/sujith/Documents/NOARKGames/` |
-| Godot binary | `/home/sujith/Downloads/Godot_v4.5-stable_linux.arm64` |
+| Repo on board | `/home/radxa/Documents/NOARKGames/` |
+| Godot binary | `/home/radxa/Downloads/Godot_v4.5-stable_linux.arm64` |
 
-A Radxa Dragon Q6A with two OV9281 cameras (via the `rcam` package, see below)
-is also supported, as an alternative to the Pi 5 — same repo, a
-`camera_backend` switch in `settings.json` picks which one runs. The Pi setup
-above is unaffected either way.
+The Raspberry Pi 5 version of this system lives in its own repository,
+[NOARKGames-pi](https://github.com/bkdiwakar34/NOARKGames-pi) — this repo is the
+Dragon Q6A one only. `pyscripts/main.py` still carries the Pi's picamera2 path for
+now; it is unused here and comes out once a Q6A run confirms the tracker is healthy.
 
 ---
 
-## First-time setup on a fresh Pi
+## First-time setup on a fresh Dragon Q6A
 
 ### 1. Install Godot
 
@@ -71,7 +71,7 @@ flags any marker whose `MARKER_OFFSETS` entry disagrees by > 5 mm.
 it falls back to the old per-marker method. Redo only if a marker is re-glued.
 Disable via `"use_board_pnp": false` in settings.json.
 
-### 3c. Dragon Q6A dual-camera setup (optional, instead of the Pi's single OV9281)
+### 3c. Dual-camera setup (the normal path on this board)
 
 Requires Python ≥3.13 and a Rust toolchain on the Q6A for `uv sync` to build `rcam._native` — see [`rcam/README.md`](../rcam/README.md). `main.py` imports `rcam` directly into its own process (not a subprocess), so **the main project's own venv** (step 2 above), not just `rcam/`'s, must be created with Python ≥3.13 — check with `python3 --version` before `python -m venv .venv` on the Q6A.
 
@@ -165,7 +165,7 @@ Or open `project.godot` in the Godot editor and press F5.
 
 ### Main scene
 
-`res://app/ui/main.tscn`. Display: fullscreen, `canvas_items` stretch mode, OpenGL compatibility renderer (Raspberry Pi requirement).
+`res://app/ui/main.tscn`. Display: fullscreen, `canvas_items` stretch mode, OpenGL compatibility renderer.
 ### Game flow
 
 1. Main screen — type hospital ID → press **Enter** (not Play button) → enters game selection.
@@ -174,9 +174,9 @@ Or open `project.godot` in the Godot editor and press F5.
 
 ---
 
-## Auto-start on Pi boot (not yet implemented)
+## Auto-start on boot (not yet implemented)
 
-The tracker is currently launched by Godot's autoload. A systemd-service-based auto-start of Godot itself on Pi boot is planned but not built. See [todo.md](todo.md).
+The tracker is currently launched by Godot's autoload. A systemd-service-based auto-start of Godot itself on boot is planned but not built. See [todo.md](todo.md).
 
 ---
 
@@ -188,7 +188,8 @@ The tracker is currently launched by Godot's autoload. A systemd-service-based a
 | `ps aux \| grep python` | Check whether tracker is alive |
 | `journalctl -u <service> -n 30` | Last 30 log lines from a systemd service |
 | `tail -f /tmp/tracker_timing.log` | Watch per-stage tracker timing in real time (debug mode only) |
-| `ssh sujith@<pi-ip>` | Remote shell into the Pi over the same WiFi |
+| `ssh radxa@<board-ip>` | Remote shell into the Q6A over the same WiFi |
+| `dmesg \| grep -i ufshc` | Check for the UFS storage fault (see §3c) — no output is good |
 
 ---
 

@@ -1,6 +1,9 @@
 # CLAUDE.md
 
-**NOARKGames** — Godot 4.5 rehabilitation gaming platform for stroke patients.
+**NOARKGames (Dragon Q6A)** — Godot 4.5 rehabilitation gaming platform for stroke patients.
+**This repo targets the Radxa Dragon Q6A + dual OV9281 via `rcam/` only.** The Raspberry
+Pi 5 version is a separate repo (`bkdiwakar34/NOARKGames-pi`), split off 2026-09-17;
+shared history up to tag `pre-split`, shared fixes move across by `git cherry-pick`.
 All game code is in `app/` (platform/games/ui/installer split) — the only version. Older
 codebases (`v2/`, `legacy/`) were deleted 2026-09-15 and live only at git tag
 `archive-before-cleanup`.

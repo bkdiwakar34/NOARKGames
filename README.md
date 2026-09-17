@@ -1,4 +1,9 @@
-# NOARKGames
+# NOARKGames — Dragon Q6A
+
+**This is the Radxa Dragon Q6A repo.** The Raspberry Pi 5 version is a separate
+repository, [NOARKGames-pi](https://github.com/bkdiwakar34/NOARKGames-pi), split off on
+2026-09-17. Both share history up to the tag `pre-split`; fixes that belong on both
+boards are moved across with `git cherry-pick`.
 
 A rehabilitation gaming platform for stroke patients. The patient holds an instrumented device with ArUco markers; a fisheye camera tracks the markers; the resulting 3D position drives a reaching game on a Raspberry Pi. Game difficulty adapts trial by trial to maintain a per-patient target success rate.
 
@@ -7,8 +12,9 @@ Instrument for a PhD study on the causal relationship between success rate and a
 ## Stack
 
 - **Game** — Godot 4.5, GDScript. All code in `app/`.
-- **Tracker** — Python 3.11+, OpenCV, picamera2. In `pyscripts/`.
-- **Hardware** — Raspberry Pi 5 (Linux ARM64), OV9281 monochrome fisheye camera (160° FOV).
+- **Tracker** — Python 3.13+, OpenCV, `rcam`. In `pyscripts/`.
+- **Camera driver** — `rcam/`: Rust + Python V4L2 capture for the OV9281, with device-tree overlays.
+- **Hardware** — Radxa Dragon Q6A (QCS6490, Linux ARM64) booting from SSD, two OV9281 monochrome fisheye cameras (160° FOV).
 
 ## Quick start
 

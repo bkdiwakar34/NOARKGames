@@ -9,10 +9,23 @@ every session, while you still remember. History lives in git and
 
 ---
 
-**Last updated:** 2026-09-15 (after a ~3-week break)
+**Last updated:** 2026-09-17
 
-**Was doing:** repo cleanup — one version of the game only. `v2/`, `legacy/` and the
-unused `addons/easy_charts/` were deleted; everything before that is at git tag
+**This repo is the Dragon Q6A one.** Split from the Raspberry Pi repo
+(`bkdiwakar34/NOARKGames-pi`) on 2026-09-17; shared history up to tag `pre-split`.
+`settings.json` here defaults to `camera_backend: "rcam_dual"`.
+**`pyscripts/main.py` still contains the Pi's picamera2 path** — deliberately, since no
+board could run the code on split day. Strip it once a Q6A run confirms the tracker is
+healthy.
+
+**Board state 2026-09-17:** the Q6A's onboard UFS module is gone (the firmware boot menu
+lists only SD card and SPI flash), so the old freezing fault cannot recur. The board has
+no OS yet — a fresh microSD is being written with
+`radxa-dragon-q6a_noble_gnome_r2.output_512.img.xz`. An M.2 **2230** NVMe SSD is the
+intended final home; the card is the stepping stone.
+
+**Before that:** repo cleanup on 2026-09-15 — `v2/`, `legacy/` and the unused
+`addons/easy_charts/` were deleted; everything before that is at git tag
 `archive-before-cleanup`.
 
 **State of the two threads before the break:**

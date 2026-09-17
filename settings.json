@@ -22,7 +22,7 @@
 	"one_euro_beta": 0.007,
 	"one_euro_d_cutoff": 1.0,
 
-	"camera_backend": "auto",
+	"camera_backend": "rcam_dual",
 	"rcam_id_0": "CAM2",
 	"rcam_id_1": "CAM3",
 	"rcam_exposure_us": 5000,
