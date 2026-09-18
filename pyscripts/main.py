@@ -964,7 +964,8 @@ class MainClass:
             self._maybe_lock_origin(corners, ids, rvecs, tvecs)
             return None
 
-        self._draw_axes(rvecs, tvecs)
+        if self._debug_preview:            # overlay exists only to be shown
+            self._draw_axes(rvecs, tvecs)
         centroid = self._get_centroid(corners, ids, rvecs, tvecs)
         return self._origin_R.T @ (self._origin_grip - centroid)
 
@@ -987,7 +988,8 @@ class MainClass:
 
         R = cv2.Rodrigues(rvec)[0]
         grip = R @ self.board.grip_point + tvec
-        self._draw_board_overlay(rvec, tvec, grip)
+        if self._debug_preview:            # overlay exists only to be shown
+            self._draw_board_overlay(rvec, tvec, grip)
         return self._origin_R.T @ (self._origin_grip - grip)
 
     def _maybe_lock_origin_board(self, rvec, tvec, corners=None, ids=None) -> None:
@@ -1205,7 +1207,7 @@ class MainClass:
             # gets transformed into cam0's frame, then combined — see
             # _fuse_board_poses for the disagreement/fallback handling that
             # keeps a dead or occluded camera from breaking tracking.
-            if ids0 is not None:
+            if ids0 is not None and self._debug_preview:
                 self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners0, ids0)
             pose0 = self._solve_camera_pose(0, corners0, ids0) if ids0 is not None else None
             pose1 = self._solve_camera_pose(1, corners1, ids1) if ids1 is not None else None
@@ -1219,7 +1221,8 @@ class MainClass:
             # Single-camera path (also used when dual-camera mode has no board
             # geometry loaded, or the demo SETUP toggle selected the legacy
             # per-marker solver — cam1 is simply not consulted in that case).
-            self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners0, ids0)
+            if self._debug_preview:
+                self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners0, ids0)
             if self.board is not None and self._use_rigid:
                 pose0 = self._solve_camera_pose(0, corners0, ids0)
                 if pose0 is not None:
