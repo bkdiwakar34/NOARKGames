@@ -56,6 +56,11 @@ with Camera("CAM2") as cam:                  # or Camera(0) / Camera("18-0060")
         "VFlip": True,
     })
     frame = cam.capture_array()              # HxW NumPy array, ready for cv2
+
+    # same frame, plus the kernel's per-frame metadata (native backend only):
+    frame, seq, t_cap = cam.capture_with_meta()
+    # seq   - sequence number; a jump (41, 42, 45) = frames produced but never read
+    # t_cap - capture time in seconds, stamped by the kernel at capture
 ```
 
 Both cameras stream **simultaneously** (independent CSID/VFE chains):

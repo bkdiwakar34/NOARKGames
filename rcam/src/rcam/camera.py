@@ -247,6 +247,27 @@ class Camera:
             return np.frombuffer(buf, "<u2").reshape(self.height, self.width)
         return self.unpack(self.capture_buffer())
 
+    def capture_with_meta(self) -> tuple[np.ndarray, int, float]:
+        """Like capture_array(), plus two things the kernel records per frame:
+
+        seq   : frame sequence number. Consecutive frames differ by 1, so a
+                jump (41, 42, 45) means frames were produced but never read.
+        t_cap : capture timestamp in seconds, taken by the kernel when the
+                frame was captured — not when this call picked it up.
+
+        Native backend only: the v4l2-ctl pipe carries pixels, not metadata.
+        """
+        if self._cap is None:
+            raise RuntimeError("capture_with_meta() needs the native backend "
+                               "(rcam._native built, and start() called)")
+        if self.bit_depth == 8:
+            buf, seq, t_cap = self._cap.next_u8_meta()
+            frame = np.frombuffer(buf, np.uint8).reshape(self.height, self.width)
+        else:
+            buf, seq, t_cap = self._cap.next_u16_meta()
+            frame = np.frombuffer(buf, "<u2").reshape(self.height, self.width)
+        return frame, seq, t_cap
+
     def unpack(self, buf: bytes) -> np.ndarray:
         """Unpack MIPI Y10P (4 px per 5 bytes) to a HxW array."""
         g = np.frombuffer(buf, np.uint8).reshape(-1, 5)

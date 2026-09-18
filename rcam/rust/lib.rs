@@ -210,18 +210,32 @@ impl Capture {
     }
 
     fn next_raw<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let out = self.grab(py, 0)?;
+        let (out, _, _) = self.grab(py, 0)?;
         Ok(PyBytes::new(py, &out))
     }
 
     fn next_u8<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let out = self.grab(py, 1)?;
+        let (out, _, _) = self.grab(py, 1)?;
         Ok(PyBytes::new(py, &out))
     }
 
     fn next_u16<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let out = self.grab(py, 2)?;
+        let (out, _, _) = self.grab(py, 2)?;
         Ok(PyBytes::new(py, &out))
+    }
+
+    /// Like next_u8, plus the kernel's frame sequence number and capture
+    /// timestamp (seconds). A gap in sequence = frames the camera produced
+    /// that were never read.
+    fn next_u8_meta<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyBytes>, u32, f64)> {
+        let (out, seq, ts) = self.grab(py, 1)?;
+        Ok((PyBytes::new(py, &out), seq, ts))
+    }
+
+    /// Like next_u16, plus sequence number and capture timestamp.
+    fn next_u16_meta<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyBytes>, u32, f64)> {
+        let (out, seq, ts) = self.grab(py, 2)?;
+        Ok((PyBytes::new(py, &out), seq, ts))
     }
 
     fn close(&mut self) {
@@ -293,12 +307,15 @@ impl Capture {
         Ok(())
     }
 
-    fn grab(&self, py: Python, mode: u8) -> PyResult<Vec<u8>> {
+    /// Dequeue one frame. Returns (pixels, sequence, capture timestamp in s).
+    /// The timestamp is the kernel's, taken when the frame was captured —
+    /// not when this call picked it up.
+    fn grab(&self, py: Python, mode: u8) -> PyResult<(Vec<u8>, u32, f64)> {
         let fd = self.fd;
         let bufs = &self.buffers;
         let w = self.width;
         let h = self.height;
-        py.allow_threads(move || -> io::Result<Vec<u8>> {
+        py.allow_threads(move || -> io::Result<(Vec<u8>, u32, f64)> {
             let mut planes: [v4l2_plane; NUM_PLANES] = unsafe { std::mem::zeroed() };
             let mut b: v4l2_buffer = unsafe { std::mem::zeroed() };
             b.type_ = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
@@ -306,6 +323,8 @@ impl Capture {
             b.length = NUM_PLANES as u32;
             b.m_planes = planes.as_mut_ptr() as u64;
             unsafe { xioctl(fd, VIDIOC_DQBUF, &mut b)? };
+            let seq = b.sequence;
+            let ts = b.timestamp_sec as f64 + b.timestamp_usec as f64 * 1e-6;
 
             let idx = b.index as usize;
             let (ptr, len) = bufs[idx];
@@ -328,7 +347,7 @@ impl Capture {
 
             // requeue the same buffer
             unsafe { xioctl(fd, VIDIOC_QBUF, &mut b)? };
-            Ok(out)
+            Ok((out, seq, ts))
         })
         .map_err(pyerr)
     }
