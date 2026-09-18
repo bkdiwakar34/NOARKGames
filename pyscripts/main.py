@@ -288,6 +288,23 @@ class MainClass:
             self.detector_1 = self._init_detector()
             self._cam_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cam")
 
+        # Search box (region of interest), per camera: once the device is found,
+        # the next frame is undistorted and searched only in a box around the
+        # markers, widened by roi_margin_markers marker-widths on every side.
+        # Inside the box the undistorted pixels are the same map entries as the
+        # full remap and the detector sees the same neighbourhoods, so corners
+        # come out the same. Any frame where the box yields no markers, or fewer
+        # than last frame, is re-searched full-frame in the same pass, and every
+        # roi_full_every-th frame is full-frame regardless. Off while the debug
+        # preview is on, since the preview needs the whole picture.
+        self._roi_enabled    = bool(settings.get("roi_enabled", True)) and not self._debug_preview
+        self._roi_margin     = float(settings.get("roi_margin_markers", 2.0))
+        self._roi_full_every = int(settings.get("roi_full_every", 30))
+        self._roi        = [None, None]   # (x0, y0, x1, y1) in undistorted pixels
+        self._roi_count  = [0, 0]         # markers found last frame
+        self._roi_age    = [0, 0]         # frames since the last full-frame search
+        self._full_count = [0, 0]         # full-frame searches since the last timing line
+
         self._init_udp_socket()
 
     # ── detector ─────────────────────────────────────────────────────────────
@@ -962,14 +979,62 @@ class MainClass:
 
     # ── main loop ─────────────────────────────────────────────────────────────
 
-    def _remap_detect(self, frame, map1, map2, detector):
-        """One camera's share of a dual-mode frame: undistort, then detect.
-        Runs on a _cam_pool worker. The main thread is blocked waiting on the
-        result meanwhile, so the state _filter_markers reads cannot change."""
+    def _remap_detect(self, cam, frame, map1, map2, detector):
+        """One camera's share of a dual-mode frame: undistort, then detect —
+        inside that camera's search box when there is one, else full-frame.
+        Runs on a _cam_pool worker; `cam` selects this camera's box state, which
+        only this camera's worker touches. The main thread is blocked waiting on
+        the result meanwhile, so the state _filter_markers reads cannot change.
+        Returns (undistorted image — the box crop when the box was used,
+        corners in full-frame undistorted pixels, ids)."""
+        self._roi_age[cam] += 1
+        roi = self._roi[cam]
+        if (self._roi_enabled and roi is not None
+                and self._roi_age[cam] < self._roi_full_every):
+            x0, y0, x1, y1 = roi
+            # Slicing the maps undistorts just this rectangle of the output:
+            # same map entries as the full remap, so the same pixels.
+            crop = cv2.remap(frame, map1[y0:y1, x0:x1], map2[y0:y1, x0:x1],
+                             interpolation=cv2.INTER_LINEAR)
+            corners, ids, _ = detector.detectMarkers(crop)
+            corners, ids = self._filter_markers(corners, ids)
+            n = 0 if ids is None else len(ids)
+            if n > 0 and n >= self._roi_count[cam]:
+                offset = np.array([x0, y0], dtype=np.float32)
+                corners = tuple(c + offset for c in corners)
+                self._update_roi(cam, corners, n)
+                return crop, corners, ids
+            # Box lost markers: fall through to a full-frame search, same pass.
+
+        self._roi_age[cam] = 0
+        self._full_count[cam] += 1
         frame = cv2.remap(frame, map1, map2, interpolation=cv2.INTER_LINEAR)
         corners, ids, _ = detector.detectMarkers(frame)
         corners, ids = self._filter_markers(corners, ids)
+        self._update_roi(cam, corners, 0 if ids is None else len(ids))
         return frame, corners, ids
+
+    def _update_roi(self, cam, corners, n) -> None:
+        """Next frame's search box: the markers' bounding box, widened on every
+        side by roi_margin_markers × the largest marker side. Measured in
+        marker widths, the margin scales with distance to the camera, and
+        2 widths = 100 mm of travel between frames for 50 mm markers."""
+        self._roi_count[cam] = n
+        if n == 0:
+            self._roi[cam] = None
+            return
+        quads = [np.asarray(c, dtype=np.float64).reshape(4, 2) for c in corners]
+        pts = np.concatenate(quads)
+        side = max(float(np.linalg.norm(q - np.roll(q, -1, axis=0), axis=1).max())
+                   for q in quads)
+        margin = self._roi_margin * side
+        w, h = self.frame_size
+        self._roi[cam] = (
+            int(max(0, np.floor(pts[:, 0].min() - margin))),
+            int(max(0, np.floor(pts[:, 1].min() - margin))),
+            int(min(w, np.ceil(pts[:, 0].max() + margin))),
+            int(min(h, np.ceil(pts[:, 1].max() + margin))),
+        )
 
     def process_frame(self) -> None:
         t0 = time.perf_counter() if self.debug else 0.0
@@ -995,10 +1060,10 @@ class MainClass:
             # Both cameras' remap + detect at once (see _cam_pool in __init__).
             fut0 = fut1 = None
             if frame0 is not None:
-                fut0 = self._cam_pool.submit(self._remap_detect, frame0,
+                fut0 = self._cam_pool.submit(self._remap_detect, 0, frame0,
                                              self.map1, self.map2, self.detector)
             if frame1 is not None:
-                fut1 = self._cam_pool.submit(self._remap_detect, frame1,
+                fut1 = self._cam_pool.submit(self._remap_detect, 1, frame1,
                                              self.map1_1, self.map2_1, self.detector_1)
             if fut0 is not None:
                 frame0, corners0, ids0 = fut0.result()
@@ -1108,7 +1173,9 @@ class MainClass:
                     means = arr.mean(axis=0)
                     total = float(means.sum())
                     if self._dual_camera:
-                        stages = f"remap+detect (both cams, parallel): {means[1]:5.2f} ms  |  "
+                        stages = (f"remap+detect (both cams, parallel): {means[1]:5.2f} ms  |  "
+                                  f"full-frame searches: {self._full_count[0]}+{self._full_count[1]}  |  ")
+                        self._full_count = [0, 0]
                     else:
                         stages = (f"remap: {means[1]:5.2f} ms  |  "
                                   f"detect: {means[2]:5.2f} ms  |  ")
