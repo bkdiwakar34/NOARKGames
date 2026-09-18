@@ -26,6 +26,11 @@ from filters import (
 from pose_averaging import rotation_angle
 
 
+# Longest the loop waits for a new camera frame before handing control back to
+# run() (which checks Godot's heartbeat). Frames arrive every 10 ms at 100 fps.
+FRAME_WAIT_S = 0.05
+
+
 class _LatestFrameSlot:
     """Lock-guarded single-slot frame holder for a capture thread — always
     exposes the newest frame, overwriting the previous one rather than
@@ -33,17 +38,33 @@ class _LatestFrameSlot:
     all a reader ever wants is "whatever's newest")."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._cond = threading.Condition()
         self._frame = None
         self._ts = None
+        self._seq = None
 
-    def put(self, frame, ts: float) -> None:
-        with self._lock:
-            self._frame, self._ts = frame, ts
+    def put(self, frame, ts: float, seq=None) -> None:
+        """ts: the frame's capture time; seq: the kernel's frame sequence number."""
+        with self._cond:
+            self._frame, self._ts, self._seq = frame, ts, seq
+            self._cond.notify_all()
 
     def get_latest(self):
-        with self._lock:
+        with self._cond:
             return self._frame, self._ts
+
+    def get_latest_meta(self):
+        with self._cond:
+            return self._frame, self._ts, self._seq
+
+    def wait_newer(self, last_seq, timeout: float):
+        """Block until the slot holds a frame whose sequence number differs
+        from last_seq — one this reader has not processed yet — or until
+        timeout. Returns (frame, ts, seq), or None on timeout."""
+        with self._cond:
+            ok = self._cond.wait_for(
+                lambda: self._frame is not None and self._seq != last_seq, timeout)
+            return (self._frame, self._ts, self._seq) if ok else None
 
 
 def _weighted_quaternion_average(Ra: np.ndarray, Rb: np.ndarray,
@@ -305,6 +326,13 @@ class MainClass:
         self._roi_age    = [0, 0]         # frames since the last full-frame search
         self._full_count = [0, 0]         # full-frame searches since the last timing line
 
+        # Sequence numbers of the last frame processed per camera, so no frame
+        # is processed twice; and camera frames skipped since the last timing
+        # line (gaps in the driving camera's sequence).
+        self._last_seq         = [None, None]
+        self._last_seq_driver  = None
+        self._missed_count     = 0
+
         self._init_udp_socket()
 
     # ── detector ─────────────────────────────────────────────────────────────
@@ -464,27 +492,50 @@ class MainClass:
         faster than expected) and starves Godot's own background thread."""
         try:
             while not self._stop_capture.is_set():
-                frame = self._rcam[cam_index].capture_array()
-                self._frame_slots[cam_index].put(frame, time.monotonic())
+                # Kernel capture time + sequence number travel with the frame:
+                # the loop uses seq to never process the same frame twice, and
+                # the capture time (same monotonic clock as time.monotonic())
+                # for the cam0/cam1 pairing check.
+                frame, seq, t_cap = self._rcam[cam_index].capture_with_meta()
+                self._frame_slots[cam_index].put(frame, t_cap, seq)
                 time.sleep(0)
         except Exception as exc:
             self._cam_errors[cam_index] = exc
 
+    def _count_missed(self, seq) -> None:
+        """Frames the driving camera produced that the loop never processed —
+        the gap between consecutive sequence numbers, minus one."""
+        last = self._last_seq_driver
+        if last is not None and seq > last + 1:
+            self._missed_count += seq - last - 1
+        self._last_seq_driver = seq
+
     def _capture_single_frame(self):
-        """Newest frame from the single rcam camera's capture thread. Returns
-        None when that thread hasn't produced one yet."""
-        frame, _ts = self._frame_slots[0].get_latest()
+        """Next not-yet-processed frame from the single camera's capture
+        thread, waiting for it if needed. None if none arrives within
+        FRAME_WAIT_S (run() then gets a chance to check Godot's heartbeat)."""
+        got = self._frame_slots[0].wait_newer(self._last_seq[0], FRAME_WAIT_S)
         if self._cam_errors[0] is not None:
             raise self._cam_errors[0]
+        if got is None:
+            return None
+        frame, _ts, seq = got
+        self._last_seq[0] = seq
+        self._count_missed(seq)
         return frame
 
     def _capture_dual_frames(self):
-        """Latest frame from each capture thread's slot. A dead camera
-        (thread raised, e.g. on stream end) reports None here from then on —
-        _fuse_board_poses already falls back to the surviving camera's solo
-        pose, so no separate "degrade to single camera" path is needed.
-        Raises only when both cameras have died (nothing left to track,
-        mirroring run()'s existing "no fresh UDP for 3s" exit)."""
+        """One pass per new frame from the driving camera (cam0, or cam1 once
+        cam0 has died): waits until it has a frame not yet processed, then
+        pairs it with the other camera's newest frame if the two were captured
+        within stereo_max_frame_skew_ms. So every pass is a distinct frame and
+        the pass rate is the camera's frame rate, never above it.
+
+        A dead camera (thread raised, e.g. on stream end) reports None here
+        from then on — _fuse_board_poses already falls back to the surviving
+        camera's solo pose. Raises only when both cameras have died (nothing
+        left to track, mirroring run()'s existing "no fresh UDP for 3s" exit).
+        Returns (None, None) if no new frame arrives within FRAME_WAIT_S."""
         if self._cam_errors[0] is not None and self._cam_errors[1] is not None:
             raise RuntimeError(
                 f"Both camera threads died (cam0: {self._cam_errors[0]!r}, "
@@ -496,13 +547,28 @@ class MainClass:
                       f"— continuing tracking on the surviving camera.")
                 self._cam_error_logged[i] = True
 
-        frame0, ts0 = (None, None) if self._cam_errors[0] is not None else self._frame_slots[0].get_latest()
-        frame1, ts1 = (None, None) if self._cam_errors[1] is not None else self._frame_slots[1].get_latest()
-        if frame0 is not None and frame1 is not None and abs(ts0 - ts1) > self._stereo_max_frame_skew_s:
-            # Stale pairing during fast motion — treat cam1 as "not ready yet"
-            # rather than fusing a mismatched pair; usually re-syncs next frame.
-            frame1 = None
-        return frame0, frame1
+        driver = 0 if self._cam_errors[0] is None else 1
+        other = 1 - driver
+        got = self._frame_slots[driver].wait_newer(self._last_seq[driver], FRAME_WAIT_S)
+        if got is None:
+            return None, None
+        frame_d, ts_d, seq_d = got
+        self._last_seq[driver] = seq_d
+        self._count_missed(seq_d)
+
+        frame_o = None
+        if self._cam_errors[other] is None:
+            frame_o, ts_o, seq_o = self._frame_slots[other].get_latest_meta()
+            if frame_o is not None and abs(ts_d - ts_o) > self._stereo_max_frame_skew_s:
+                # Stale pairing — the other camera's newest frame is too far
+                # from this one in capture time; fuse without it this pass.
+                frame_o = None
+            elif frame_o is not None:
+                self._last_seq[other] = seq_o
+
+        frames = [None, None]
+        frames[driver], frames[other] = frame_d, frame_o
+        return frames[0], frames[1]
 
     # ── transport init ────────────────────────────────────────────────────────
 
@@ -1179,10 +1245,12 @@ class MainClass:
                     else:
                         stages = (f"remap: {means[1]:5.2f} ms  |  "
                                   f"detect: {means[2]:5.2f} ms  |  ")
-                    line = (f"capture: {means[0]:5.2f} ms  |  "
+                    line = (f"wait+capture: {means[0]:5.2f} ms  |  "
                             + stages +
                             f"pose+send: {means[3]:5.2f} ms  |  "
-                            f"total: {total:5.2f} ms  ({len(arr)} frames)")
+                            f"total: {total:5.2f} ms  ({len(arr)} frames, "
+                            f"{self._missed_count} missed)")
+                    self._missed_count = 0
                     print(line)
                     if self._timing_log is not None:
                         self._timing_log.write(
