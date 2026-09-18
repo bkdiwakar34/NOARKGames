@@ -19,6 +19,10 @@ Procedure:
   5. Press S to solve and save, Q/Esc to abort.
 
 Run: python pyscripts/calibrate_stereo.py
+
+Imports no other script — only the two shared libraries: board.py (the device
+model and pose solve, which must be the same one main.py tracks with) and
+pose_averaging.py (the sample averaging, shared with calibrate_board.py).
 """
 
 import json
@@ -30,12 +34,10 @@ from datetime import datetime
 
 import cv2
 import numpy as np
+import toml
 from cv2 import aruco
 
 from board import BoardGeometry, estimate_board_pose
-from calibrate_board import init_detector, load_calibration
-from filters import CornerStabilityFilter
-from main import _LatestFrameSlot
 from pose_averaging import robust_average_transform
 
 MIN_SAMPLES          = 20
@@ -59,6 +61,76 @@ def _settings() -> dict:
         with open(_SETTINGS_PATH) as f:
             return json.load(f)
     return {}
+
+
+def load_calibration(settings_key: str = "calibration_file",
+                     default_name: str = "camera_calib.toml"):
+    """One camera's fisheye intrinsics from its .toml, named in settings.json."""
+    calib_name = _settings().get(settings_key, default_name)
+    path = calib_name if os.path.isabs(calib_name) else os.path.join(_SCRIPT_DIR, calib_name)
+    if not os.path.exists(path):
+        sys.exit(f"Calibration file not found: {path}. Run calibrate_camera.py first.")
+    data = toml.load(path)
+    K = np.array(data["calibration"]["camera_matrix"]).reshape(3, 3)
+    D = np.array(data["calibration"]["dist_coeffs"]).reshape(4, 1)
+    res = data["calibration"].get("resolution", [1280, 800])
+    print(f"Loaded calibration from {path}")
+    return K, D, tuple(res)
+
+
+def init_detector() -> aruco.ArucoDetector:
+    params = aruco.DetectorParameters()
+    params.useAruco3Detection     = True
+    params.cornerRefinementMethod = aruco.CORNER_REFINE_APRILTAG
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+    return aruco.ArucoDetector(dictionary, params)
+
+
+class _LatestFrameSlot:
+    """Newest frame from one camera's capture thread — overwritten, never queued."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._frame = None
+        self._ts = None
+
+    def put(self, frame, ts: float) -> None:
+        with self._lock:
+            self._frame, self._ts = frame, ts
+
+    def get_latest(self):
+        with self._lock:
+            return self._frame, self._ts
+
+
+class StillnessCheck:
+    """Has the device stopped moving, as seen by one camera?
+
+    Compares each frame's marker corners with a reference frame, marker by
+    marker (matched by id — detectMarkers does not list markers in a fixed
+    order), and calls it still only if every corner is within `threshold_px`
+    of where it was. Any real movement, or a change in which markers are
+    visible, re-anchors the reference to the current frame."""
+
+    def __init__(self, threshold_px: float) -> None:
+        self.threshold_px = threshold_px
+        self._ref = None                     # {marker id: (4, 2) corner array}
+
+    def is_still(self, corners, ids) -> bool:
+        current = {int(i): np.asarray(c, dtype=np.float64).reshape(4, 2)
+                   for i, c in zip(np.asarray(ids).flatten(), corners)}
+        ref, self._ref = self._ref, current
+        if ref is None or ref.keys() != current.keys():
+            return False
+        motion = max(float(np.max(np.linalg.norm(current[i] - ref[i], axis=1)))
+                     for i in current)
+        if motion > self.threshold_px:
+            return False
+        self._ref = ref                      # still: keep measuring against the anchor
+        return True
+
+    def reset(self) -> None:
+        self._ref = None
 
 
 def load_board() -> BoardGeometry:
@@ -120,8 +192,8 @@ def main():
     cam0, cam1, slots, stop, threads = init_dual_camera(frame_size)
 
     samples = []
-    stability0 = CornerStabilityFilter(threshold=STABLE_PX_THRESHOLD)
-    stability1 = CornerStabilityFilter(threshold=STABLE_PX_THRESHOLD)
+    stability0 = StillnessCheck(threshold_px=STABLE_PX_THRESHOLD)
+    stability1 = StillnessCheck(threshold_px=STABLE_PX_THRESHOLD)
     stable_count = 0
     last_capture = 0.0
     flash_until = 0.0
@@ -152,8 +224,11 @@ def main():
             now = time.time()
             both_stable = False
             if ids0 is not None and ids1 is not None:
-                both_stable = (stability0.is_stable(corners0, ids0)
-                                and stability1.is_stable(corners1, ids1))
+                # Evaluate both every frame (no short-circuit), so each camera's
+                # reference stays current even while the other one is moving.
+                still0 = stability0.is_still(corners0, ids0)
+                still1 = stability1.is_still(corners1, ids1)
+                both_stable = still0 and still1
             else:
                 stability0.reset()
                 stability1.reset()
