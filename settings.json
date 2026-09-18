@@ -1,6 +1,6 @@
 {
 	"debug": true,
-	"debug_preview": true,
+	"debug_preview": false,
 	"udp_port": 12345,
 	"calibration_file": "camera_calib.toml",
 	"corner_refine": "contour",
@@ -22,6 +22,7 @@
 	"one_euro_d_cutoff": 1.0,
 
 	"camera_backend": "rcam_dual",
+	"tracker_cpu_affinity": "4-7",
 	"rcam_id_0": "CAM2",
 	"rcam_id_1": "CAM3",
 	"rcam_exposure_us": 5000,

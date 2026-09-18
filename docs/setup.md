@@ -254,7 +254,21 @@ Run the game and use the workspace calibration overlay. The patient (or you) tou
 
 ## Running the system
 
-The tracker is launched automatically by the Godot UDPReceiver autoload. To run manually for debugging:
+Normal use — start Godot on the four slow cores; it launches the tracker itself,
+pinned to the four fast ones:
+
+```bash
+taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOARKGames --main-scene res://app/ui/main.tscn
+```
+
+The Q6A's cores are not equal: cpu0–3 are Cortex-A55 at 1958 MHz, cpu4–6
+Cortex-A78 at 2400 MHz, cpu7 an A78 at 2707 MHz (read from
+`/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq`). The tracker is the
+time-critical process, so `"tracker_cpu_affinity": "4-7"` in settings.json makes
+Godot start it with `taskset -c 4-7`; `taskset -c 0-3` on Godot keeps the game
+off those cores.
+
+To run manually for debugging:
 
 ```bash
 # Terminal 1 — tracker

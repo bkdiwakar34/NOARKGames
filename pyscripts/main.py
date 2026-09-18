@@ -5,6 +5,7 @@ import socket
 import struct
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional
 
@@ -275,6 +276,17 @@ class MainClass:
         self._camera_backend = str(settings.get("camera_backend", "auto")).lower()
         self._dual_camera = self._camera_backend == "rcam_dual"
         self._init_camera_backend(settings)
+
+        # Dual mode: remap + detect run for both cameras at once, one worker per
+        # camera, instead of cam0 then cam1. cv2.remap and detectMarkers release
+        # the GIL, so the two really run in parallel on separate cores; the loop
+        # then costs the slower camera, not the sum. Each camera gets its own
+        # detector — ArucoDetector is not documented as safe to share across
+        # threads. The computation per camera is unchanged.
+        self._cam_pool = None
+        if self._dual_camera:
+            self.detector_1 = self._init_detector()
+            self._cam_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cam")
 
         self._init_udp_socket()
 
@@ -950,6 +962,15 @@ class MainClass:
 
     # ── main loop ─────────────────────────────────────────────────────────────
 
+    def _remap_detect(self, frame, map1, map2, detector):
+        """One camera's share of a dual-mode frame: undistort, then detect.
+        Runs on a _cam_pool worker. The main thread is blocked waiting on the
+        result meanwhile, so the state _filter_markers reads cannot change."""
+        frame = cv2.remap(frame, map1, map2, interpolation=cv2.INTER_LINEAR)
+        corners, ids, _ = detector.detectMarkers(frame)
+        corners, ids = self._filter_markers(corners, ids)
+        return frame, corners, ids
+
     def process_frame(self) -> None:
         t0 = time.perf_counter() if self.debug else 0.0
 
@@ -968,18 +989,38 @@ class MainClass:
 
         # INTER_LINEAR: ~half the cost of INTER_CUBIC; corner sub-pixel accuracy
         # comes from the detector's corner refinement, not the resampling kernel.
-        #
-        # skip_remap: undistort the four corners per marker instead of the whole
-        # frame (see _undistort_corners). Single-camera only — the dual path
-        # would also need cam1's own intrinsics, so it keeps the remap.
-        skip_remap = (not self._undistort_image) and not self._dual_camera
-        if frame0 is not None:
+        corners0 = ids0 = None
+        corners1 = ids1 = None
+        if self._dual_camera:
+            # Both cameras' remap + detect at once (see _cam_pool in __init__).
+            fut0 = fut1 = None
+            if frame0 is not None:
+                fut0 = self._cam_pool.submit(self._remap_detect, frame0,
+                                             self.map1, self.map2, self.detector)
+            if frame1 is not None:
+                fut1 = self._cam_pool.submit(self._remap_detect, frame1,
+                                             self.map1_1, self.map2_1, self.detector_1)
+            if fut0 is not None:
+                frame0, corners0, ids0 = fut0.result()
+                self.video_frame = frame0
+            if fut1 is not None:
+                frame1, corners1, ids1 = fut1.result()
+            # The two stages overlap now, so they are timed as one ("remap"
+            # column); detect reads 0 in dual mode.
+            t2 = t3 = time.perf_counter() if self.debug else 0.0
+        else:
+            # skip_remap: undistort the four corners per marker instead of the
+            # whole frame (see _undistort_corners).
+            skip_remap = not self._undistort_image
             if not skip_remap:
                 frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
             self.video_frame = frame0
-        if self._dual_camera and frame1 is not None:
-            frame1 = cv2.remap(frame1, self.map1_1, self.map2_1, interpolation=cv2.INTER_LINEAR)
-        t2 = time.perf_counter() if self.debug else 0.0
+            t2 = time.perf_counter() if self.debug else 0.0
+            corners0, ids0, _ = self.detector.detectMarkers(frame0)
+            if skip_remap:
+                corners0 = self._undistort_corners(corners0)
+            corners0, ids0 = self._filter_markers(corners0, ids0)
+            t3 = time.perf_counter() if self.debug else 0.0
 
         # Poll command from Godot
         cmd = self._recv_command()
@@ -989,19 +1030,6 @@ class MainClass:
             self._relock_origin()    # installer origin ritual, not a dispatch command
         elif cmd:
             self.received_message = cmd
-
-        # Detect markers
-        corners0 = ids0 = None
-        if frame0 is not None:
-            corners0, ids0, _ = self.detector.detectMarkers(frame0)
-            if skip_remap:
-                corners0 = self._undistort_corners(corners0)
-            corners0, ids0 = self._filter_markers(corners0, ids0)
-        corners1 = ids1 = None
-        if self._dual_camera and frame1 is not None:
-            corners1, ids1, _ = self.detector.detectMarkers(frame1)
-            corners1, ids1 = self._filter_markers(corners1, ids1)
-        t3 = time.perf_counter() if self.debug else 0.0
 
         local_coords = None
         if self._dual_camera and self.board is not None and self._use_rigid:
@@ -1079,9 +1107,13 @@ class MainClass:
                     arr = np.array(self._stage_times)
                     means = arr.mean(axis=0)
                     total = float(means.sum())
+                    if self._dual_camera:
+                        stages = f"remap+detect (both cams, parallel): {means[1]:5.2f} ms  |  "
+                    else:
+                        stages = (f"remap: {means[1]:5.2f} ms  |  "
+                                  f"detect: {means[2]:5.2f} ms  |  ")
                     line = (f"capture: {means[0]:5.2f} ms  |  "
-                            f"remap: {means[1]:5.2f} ms  |  "
-                            f"detect: {means[2]:5.2f} ms  |  "
+                            + stages +
                             f"pose+send: {means[3]:5.2f} ms  |  "
                             f"total: {total:5.2f} ms  ({len(arr)} frames)")
                     print(line)
@@ -1118,6 +1150,8 @@ class MainClass:
                 if self._debug_preview and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
+            if self._cam_pool is not None:
+                self._cam_pool.shutdown(wait=True)
             if self._camera_backend in ("rcam_single", "rcam_dual"):
                 self._stop_capture.set()
                 for t in self._cam_threads:
