@@ -24,7 +24,7 @@
 	"camera_backend": "rcam_dual",
 	"tracker_cpu_affinity": "4-7",
 	"roi_enabled": true,
-	"roi_margin_markers": 2.0,
+	"roi_margin_markers": 1.0,
 	"roi_full_every": 100,
 	"rcam_id_0": "CAM2",
 	"rcam_id_1": "CAM3",
