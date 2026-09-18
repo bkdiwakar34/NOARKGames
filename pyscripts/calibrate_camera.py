@@ -16,6 +16,7 @@ Run on the Q6A:       python pyscripts/calibrate_camera.py --backend rcam --cam-
 """
 
 import argparse
+import json
 import os
 import platform
 import time
@@ -38,6 +39,22 @@ STABLE_PX_THRESHOLD = 2.0        # max mean corner motion (px) to count as still
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def _rcam_controls() -> dict:
+    """Exposure, gain and frame rate from settings.json — the same keys main.py
+    reads, so every program runs the cameras the same way instead of inheriting
+    whatever the last program left set on the sensor."""
+    path = os.path.join(_SCRIPT_DIR, "..", "settings.json")
+    s = {}
+    if os.path.exists(path):
+        with open(path) as f:
+            s = json.load(f)
+    return {
+        "ExposureTime": int(s.get("rcam_exposure_us", 5000)),
+        "AnalogueGain": float(s.get("rcam_gain", 4.0)),
+        "FrameRate":    int(s.get("framerate", 100)),
+    }
+
+
 # ── camera ───────────────────────────────────────────────────────────────────
 
 def init_camera(backend: str = "auto", cam_id: str = "CAM2"):
@@ -48,7 +65,7 @@ def init_camera(backend: str = "auto", cam_id: str = "CAM2"):
 
         cam = Camera(cam_id)
         cam.configure(size=FRAME_SIZE, bit_depth=8)
-        cam.set_controls({"ExposureTime": 5000, "AnalogueGain": 4.0})
+        cam.set_controls(_rcam_controls())
         cam.start()
         return ("rcam", cam)
     if platform.system() == "Linux":

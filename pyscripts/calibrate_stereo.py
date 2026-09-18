@@ -146,9 +146,11 @@ def init_dual_camera(frame_size):
     from rcam import Camera
 
     settings = _settings()
+    # All three, like main.py — never rely on what the last program left set.
     controls = {
         "ExposureTime": int(settings.get("rcam_exposure_us", 5000)),
         "AnalogueGain": float(settings.get("rcam_gain", 4.0)),
+        "FrameRate":    int(settings.get("framerate", 100)),
     }
     cam0 = Camera(settings.get("rcam_id_0", "CAM2"))
     cam1 = Camera(settings.get("rcam_id_1", "CAM3"))

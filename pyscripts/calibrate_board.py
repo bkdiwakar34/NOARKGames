@@ -50,6 +50,22 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_PATH = os.path.join(_SCRIPT_DIR, "board_geometry.json")
 
 
+def _rcam_controls() -> dict:
+    """Exposure, gain and frame rate from settings.json — the same keys main.py
+    reads, so every program runs the cameras the same way instead of inheriting
+    whatever the last program left set on the sensor."""
+    path = os.path.join(_SCRIPT_DIR, "..", "settings.json")
+    s = {}
+    if os.path.exists(path):
+        with open(path) as f:
+            s = json.load(f)
+    return {
+        "ExposureTime": int(s.get("rcam_exposure_us", 5000)),
+        "AnalogueGain": float(s.get("rcam_gain", 4.0)),
+        "FrameRate":    int(s.get("framerate", 100)),
+    }
+
+
 # ── setup (mirrors diagnose_jitter.py) ───────────────────────────────────────
 
 def load_calibration(settings_key: str = "calibration_file", default_name: str = "camera_calib.toml"):
@@ -88,7 +104,7 @@ def init_camera(frame_size, backend: str = "auto", cam_id: str = "CAM2"):
 
         cam = Camera(cam_id)
         cam.configure(size=frame_size, bit_depth=8)
-        cam.set_controls({"ExposureTime": 5000, "AnalogueGain": 4.0})
+        cam.set_controls(_rcam_controls())
         cam.start()
         return ("rcam", cam)
     if platform.system() == "Linux":
