@@ -311,16 +311,29 @@ class MainClass:
 
         # Search box (region of interest), per camera: once the device is found,
         # the next frame is undistorted and searched only in a box around the
-        # markers, widened by roi_margin_markers marker-widths on every side.
-        # Inside the box the undistorted pixels are the same map entries as the
-        # full remap and the detector sees the same neighbourhoods, so corners
-        # come out the same. Any frame where the box yields no markers, or fewer
-        # than last frame, is re-searched full-frame in the same pass, and every
-        # roi_full_every-th frame is full-frame regardless. Off while the debug
-        # preview is on, since the preview needs the whole picture.
+        # whole device (all markers projected with this frame's pose — see
+        # _roi_from_pose; the detected markers' box when there is no pose),
+        # widened by roi_margin_markers marker-widths on every side. Inside the
+        # box the undistorted pixels are the same map entries as the full remap
+        # and the detector sees the same neighbourhoods, so corners come out the
+        # same. A box that yields no markers at all is re-searched full-frame in
+        # the same pass, and every roi_full_every-th frame is full-frame
+        # regardless. Off while the debug preview is on, since the preview needs
+        # the whole picture.
         self._roi_enabled    = bool(settings.get("roi_enabled", True)) and not self._debug_preview
         self._roi_margin     = float(settings.get("roi_margin_markers", 2.0))
-        self._roi_full_every = int(settings.get("roi_full_every", 30))
+        self._roi_full_every = int(settings.get("roi_full_every", 100))
+        # All marker corners of the device in the board frame (from
+        # board_geometry.json). Projected with a camera's latest pose, they give
+        # a box around the WHOLE device — markers seen edge-on or hidden this
+        # frame included — so a marker missing from the box is never the box's
+        # fault, and the full-frame fallback is only needed when nothing at all
+        # is found.
+        self._device_pts = None
+        if self.board is not None:
+            self._device_pts = np.concatenate(
+                [self.board.corners_in_board(mid) for mid in self.board.marker_poses]
+            ).astype(np.float64)
         self._roi        = [None, None]   # (x0, y0, x1, y1) in undistorted pixels
         self._roi_count  = [0, 0]         # markers found last frame
         self._roi_age    = [0, 0]         # frames since the last full-frame search
@@ -1065,12 +1078,12 @@ class MainClass:
             corners, ids, _ = detector.detectMarkers(crop)
             corners, ids = self._filter_markers(corners, ids)
             n = 0 if ids is None else len(ids)
-            if n > 0 and n >= self._roi_count[cam]:
+            if n > 0:
                 offset = np.array([x0, y0], dtype=np.float32)
                 corners = tuple(c + offset for c in corners)
                 self._update_roi(cam, corners, n)
                 return crop, corners, ids
-            # Box lost markers: fall through to a full-frame search, same pass.
+            # Box found nothing: fall through to a full-frame search, same pass.
 
         self._roi_age[cam] = 0
         self._full_count[cam] += 1
@@ -1079,6 +1092,30 @@ class MainClass:
         corners, ids = self._filter_markers(corners, ids)
         self._update_roi(cam, corners, 0 if ids is None else len(ids))
         return frame, corners, ids
+
+    def _roi_from_pose(self, cam, pose, camera_matrix) -> None:
+        """Replace this camera's next search box with one around the whole
+        device: all marker corners projected with this frame's pose, widened
+        by roi_margin_markers × the largest projected marker side. Runs on the
+        main thread after both workers have finished. Without a pose (too few
+        markers, or a rejected solve) the markers-only box from _update_roi
+        stays in place."""
+        if pose is None or self._device_pts is None:
+            return
+        rvec, tvec, _ = pose
+        pix, _ = cv2.projectPoints(self._device_pts, rvec, tvec,
+                                   camera_matrix, np.zeros(5))
+        quads = pix.reshape(-1, 4, 2)
+        side = float(np.linalg.norm(quads - np.roll(quads, -1, axis=1), axis=2).max())
+        margin = self._roi_margin * side
+        pts = quads.reshape(-1, 2)
+        w, h = self.frame_size
+        x0 = int(max(0, np.floor(pts[:, 0].min() - margin)))
+        y0 = int(max(0, np.floor(pts[:, 1].min() - margin)))
+        x1 = int(min(w, np.ceil(pts[:, 0].max() + margin)))
+        y1 = int(min(h, np.ceil(pts[:, 1].max() + margin)))
+        if x1 > x0 and y1 > y0:
+            self._roi[cam] = (x0, y0, x1, y1)
 
     def _update_roi(self, cam, corners, n) -> None:
         """Next frame's search box: the markers' bounding box, widened on every
@@ -1172,6 +1209,9 @@ class MainClass:
                 self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners0, ids0)
             pose0 = self._solve_camera_pose(0, corners0, ids0) if ids0 is not None else None
             pose1 = self._solve_camera_pose(1, corners1, ids1) if ids1 is not None else None
+            if self._roi_enabled:
+                self._roi_from_pose(0, pose0, self.camera_matrix)
+                self._roi_from_pose(1, pose1, self.camera_matrix_1)
             fused = self._fuse_board_poses(pose0, pose1)
             if fused is not None:
                 local_coords = self._process_board(fused[0], fused[1])
