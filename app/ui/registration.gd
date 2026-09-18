@@ -219,7 +219,9 @@ func _on_register_pressed() -> void:
 	if GlobalSignals.return_to_installer:
 		get_tree().change_scene_to_file("res://app/installer/installer.tscn")
 	else:
-		get_tree().change_scene_to_file("res://app/ui/game_select.tscn")
+		# First-run registration: straight to the patient's chooser, as main.gd
+		# does on every later launch. game_select is installer-only now.
+		get_tree().change_scene_to_file("res://app/ui/chooser.tscn")
 
 
 func _prefill(id: String) -> void:
