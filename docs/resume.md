@@ -9,54 +9,50 @@ every session, while you still remember. The full story lives in
 
 ---
 
-**Last updated:** 2026-09-17
+**Last updated:** 2026-09-18
 
-**This repo is the Dragon Q6A one.** Split from the Raspberry Pi repo
-(`bkdiwakar34/NOARKGames-pi`) on 2026-09-17; shared history up to tag `pre-split`,
-shared fixes move across by `git cherry-pick`.
+**This repo is the Dragon Q6A one.** The Raspberry Pi version is `bkdiwakar34/NOARKGames-pi`.
 
-## State of the board
+## State
 
-Rebuilt from bare metal today and **working**: boots from the SSD (`nvme0n1p3`), both
-OV9281 cameras detected and capturing, Godot 4.5 installed, repo cloned at
-`~/Documents/NOARKGames`. Reachable at `radxa@10.158.152.4` with the
-`~/.ssh/noark_q6a` key — **the IP changes with the hotspot**, so check `hostname -I`
-on the board if SSH times out.
+**The system works end to end at exactly 100 samples/s.** Board rebuilt (SSD), both
+cameras calibrated, device and stereo calibrated, Godot 4.5 installed. A 64 s test
+session recorded every camera frame — all 6446 gaps between samples 10 ms. The hand
+CSV now has a `capture_time` column (camera capture time, Unix s to 1 µs).
 
-Two things that do **not** survive a reboot:
+**Starting the system** (on the board):
 
 ```bash
-sudo modprobe ov9282                 # camera driver
-source .venv/bin/activate            # per terminal
+sudo modprobe ov9282        # camera driver — needed after every reboot
+taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOARKGames --main-scene res://app/ui/main.tscn
 ```
 
-The old UFS freezing fault is gone with the hardware — the boot menu lists no UFS
-device and `dmesg | grep -i ufshc` is silent.
-
-## The blocker
-
-**The camera rig does not exist.** Both cameras are connected but not mounted, so
-they cannot see the markers. Nothing below can be verified until that is built.
+Godot starts the tracker itself, pinned to the fast cores. SSH: `ssh radxa@<ip>` — the IP
+changes with the phone hotspot (`hostname -I` on the board). Calibration scripts must
+be run in a terminal on the board, not over SSH (they open a window).
 
 ## Next action
 
-1. Build the rig — mount both cameras in their final position.
-2. Run the tracker once: `python pyscripts/main.py` on the board. This verifies
-   commit `cc2193c`, which removed 147 lines (the Pi camera path and the pipelined
-   undistort worker) and **has never been executed** — the commit message wrongly
-   claims otherwise, see the journal.
-3. Calibrate from scratch — nothing survived the reinstall. `calibrate_camera.py`
-   per camera (9×6 chessboard, 24.35 mm squares), then `calibrate_board.py`, then
-   `calibrate_stereo.py` once the mount is final. **Back the files up off the board.**
+Pick up the July agenda, which the sampling-rate work now supports:
 
-## Open question
+1. **Data audit** — check every field the study needs is saved (schema:
+   [v1_plan.md §5](v1_plan.md)). Data lives in `~/Documents/NOARK/data/<patient>/GameData/`.
+2. **Healthy-user test** sessions.
+3. **Analysis script** over the CSVs — use `capture_time`, not `epochtime`, for anything
+   timing-sensitive.
 
-Where should the rig be built, and is the mount final enough to calibrate stereo
-against?
+## Small open items
+
+- One deliberate close-up run to confirm the 10 ms budget holds with the device nearest
+  the cameras.
+- Back up the four calibration files off the board (`pyscripts/camera_calib.toml`,
+  `camera_calib_1.toml`, `board_geometry.json`, `stereo_extrinsics.json`).
+- Auto-load `ov9282` at boot.
+- Decide on the in-game **■ Stop** button (patients can reach the researcher graph).
 
 ## Deliberately not done
 
-- Splitting `main.py` into capture / pose / stream modules, and moving the
-  calibration and one-off scripts into subfolders — waiting on a verified baseline
-  rather than stacking untested cuts.
+- 120 fps — possible (camera ceiling 120.6) but not needed.
+- Faster detection that changes what the detector computes (Aruco3 downscaling,
+  detecting on the raw picture) — rejected until accuracy can be checked.
 - Kiosk boot (package 5) and upload (package 7) — explicitly last.

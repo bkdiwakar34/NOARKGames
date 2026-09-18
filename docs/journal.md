@@ -16,6 +16,133 @@ New entries go at the **top**, under the date.
 
 ---
 
+## 2026-09-18 — Calibration, and the tracker from 39 to exactly 100 samples/s
+
+**Goal:** finish setting the rebuilt Q6A up (calibration), then find out — and
+push — the real sampling rate of the whole system.
+
+**Ended the day with:** all four calibrations done; every camera frame, 100 per
+second, recorded in the hand CSV with the time it was captured. Verified: a 64 s
+session had 6446 gaps between consecutive samples and **every one was 10 ms**.
+
+### 1. Calibration — all four, from scratch
+
+Nothing survived the reinstall, and it turned out `camera_calib.toml` had never
+been in git either (it is git-ignored, like the others). Order matters, because
+each step uses the one before:
+
+| Step | Command | Result |
+|---|---|---|
+| CAM2 lens | `python pyscripts/calibrate_camera.py --backend rcam --cam-id CAM2` | fit 0.33 px; 5 of 6 test poses 0.11–0.21 mm |
+| CAM3 lens | `... --cam-id CAM3 --output camera_calib_1.toml` | fit 1.44 px, but test poses 0.12–0.34 mm (the test is what counts) |
+| Device (marker positions) | `python pyscripts/calibrate_board.py --backend rcam --cam-id CAM2` | worst marker 4.2 mm (limit 5); pairs 24–28 and 12–32 weak both runs |
+| Camera to camera | `python pyscripts/calibrate_stereo.py` | 0.32° / 1.72 mm (July: 0.75° / 6.68 mm) |
+
+Forgetting `--output camera_calib_1.toml` on the CAM3 run silently overwrites CAM2's
+file. The device calibration only needs one camera — it measures the device, not
+the lens.
+
+**Dead ends worth remembering:**
+
+- Running a calibration script **over SSH** fails with `could not connect to display`
+  — the script opens a live window. Run it in a terminal on the board itself.
+- CAM2's first test showed one pose at 2.80 mm and a max error of 24.32 mm. That
+  max is almost exactly one square (24.35 mm): the detector mislabelled a row of
+  corners in that one frame. A lens problem cannot produce an error of exactly one
+  square, so the calibration was kept.
+- **The stereo step would not capture at all.** Two causes. (a) Its "is the device
+  still?" check compared markers by list position, and the detector does not list
+  markers in a fixed order — the same markers reordered looked like hundreds of
+  pixels of movement. The script was made standalone with its own check that
+  matches markers by ID. (b) In room light the picture is dark (average pixel
+  40/255) and noisy, so corners jitter past the 2 px limit even with the device
+  still. A lamp beside the cameras, plus a 4 px limit, fixed it. **Gain does not
+  help here** — it brightens the noise too.
+- Marker pairs 24–28 and 12–32 came out weak in both device runs whatever the
+  technique. Something that survives a change of technique is usually physical — a
+  marker not quite flat, or two faces never seen square-on together. First place to
+  look if tracking jumps when marker 32 or 28 faces a camera.
+
+**Also fixed on the way:** the board clock was on UTC (5 h 30 min behind) —
+`sudo timedatectl set-timezone Asia/Kolkata`. Session CSVs are timestamped with it.
+
+### 2. What limits the sampling rate — measured, stage by stage
+
+A sample passes through: camera → cable → `rcam` unpacking → tracker → UDP → Godot
+→ CSV. The recorded rate is the slowest stage.
+
+| Stage | How measured | Result |
+|---|---|---|
+| Camera sensor | `python rcam/bench.py` | ceiling **120.6 fps** per camera; set to 100 |
+| Cable | arithmetic from the overlay: 2 lanes × 800 Mbit/s = 1.6 Gbit/s | needs 1.23 at 120 fps — not a limit |
+| `rcam` unpacking | `bench.py`, rcam rows | 120.5 fps, 0 dropped — not a limit |
+| Tracker | `/tmp/tracker_timing.log` | **39 fps** — the bottleneck |
+| Godot → CSV | rows per second in the hand CSV | one row per tracker sample — not a limit |
+
+Measuring the tracker: with `"debug": true` and `"debug_preview": false`, it writes
+one line per second to `/tmp/tracker_timing.log` — the time per stage, and how many
+frames it processed that second. Run the game, play a minute, then
+`tail -20 /tmp/tracker_timing.log`. Baseline: remap (undistort) 7.7 ms + detect
+16.6 ms + pose 2.1 ms = 26.4 ms per frame → 1000 / 26.4 ≈ 39 fps. Of every 100
+frames the cameras took, 61 were never used.
+
+### 3. Getting the tracker to 100
+
+Each step was measured on the board before the next. Two faster options were
+**rejected on purpose** because they change what the detector computes, and
+checking accuracy is hard: OpenCV's built-in downscaling (Aruco3), and detecting on
+the raw fisheye picture. Everything below keeps the per-pixel work identical.
+
+| Step | What it does | Result |
+|---|---|---|
+| Per-frame labels in `rcam` | the kernel's frame sequence number + capture time now come with each frame (`capture_with_meta()`); needs the Rust rebuild | frames verifiably 10.0 ms apart, none skipped |
+| Two cameras at once | each camera's undistort + detect on its own worker thread | 39 → 57 fps |
+| Pin to cores | tracker on the four fast cores (cpu4–7, A78), Godot on the slow ones (cpu0–3, A55) — `tracker_cpu_affinity: "4-7"` and `taskset -c 0-3` on Godot | rate much steadier (56–58 instead of 34–45) |
+| Search box | undistort and search only a box around the device, full picture only when the box finds nothing, plus once a second | ~100 fps |
+| No repeats | the tracker had started outrunning the camera and re-processing the same frame (up to 145 "frames" a second) — now it waits for a frame it has not seen, using the sequence number | repeats gone |
+| Box around the whole device | the box first covered only the markers seen, so an edge-on marker flickering in and out triggered full searches (up to 19/s per camera, each costing a frame); now all 8 markers are projected from the pose | full searches down to the 1/s refresh |
+| Margin 2 → 1 marker width | 1 width = 50 mm of movement per frame, 2.5× the 20 mm a very fast (2 m/s) hand moves in 10 ms | close-up frames back under 10 ms |
+| 3-frame queue | a slow frame delays the next ones instead of letting them be overwritten | no frames dropped |
+| Capture time into the CSV | sent to Godot as a float64 in a 24-byte packet (a float32 cannot hold a Unix time); new last column `capture_time` in the hand CSV | every sample on the camera's 10 ms grid |
+
+The core rule behind all of it: **the tracker has 10 ms per frame at 100 fps.** If a
+frame's work takes W ms and W is over 10, the tracker processes 1000 / W frames a
+second and misses the rest — e.g. W = 11.14 ms gives 90 processed, 10 missed, which
+is exactly what the log showed.
+
+**Checking the recording** (on the board, after a session):
+
+```bash
+f=$(ls -t ~/Documents/NOARK/data/*/GameData/RandomReachHand_* | head -1)
+# samples per second, by capture time (column 8): expect 100
+grep -E '^[0-9]{10}' "$f" | cut -d, -f8 | cut -d. -f1 | uniq -c | tail -20
+# gaps between consecutive samples, in ms: expect only 10; a 20 is a lost sample
+grep -E '^[0-9]{10}' "$f" | cut -d, -f8 | awk 'NR>1{printf "%.0f\n", ($1-p)*1000} {p=$1}' | sort -n | uniq -c
+```
+
+The occasional second with 99 samples is the camera itself: its frames are 10.03 ms
+apart (99.7 fps), not exactly 10.
+
+**Other things fixed on the way:** calibration scripts and `bench.py` now set every
+camera setting themselves (settings persist on the sensor after a program exits, so
+programs were inheriting each other's); registration of a new patient now goes to the
+game chooser instead of the old v2 session screen.
+
+### Open after today
+
+1. One deliberate close-up run — the smallest marker size seen was 61 px and the
+   largest 75 px; the very closest positions have not been checked against the
+   10 ms budget.
+2. Back up the four calibration files off the board.
+3. Auto-load `ov9282` at boot (still a manual `sudo modprobe ov9282`).
+4. The **■ Stop** button in the game is visible to patients and leads to the
+   researcher's graph and settings page — decide: hide it outside installer mode, or
+   leave it.
+5. Back to the July agenda: data audit, healthy-user test, analysis script — which
+   can now use `capture_time`.
+
+---
+
 ## 2026-09-17 — Rebuilding the Dragon Q6A from bare metal
 
 **Goal:** get the Q6A running again after its storage was replaced, and split the
