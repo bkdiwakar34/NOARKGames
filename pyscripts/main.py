@@ -1,3 +1,4 @@
+import collections
 import csv
 import json
 import os
@@ -30,41 +31,53 @@ from pose_averaging import rotation_angle
 # run() (which checks Godot's heartbeat). Frames arrive every 10 ms at 100 fps.
 FRAME_WAIT_S = 0.05
 
+# Frames each camera's queue holds. A slow pass then delays the next frames
+# instead of letting them be overwritten; the loop catches up because a
+# typical pass (~7.5 ms) is shorter than the 10 ms between frames. Only if it
+# falls more than this many frames behind is the oldest one dropped (and
+# counted as missed). 3 frames = 30 ms of slack at 100 fps.
+FRAME_QUEUE_DEPTH = 3
 
-class _LatestFrameSlot:
-    """Lock-guarded single-slot frame holder for a capture thread — always
-    exposes the newest frame, overwriting the previous one rather than
-    queuing (a queue.Queue's FIFO/blocking semantics are the wrong fit when
-    all a reader ever wants is "whatever's newest")."""
+
+class _FrameQueue:
+    """The last FRAME_QUEUE_DEPTH frames from one camera's capture thread, each
+    with its kernel capture time and sequence number, oldest first."""
 
     def __init__(self) -> None:
         self._cond = threading.Condition()
-        self._frame = None
-        self._ts = None
-        self._seq = None
+        self._items = collections.deque(maxlen=FRAME_QUEUE_DEPTH)   # (frame, ts, seq)
 
-    def put(self, frame, ts: float, seq=None) -> None:
+    def put(self, frame, ts: float, seq) -> None:
         """ts: the frame's capture time; seq: the kernel's frame sequence number."""
         with self._cond:
-            self._frame, self._ts, self._seq = frame, ts, seq
+            self._items.append((frame, ts, seq))
             self._cond.notify_all()
 
-    def get_latest(self):
+    def next_after(self, last_seq, timeout: float):
+        """The oldest queued frame this reader has not processed yet — the
+        first with seq > last_seq (the newest, on the first call) — waiting
+        up to timeout for one to arrive. Returns (frame, ts, seq) or None."""
+        def pick():
+            if not self._items:
+                return None
+            if last_seq is None:
+                return self._items[-1]
+            for item in self._items:
+                if item[2] > last_seq:
+                    return item
+            return None
         with self._cond:
-            return self._frame, self._ts
+            if self._cond.wait_for(lambda: pick() is not None, timeout):
+                return pick()
+            return None
 
-    def get_latest_meta(self):
+    def nearest(self, ts: float):
+        """The queued frame captured closest in time to ts — for pairing the
+        second camera with the driving camera's frame. (frame, ts, seq) or None."""
         with self._cond:
-            return self._frame, self._ts, self._seq
-
-    def wait_newer(self, last_seq, timeout: float):
-        """Block until the slot holds a frame whose sequence number differs
-        from last_seq — one this reader has not processed yet — or until
-        timeout. Returns (frame, ts, seq), or None on timeout."""
-        with self._cond:
-            ok = self._cond.wait_for(
-                lambda: self._frame is not None and self._seq != last_seq, timeout)
-            return (self._frame, self._ts, self._seq) if ok else None
+            if not self._items:
+                return None
+            return min(self._items, key=lambda item: abs(item[1] - ts))
 
 
 def _weighted_quaternion_average(Ra: np.ndarray, Rb: np.ndarray,
@@ -343,6 +356,12 @@ class MainClass:
         # is processed twice; and camera frames skipped since the last timing
         # line (gaps in the driving camera's sequence).
         self._last_seq         = [None, None]
+        # Capture time of the frame this pass is processing (kernel clock,
+        # CLOCK_MONOTONIC), sent to Godot with each position. Converted to
+        # Unix time with an offset taken once at start-up; the two clocks
+        # only drift apart if the system clock is stepped mid-session.
+        self._frame_t_cap   = None
+        self._mono_to_unix  = time.time() - time.monotonic()
         self._last_seq_driver  = None
         self._missed_count     = 0
 
@@ -420,7 +439,7 @@ class MainClass:
         cam.start()
 
         self._rcam         = [cam]
-        self._frame_slots   = [_LatestFrameSlot()]
+        self._frame_slots   = [_FrameQueue()]
         self._cam_errors    = [None]
         self._cam_error_logged = [False]
         self._cam_threads   = [None]
@@ -442,7 +461,7 @@ class MainClass:
             cam.start()
             self._rcam.append(cam)
 
-        self._frame_slots      = [_LatestFrameSlot(), _LatestFrameSlot()]
+        self._frame_slots      = [_FrameQueue(), _FrameQueue()]
         self._cam_errors       = [None, None]
         self._cam_error_logged = [False, False]
         self._cam_threads      = [None, None]
@@ -527,22 +546,25 @@ class MainClass:
         """Next not-yet-processed frame from the single camera's capture
         thread, waiting for it if needed. None if none arrives within
         FRAME_WAIT_S (run() then gets a chance to check Godot's heartbeat)."""
-        got = self._frame_slots[0].wait_newer(self._last_seq[0], FRAME_WAIT_S)
+        got = self._frame_slots[0].next_after(self._last_seq[0], FRAME_WAIT_S)
         if self._cam_errors[0] is not None:
             raise self._cam_errors[0]
         if got is None:
             return None
-        frame, _ts, seq = got
+        frame, ts, seq = got
         self._last_seq[0] = seq
         self._count_missed(seq)
+        self._frame_t_cap = ts
         return frame
 
     def _capture_dual_frames(self):
-        """One pass per new frame from the driving camera (cam0, or cam1 once
-        cam0 has died): waits until it has a frame not yet processed, then
-        pairs it with the other camera's newest frame if the two were captured
-        within stereo_max_frame_skew_ms. So every pass is a distinct frame and
-        the pass rate is the camera's frame rate, never above it.
+        """One pass per frame from the driving camera (cam0, or cam1 once cam0
+        has died), in capture order: takes the oldest queued frame not yet
+        processed (waiting if there is none), then pairs it with the other
+        camera's queued frame captured closest to it, if within
+        stereo_max_frame_skew_ms. Every pass is a distinct frame, none is
+        skipped unless the loop falls FRAME_QUEUE_DEPTH frames behind, and the
+        pass rate is the camera's frame rate.
 
         A dead camera (thread raised, e.g. on stream end) reports None here
         from then on — _fuse_board_poses already falls back to the surviving
@@ -562,22 +584,25 @@ class MainClass:
 
         driver = 0 if self._cam_errors[0] is None else 1
         other = 1 - driver
-        got = self._frame_slots[driver].wait_newer(self._last_seq[driver], FRAME_WAIT_S)
+        got = self._frame_slots[driver].next_after(self._last_seq[driver], FRAME_WAIT_S)
         if got is None:
             return None, None
         frame_d, ts_d, seq_d = got
         self._last_seq[driver] = seq_d
         self._count_missed(seq_d)
+        self._frame_t_cap = ts_d
 
         frame_o = None
         if self._cam_errors[other] is None:
-            frame_o, ts_o, seq_o = self._frame_slots[other].get_latest_meta()
-            if frame_o is not None and abs(ts_d - ts_o) > self._stereo_max_frame_skew_s:
-                # Stale pairing — the other camera's newest frame is too far
-                # from this one in capture time; fuse without it this pass.
-                frame_o = None
-            elif frame_o is not None:
-                self._last_seq[other] = seq_o
+            match = self._frame_slots[other].nearest(ts_d)
+            if match is not None:
+                frame_o, ts_o, seq_o = match
+                if abs(ts_d - ts_o) > self._stereo_max_frame_skew_s:
+                    # No frame of the other camera close enough in capture
+                    # time — fuse without it this pass.
+                    frame_o = None
+                else:
+                    self._last_seq[other] = seq_o
 
         frames = [None, None]
         frames[driver], frames[other] = frame_d, frame_o
@@ -603,13 +628,20 @@ class MainClass:
             return b""
 
     def _send_coordinates(self, command: str, coords: np.ndarray) -> None:
-        """Map a string command to a float code and stream 4 floats to Godot."""
+        """Stream one sample to Godot — 24 bytes:
+             bytes  0-15  4 × float32: command code, x, y, z
+             bytes 16-23  1 × float64: capture time of the frame, Unix seconds
+        The capture time is float64 because float32 cannot hold a Unix time
+        to better than ~2 minutes. Godot reads it when the packet is 24 bytes
+        and falls back to its own arrival time otherwise."""
         if self.addr is None:
             return
         code_map = {"STOP": -99.0, "START": 2.0, "RESET": 5.0}
         msg_code = code_map.get(command, 2.0)
         data = np.append(msg_code, coords).flatten()
-        data_bytes = struct.pack("<" + "f" * len(data), *data)
+        t_cap = (self._frame_t_cap + self._mono_to_unix
+                 if self._frame_t_cap is not None else time.time())
+        data_bytes = struct.pack("<" + "f" * len(data), *data) + struct.pack("<d", t_cap)
         self.udp_socket.sendto(data_bytes, self.addr)
 
     # ── pose estimation ───────────────────────────────────────────────────────

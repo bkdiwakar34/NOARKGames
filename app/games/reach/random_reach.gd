@@ -339,9 +339,11 @@ func _start_logging() -> void:
 	_hand_file = SessionManager.create_log_file(
 		"RandomReachHand", PatientDB.current_patient_id, [origin_line])
 	if _hand_file:
+		# epochtime   = when the sample ARRIVED in Godot (varies with processing)
+		# capture_time = when the camera CAPTURED the frame (kernel clock, 10 ms grid)
 		_hand_file.store_csv_line(PackedStringArray([
 			"epochtime", "trial", "screen_x", "screen_y",
-			"tracker_x", "tracker_y", "tracker_z"
+			"tracker_x", "tracker_y", "tracker_z", "capture_time"
 		]))
 	_targets_file = SessionManager.create_log_file(
 		"RandomReachTargets", PatientDB.current_patient_id)
@@ -365,7 +367,8 @@ func _drain_hand_samples() -> void:
 	for s in samples:
 		_hand_file.store_csv_line(PackedStringArray([
 			str(s[0]), trial, str(s[1]), str(s[2]),
-			str(s[3]), str(s[4]), str(s[5])
+			str(s[3]), str(s[4]), str(s[5]),
+			"%.6f" % s[6]   # microseconds: str() would round a Unix time
 		]))
 	_hand_file.flush()
 

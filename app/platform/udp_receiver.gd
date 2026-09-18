@@ -22,7 +22,7 @@ var _pkt_window_ms: int = 0
 # Per-packet log buffer: filled on the network thread at tracker rate (~100 Hz),
 # drained by the game scene once per frame via take_samples().
 var log_enabled: bool = false
-var _log_buffer: Array = []      # [unix_time, screen_x, screen_y, tracker_x, tracker_y, tracker_z]
+var _log_buffer: Array = []      # [arrival_unix_time, screen_x, screen_y, tracker_x, tracker_y, tracker_z, capture_unix_time]
 var _log_mutex: Mutex = Mutex.new()
 
 var _udp: PacketPeerUDP = PacketPeerUDP.new()
@@ -78,9 +78,14 @@ func _network_loop() -> void:
 	while _running:
 		var got_any: bool = false
 		while _udp.get_available_packet_count() > 0:
-			var packet = _udp.get_packet()
-			var floats = PackedByteArray(packet).to_float32_array()
-			_apply_packet(floats)
+			var packet: PackedByteArray = _udp.get_packet()
+			# 24-byte packets: 4 × float32 (code, x, y, z) + float64 capture
+			# time in Unix seconds (see the tracker's _send_coordinates).
+			# Older 16-byte packets carry no capture time — use arrival time.
+			var t_cap: float = Time.get_unix_time_from_system()
+			if packet.size() >= 24:
+				t_cap = packet.decode_double(16)
+			_apply_packet(packet.slice(0, 16).to_float32_array(), t_cap)
 			got_any = true
 		var now: int = Time.get_ticks_msec()
 		if now - last_send >= 100:
@@ -89,7 +94,7 @@ func _network_loop() -> void:
 		if not got_any:
 			OS.delay_msec(2)
 
-func _apply_packet(f: PackedFloat32Array) -> void:
+func _apply_packet(f: PackedFloat32Array, t_cap: float) -> void:
 	if f.size() < 4:
 		return
 	raw_x = f[1]
@@ -108,7 +113,7 @@ func _apply_packet(f: PackedFloat32Array) -> void:
 	if log_enabled:
 		_log_mutex.lock()
 		_log_buffer.append([Time.get_unix_time_from_system(),
-			screen_pos.x, screen_pos.y, raw_x, raw_y, raw_z])
+			screen_pos.x, screen_pos.y, raw_x, raw_y, raw_z, t_cap])
 		if _log_buffer.size() > 2000:  # safety cap if the game stops draining
 			_log_buffer = _log_buffer.slice(_log_buffer.size() - 2000)
 		_log_mutex.unlock()

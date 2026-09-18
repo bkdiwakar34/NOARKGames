@@ -95,8 +95,11 @@ SSH (researcher-only, already working, done at bench prep).
 Two CSVs per game run in `Documents/NOARK/data/<patient>/GameData/`, every row flushed to
 disk immediately (power-cut safe):
 
-- **Hand stream** (~100 Hz, one row per tracker packet):
-  `epochtime, trial, screen_x, screen_y, tracker_x, tracker_y, tracker_z`.
+- **Hand stream** (100 Hz, one row per tracker packet):
+  `epochtime, trial, screen_x, screen_y, tracker_x, tracker_y, tracker_z, capture_time`.
+  `epochtime` is when the sample arrived in Godot; `capture_time` (added 2026-09-18,
+  Unix seconds to 1 µs) is when the camera captured the frame — on the camera's
+  10 ms grid, so use it for anything timing-sensitive (velocity, movement time).
   No mouse-fallback logging — tracker only.
 - **Targets** (one row per target):
   `trial, spawn_time, target_x, target_y, diameter_px, outcome (caught/expired/aborted),
