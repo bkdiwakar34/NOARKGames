@@ -11,7 +11,7 @@ How to set up the hardware and run the system on the Radxa Dragon Q6A. For what 
 | Computer | Radxa Dragon Q6A (QCS6490, Linux ARM64), booting from SSD — see the UFS note in §3c |
 | Camera | Two OV9281 monochrome fisheye cameras (160° FOV), via the `rcam` package |
 | Input device | NOARK device with ArUco markers (IDs 12, 14, 20 active) |
-| Display | Monitor connected to Pi |
+| Display | 1920×1080 HDMI monitor, set to 100 Hz (§6) |
 | Repo on board | `/home/radxa/Documents/NOARKGames/` |
 | Godot binary | `/home/radxa/Downloads/Godot_v4.5-stable_linux.arm64` |
 
@@ -186,6 +186,20 @@ open work (see [todo.md](todo.md)).
    two cameras, from both tracking the same board simultaneously (no separate
    checkerboard). Move the device until the sample counter passes 60, press **S**
    to save `pyscripts/stereo_extrinsics.json`.
+
+   **Ruler check** — print where cam1 sits relative to cam0 and compare it with the
+   mount (lens centre to lens centre):
+
+   ```bash
+   cd ~/Documents/NOARKGames && source .venv/bin/activate
+   python -c "import json,numpy as np; d=json.load(open('pyscripts/stereo_extrinsics.json')); t=np.array(d['tx']).flatten()*1000; R=np.array(d['Rx']); print('x, y, z (mm):', t.round(1)); print('distance (mm):', round(float(np.linalg.norm(t)),1)); print('turn (deg):', round(float(np.degrees(np.arccos(np.clip((np.trace(R)-1)/2,-1,1)))),1))"
+   ```
+
+   $x$ = right, $y$ = down, $z$ = forward, all in cam0's view; distance
+   $= \sqrt{x^2 + y^2 + z^2}$; turn $= \arccos\big((\operatorname{tr} R_x - 1)/2\big)$.
+   For the side-by-side mount expect nearly all the distance in $x$, and the
+   distance to match the ruler within a few mm (2026-09-19: 75.0 mm, 1.6°). This
+   catches a badly wrong calibration, not a 1 mm error.
 4. `settings.json` already sets `"camera_backend": "rcam_dual"` in this repo.
 
 `camera_calib_1.toml`, `board_geometry.json` and `stereo_extrinsics.json` are
@@ -249,6 +263,23 @@ Run the game and use the workspace calibration overlay. The patient (or you) tou
 ```
 
 `debug: true` enables a 350×200 OpenCV preview window in the tracker and skips authentication in Godot (sets patient ID to `vvv`). Leave `false` for headless / production.
+
+### 6. Set the monitor to 100 Hz
+
+A fresh install drives the monitor at 60 Hz even when it can do more. Godot draws
+once per monitor refresh (vsync on, no FPS cap in `project.godot`), so the screen
+follows this setting.
+
+GNOME (RadxaOS): `gnome-control-center display` → **Refresh Rate** → **100 Hz** → Apply.
+(`xrandr` cannot be used to check it: under Wayland it lists only the current mode.)
+
+**Check:** Game select → gear → **Trace test** shows `fps: 100` and `rx: 100 pkt/s`.
+
+What it changes: the cursor updates 100 times a second instead of 60, and game
+event times (`outcome_time`) are precise to $1/100$ s $= 10$ ms instead of
+$1/60$ s $\approx 16.7$ ms. What it does **not** change: the sampling rate. Every
+tracker sample is saved at any screen rate, because each screen frame writes all
+samples that arrived since the last one ($100/60 \approx 1.67$ per frame at 60 Hz).
 
 ---
 

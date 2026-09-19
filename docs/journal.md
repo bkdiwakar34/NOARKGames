@@ -16,6 +16,67 @@ New entries go at the **top**, under the date.
 
 ---
 
+## 2026-09-19 — Checking the camera-to-camera calibration; monitor from 60 to 100 Hz
+
+**Goal:** two checks before the data audit. Is the camera-to-camera calibration
+really right? And does Godot's screen rate limit the data?
+
+**Ended the day with:** the calibration matches the ruler, the screen now runs at
+100 Hz like the tracker, and a 66 s session still saved every sample.
+
+### 1. Is the camera-to-camera calibration good?
+
+`calibrate_stereo.py` works out where cam1 (CAM3) sits relative to cam0 (CAM2): a
+shift $t_x$ (mm) and a turn $R_x$. The number it prints at the end (yesterday
+0.32° / 1.72 mm) only shows that the ~20 held poses **agreed with each other**. It
+is graded on the same poses that built it, and it would not notice an error that
+every pose shares. So we checked the result against the physical mount instead.
+
+Printed from `stereo_extrinsics.json` (command in [setup.md §3c](setup.md)):
+
+| | Value | Meaning |
+|---|---|---|
+| $x, y, z$ | 74.9, −2.1, 3.0 mm | cam1 is 75 mm to the side, 2 mm higher, 3 mm forward |
+| distance | $\sqrt{74.9^2 + 2.1^2 + 3.0^2} = 75.0$ mm | |
+| turn | 1.6° | the cameras point almost the same way |
+
+A ruler between the lens centres agreed. **Verdict: good.** This is a coarse check;
+it would catch a badly wrong calibration, not a 1 mm one.
+
+Not done yet, and the stronger test: hold the device at new places and compare
+cam0's position with cam1's position converted into cam0's view. `main.py`
+already computes that gap every frame (`_fuse_board_poses`) but does not save it.
+
+### 2. Does Godot's screen rate limit the data? No.
+
+Godot has two separate rates:
+
+- **Screen:** redraws once per monitor refresh.
+- **Data:** a separate thread receives every tracker packet as it arrives; each
+  screen frame then writes **all** waiting samples to the CSV. At 60 Hz that is
+  $100/60 \approx 1.67$, so 1 or 2 samples per frame, none lost.
+
+What the screen rate *does* limit: how often the cursor moves, and the precision of
+game event times such as `outcome_time` ($1/\text{fps}$ seconds).
+
+### 3. The monitor was running at 60 Hz, not 100
+
+The Trace test showed `fps: 60`, although the monitor supports 100 Hz. Nothing in
+the project caps the frame rate. The OS was simply driving the monitor at 60 Hz.
+
+- Dead end: `xrandr` showed only `1920x1080 59.96*`. Under Wayland it lists just
+  the current mode, so it cannot show what else the monitor supports.
+- Fix: GNOME Settings → Displays → Refresh Rate → 100 Hz.
+
+Could this slow the tracker? Drawing 100 frames/s instead of 60 is more work for
+Godot, but Godot runs on cores 0–3 and the tracker on 4–7, so they don't compete.
+
+**Verified:** Trace test `fps: 100`, `rx: 100 pkt/s`; a 66 s Random Reach session
+had **6629 gaps between samples, every one 10 ms** ($6629 \times 10$ ms $= 66.29$ s,
+0 lost).
+
+---
+
 ## 2026-09-18 — Calibration, and the tracker from 39 to exactly 100 samples/s
 
 **Goal:** finish setting the rebuilt Q6A up (calibration), then find out — and

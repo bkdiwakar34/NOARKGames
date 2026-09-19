@@ -9,16 +9,18 @@ every session, while you still remember. The full story lives in
 
 ---
 
-**Last updated:** 2026-09-18
+**Last updated:** 2026-09-19
 
 **This repo is the Dragon Q6A one.** The Raspberry Pi version is `bkdiwakar34/NOARKGames-pi`.
 
 ## State
 
-**The system works end to end at exactly 100 samples/s.** Board rebuilt (SSD), both
-cameras calibrated, device and stereo calibrated, Godot 4.5 installed. A 64 s test
-session recorded every camera frame — all 6446 gaps between samples 10 ms. The hand
-CSV now has a `capture_time` column (camera capture time, Unix s to 1 µs).
+**The system works end to end at exactly 100 samples/s, and the screen now runs at
+100 Hz too.** Board rebuilt (SSD), both cameras calibrated, device and stereo
+calibrated, Godot 4.5 installed. Camera-to-camera calibration checked against a
+ruler (75.0 mm, 1.6° — matches the mount). Monitor switched 60 → 100 Hz in GNOME
+Displays; a 66 s session still saved every sample (6629 gaps, all 10 ms). The hand
+CSV has a `capture_time` column (camera capture time, Unix s to 1 µs).
 
 **Starting the system** (on the board):
 
@@ -43,6 +45,9 @@ Pick up the July agenda, which the sampling-rate work now supports:
 
 ## Small open items
 
+- Stronger stereo test: save `main.py`'s per-frame cam0-vs-cam1 gap (`_fuse_board_poses`
+  already computes it) and check it across the workspace. Its tolerance (20 mm / 6°)
+  lets smaller disagreements be averaged in silently.
 - One deliberate close-up run to confirm the 10 ms budget holds with the device nearest
   the cameras.
 - Back up the four calibration files off the board (`pyscripts/camera_calib.toml`,
