@@ -12,9 +12,8 @@ imports without extra path plumbing.
 
 | File | Purpose |
 |---|---|
-| `main.py` | The tracker. Camera capture, marker detection, pose solve (joint rigid-body or per-marker), origin lock, filtering, UDP streaming to Godot. |
+| `main.py` | The tracker. Camera capture, marker detection, pose solve (joint rigid-body or per-marker), origin lock, UDP streaming to Godot. No smoothing. |
 | `board.py` | Shared device model: `MARKER_LENGTH`, `MARKER_OFFSETS` (grip offset per marker), and the `BoardGeometry` class that reads/writes `board_geometry.json`. |
-| `filters.py` | Smoothing and gating: EMA, Kalman, One Euro, corner-stability. |
 
 ## Calibration (run once each — see setup.md for when)
 

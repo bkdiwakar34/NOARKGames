@@ -250,13 +250,6 @@ Run the game and use the workspace calibration overlay. The patient (or you) tou
     "udp_port": 12345,
     "calibration_file": "camera_calib.toml",
     "corner_refine": "contour",
-    "corner_stability_threshold": 2.0,
-    "filter_type": "one_euro",
-    "kalman_process_noise": 0.01,
-    "kalman_measurement_noise": 0.05,
-    "one_euro_min_cutoff": 1.0,
-    "one_euro_beta": 0.007,
-    "one_euro_d_cutoff": 1.0,
     "pnp_method": "square",
     "framerate": 100
 }

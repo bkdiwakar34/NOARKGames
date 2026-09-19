@@ -1,5 +1,4 @@
 import collections
-import csv
 import json
 import os
 import socket
@@ -17,13 +16,6 @@ from scipy.spatial.transform import Rotation as ScipyRotation
 
 import board as board_model
 from board import BoardGeometry, estimate_board_pose
-from filters import (
-    CornerStabilityFilter,
-    ExponentialMovingAverageFilter3D,
-    KalmanFilter3D,
-    NoOpFilter3D,
-    OneEuroFilter3D,
-)
 from pose_averaging import rotation_angle
 
 
@@ -110,7 +102,6 @@ class Config:
     FRAME_SIZE = (1280, 800)        # OV9281 native resolution; matches camera_calib.toml
     MARKER_LENGTH = board_model.MARKER_LENGTH
     UDP_IP = "localhost"
-    ALPHA = 0.4
     ORIGIN_LOCK_FRAMES = 10         # consecutive stable frames required before locking the world origin
     ORIGIN_STABLE_PX   = 2.0        # max mean corner motion (px) between frames to count as stable
     BOARD_MAX_REPROJ_PX = 3.0       # board solve worse than this -> re-initialise without the previous-frame guess
@@ -129,21 +120,6 @@ class MainClass:
         self._debug_preview = bool(settings.get("debug_preview", True)) and self.debug
         self.udp_port        = settings.get("udp_port", 12345)
 
-        filter_type = str(settings.get("filter_type", "ema")).lower()
-        if filter_type == "none":
-            self.filter = NoOpFilter3D()
-        elif filter_type == "kalman":
-            kf_proc = float(settings.get("kalman_process_noise",     0.01))
-            kf_meas = float(settings.get("kalman_measurement_noise", 0.05))
-            self.filter = KalmanFilter3D(process_noise=kf_proc, measurement_noise=kf_meas)
-        elif filter_type == "one_euro":
-            oe_min   = float(settings.get("one_euro_min_cutoff", 1.0))
-            oe_beta  = float(settings.get("one_euro_beta",       0.007))
-            oe_dcut  = float(settings.get("one_euro_d_cutoff",   1.0))
-            self.filter = OneEuroFilter3D(min_cutoff=oe_min, beta=oe_beta, d_cutoff=oe_dcut)
-        else:
-            self.filter = ExponentialMovingAverageFilter3D(alpha=Config.ALPHA)
-        print(f"Using {filter_type} filter for smoothing")
         self.frame_size    = Config.FRAME_SIZE
         self.marker_length = Config.MARKER_LENGTH
 
@@ -152,28 +128,14 @@ class MainClass:
         self.camera_matrix = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
         self.dist_coeffs   = np.array(calib_data["calibration"]["dist_coeffs"])
 
-        # Two ways to remove the lens distortion, same result downstream:
-        #
-        #   undistort_image = True   remap all 1,024,000 pixels once per frame, then
-        #                            detect on the corrected image (the original path).
-        #   undistort_image = False  detect on the raw frame and undistort only the
-        #                            handful of corner points that come back. Costs a
-        #                            few dozen point transforms instead of a megapixel
-        #                            remap. calibrate_camera.py's verify() already does
-        #                            exactly this.
-        #
-        # Either way the corners reaching solvePnP are pinhole-equivalent with
-        # intrinsics = camera_matrix, so it is still called with np.zeros(5).
-        self._undistort_image = bool(settings.get("undistort_image", True))
-        if self._undistort_image:
-            self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
-                self.camera_matrix, self.dist_coeffs, np.eye(3),
-                self.camera_matrix, self.frame_size, cv2.CV_16SC2,
-            )
-        else:
-            self.map1 = self.map2 = None
-            print("undistort_image=False — detecting on the raw frame, "
-                  "undistorting corners only")
+        # Lens distortion is removed by remapping the whole frame, then detecting
+        # on the corrected image. The corners reaching solvePnP are therefore
+        # pinhole-equivalent with intrinsics = camera_matrix, so it is called
+        # with np.zeros(5).
+        self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
+            self.camera_matrix, self.dist_coeffs, np.eye(3),
+            self.camera_matrix, self.frame_size, cv2.CV_16SC2,
+        )
 
         # Leave cores free for Godot on the Pi — OpenCV otherwise parallelises
         # detection across ALL cores and starves the game's render thread.
@@ -197,25 +159,14 @@ class MainClass:
         self._framerate = int(settings.get("framerate", 100))
         print(f"Camera framerate target: {self._framerate}")
 
-        # Skip solvePnP when corners haven't moved — reuse last pose instead.
-        # Eliminates per-frame jitter from solvePnP returning slightly different
-        # answers on near-identical inputs.
-        stability_threshold = float(settings.get("corner_stability_threshold", 2.0))
-        self.corner_stability = CornerStabilityFilter(threshold=stability_threshold)
-        self.corner_stability_1 = CornerStabilityFilter(threshold=stability_threshold)  # cam1, dual-camera mode only
-        self._cached_rvecs = None
-        self._cached_tvecs = None
-
         # Joint rigid-body solve: enabled when board_geometry.json exists
         # (produced by calibrate_board.py). Falls back to per-marker PnP +
         # weighted averaging otherwise.
         self.board = None
         self._board_rvec = None      # last good board pose — ITERATIVE guess for the next frame
         self._board_tvec = None
-        self._cached_board_pose = None
         self._board_rvec_1 = None    # cam1's own guess cache, dual-camera mode only
         self._board_tvec_1 = None
-        self._cached_board_pose_1 = None
         self._origin_R    = None     # locked board orientation (world frame)
         self._origin_grip = None     # locked grip position in camera frame
         if settings.get("use_board_pnp", True):
@@ -251,13 +202,8 @@ class MainClass:
 
         self.video_frame  = None                    # latest captured image, refreshed every frame
         self.first_frame  = True                    # True until the world origin has been locked (see _maybe_lock_origin)
-        self.save_path    = None                    # folder for this patient's CSV, created on first USER: message
-        self.csv_writer   = None                    # csv.writer for the active session, created alongside save_path
-        self._csv_file    = None                    # underlying file handle for csv_writer; closed when CHANGE happens or run() exits
-        self.record       = False                   # True once Godot has sent USER: and we should log rows
         self.received_message: bytes = b""          # most recent UDP command from Godot (sticky — last command is reused each frame)
         self.addr         = None                    # Godot's UDP address, learned from the first incoming packet
-        self._hid         = None                    # current patient hospital ID; set on first USER:/CHANGE: message
         self._dbg_last_print = 0.0                  # timestamp of last debug print, to throttle to ~1/sec
 
         # Per-stage timing buffer (filled by process_frame, drained by the debug print
@@ -279,10 +225,6 @@ class MainClass:
         # arrives for 3 seconds — Godot sends "CONNECTED" every 100 ms by default, so this
         # only trips when Godot has actually died or stopped responding.
         self._last_msg_time = time.time()
-
-        self._curr_session = os.path.join(
-            "Session-" + datetime.today().strftime("%Y-%m-%d"), "MovementData"
-        )
 
         # Reuse the previous session's world origin (see _persist_origin above).
         # Must run after first_frame is initialised.
@@ -627,44 +569,24 @@ class MainClass:
         except socket.error:
             return b""
 
-    def _send_coordinates(self, command: str, coords: np.ndarray) -> None:
+    def _send_coordinates(self, coords: np.ndarray) -> None:
         """Stream one sample to Godot — 24 bytes:
-             bytes  0-15  4 × float32: command code, x, y, z
+             bytes  0-15  4 × float32: code, x, y, z
              bytes 16-23  1 × float64: capture time of the frame, Unix seconds
+        The code is always 2.0 and Godot ignores it; the slot is kept so the
+        packet layout Godot parses stays unchanged.
         The capture time is float64 because float32 cannot hold a Unix time
         to better than ~2 minutes. Godot reads it when the packet is 24 bytes
         and falls back to its own arrival time otherwise."""
         if self.addr is None:
             return
-        code_map = {"STOP": -99.0, "START": 2.0, "RESET": 5.0}
-        msg_code = code_map.get(command, 2.0)
-        data = np.append(msg_code, coords).flatten()
+        data = np.append(2.0, coords).flatten()
         t_cap = (self._frame_t_cap + self._mono_to_unix
                  if self._frame_t_cap is not None else time.time())
         data_bytes = struct.pack("<" + "f" * len(data), *data) + struct.pack("<d", t_cap)
         self.udp_socket.sendto(data_bytes, self.addr)
 
     # ── pose estimation ───────────────────────────────────────────────────────
-
-    def _undistort_corners(self, corners):
-        """Map corners detected in the raw (still distorted) frame into the
-        pinhole-equivalent coordinates the rest of the pipeline assumes.
-
-        Used only when undistort_image is False. Replaces a full-frame remap
-        with four point transforms per marker — the same trick verify() in
-        calibrate_camera.py uses. P=camera_matrix puts the results back in
-        pixel units rather than normalised ones, so everything downstream
-        (corner stability checks, solvePnP, reprojection error) is unchanged."""
-        if corners is None or len(corners) == 0:
-            return corners
-        out = []
-        for c in corners:
-            pts = np.asarray(c, dtype=np.float64).reshape(-1, 1, 2)
-            ud = cv2.fisheye.undistortPoints(
-                pts, self.camera_matrix, self.dist_coeffs, P=self.camera_matrix
-            )
-            out.append(ud.reshape(1, -1, 2).astype(np.float32))
-        return out
 
     def estimate_pose(self, corners):
         marker_points = np.array(
@@ -689,8 +611,8 @@ class MainClass:
         return np.array(rvecs), np.array(tvecs)
 
     def _solve_camera_pose(self, cam_index: int, corners, ids):
-        """Board-pose solve for one camera, using its own camera_matrix,
-        stability filter, and ITERATIVE-guess cache. Returns (rvec, tvec,
+        """Board-pose solve for one camera, using its own camera_matrix and
+        ITERATIVE-guess cache. Returns (rvec, tvec,
         reproj), or None if no known marker is visible, the solve fails, or
         (dual-camera mode only) reproj exceeds stereo_max_reproj_px — a bad
         solve here must be hard-rejected before it reaches the fusion
@@ -703,38 +625,28 @@ class MainClass:
         can reuse it with its own state)."""
         if cam_index == 0:
             camera_matrix = self.camera_matrix
-            stability     = self.corner_stability
-            cached        = self._cached_board_pose
             guess_rvec    = self._board_rvec
             guess_tvec    = self._board_tvec
         else:
             camera_matrix = self.camera_matrix_1
-            stability     = self.corner_stability_1
-            cached        = self._cached_board_pose_1
             guess_rvec    = self._board_rvec_1
             guess_tvec    = self._board_tvec_1
 
-        if stability.is_stable(corners, ids) and cached is not None:
-            rvec, tvec, reproj = cached
+        guess = (guess_rvec, guess_tvec) if guess_rvec is not None else None
+        result = estimate_board_pose(self.board, corners, ids, camera_matrix, guess)
+        if result is None:
+            return None
+        rvec, tvec, reproj = result
+        # A stale guess (fast motion, re-entry after occlusion) can trap the
+        # iterative solver in a bad local minimum — re-initialise from scratch.
+        if guess is not None and reproj > Config.BOARD_MAX_REPROJ_PX:
+            fresh = estimate_board_pose(self.board, corners, ids, camera_matrix, None)
+            if fresh is not None and fresh[2] < reproj:
+                rvec, tvec, reproj = fresh
+        if cam_index == 0:
+            self._board_rvec, self._board_tvec = rvec, tvec
         else:
-            guess = (guess_rvec, guess_tvec) if guess_rvec is not None else None
-            result = estimate_board_pose(self.board, corners, ids, camera_matrix, guess)
-            if result is None:
-                return None
-            rvec, tvec, reproj = result
-            # A stale guess (fast motion, re-entry after occlusion) can trap the
-            # iterative solver in a bad local minimum — re-initialise from scratch.
-            if guess is not None and reproj > Config.BOARD_MAX_REPROJ_PX:
-                fresh = estimate_board_pose(self.board, corners, ids, camera_matrix, None)
-                if fresh is not None and fresh[2] < reproj:
-                    rvec, tvec, reproj = fresh
-            cached = (rvec, tvec, reproj)
-            if cam_index == 0:
-                self._cached_board_pose = cached
-                self._board_rvec, self._board_tvec = rvec, tvec
-            else:
-                self._cached_board_pose_1 = cached
-                self._board_rvec_1, self._board_tvec_1 = rvec, tvec
+            self._board_rvec_1, self._board_tvec_1 = rvec, tvec
 
         if self._dual_camera and reproj > self._stereo_max_reproj_px:
             return None
@@ -932,12 +844,8 @@ class MainClass:
         self._prev_corners        = None
         self._prev_ids            = None
         self._prev_fused_pose     = None
-        self._cached_rvecs        = None
-        self._cached_tvecs        = None
-        self._cached_board_pose   = None
         self._board_rvec          = None
         self._board_tvec          = None
-        self._cached_board_pose_1 = None
         self._board_rvec_1        = None
         self._board_tvec_1        = None
         self._disagree_count      = 0
@@ -986,11 +894,7 @@ class MainClass:
 
     def _process_per_marker(self, corners, ids):
         """Legacy path: independent solvePnP per marker, weighted grip average."""
-        if self.corner_stability.is_stable(corners, ids) and self._cached_rvecs is not None:
-            rvecs, tvecs = self._cached_rvecs, self._cached_tvecs
-        else:
-            rvecs, tvecs = self.estimate_pose(corners)
-            self._cached_rvecs, self._cached_tvecs = rvecs, tvecs
+        rvecs, tvecs = self.estimate_pose(corners)
 
         if self.first_frame:
             self._maybe_lock_origin(corners, ids, rvecs, tvecs)
@@ -1065,30 +969,6 @@ class MainClass:
             )
             cv2.circle(self.video_frame,
                        tuple(int(v) for v in pix.ravel()), 6, (0, 0, 255), -1)
-
-    # ── CSV recording ─────────────────────────────────────────────────────────
-
-    def _select_hospitalid(self) -> None:
-        if self.save_path is None:
-            # Close any previously-open CSV before opening a new one (avoids leak on CHANGE).
-            if self._csv_file is not None:
-                self._csv_file.close()
-                self._csv_file = None
-                self.csv_writer = None
-
-            self.save_path = os.path.join(
-                os.path.expanduser("~/Documents/NOARK/data"),
-                self._hid,
-                self._curr_session,
-            )
-            os.makedirs(self.save_path, exist_ok=True)
-            csv_path = os.path.join(
-                self.save_path,
-                datetime.now().strftime("%Y_%m_%d_%H_%M_%S") + "_data.csv",
-            )
-            self._csv_file  = open(csv_path, "w", newline="")
-            self.csv_writer = csv.writer(self._csv_file)
-            self.csv_writer.writerow(["Time", "X", "Y", "Z"])
 
     # ── main loop ─────────────────────────────────────────────────────────────
 
@@ -1211,16 +1091,10 @@ class MainClass:
             # column); detect reads 0 in dual mode.
             t2 = t3 = time.perf_counter() if self.debug else 0.0
         else:
-            # skip_remap: undistort the four corners per marker instead of the
-            # whole frame (see _undistort_corners).
-            skip_remap = not self._undistort_image
-            if not skip_remap:
-                frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
+            frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
             self.video_frame = frame0
             t2 = time.perf_counter() if self.debug else 0.0
             corners0, ids0, _ = self.detector.detectMarkers(frame0)
-            if skip_remap:
-                corners0 = self._undistort_corners(corners0)
             corners0, ids0 = self._filter_markers(corners0, ids0)
             t3 = time.perf_counter() if self.debug else 0.0
 
@@ -1262,37 +1136,8 @@ class MainClass:
             else:
                 local_coords = self._process_per_marker(corners0, ids0)
 
-        if local_coords is not None:
-            local_coords = self.filter.update(local_coords)
-
-            # Dispatch command
-            if self.received_message:
-                if self.received_message == b"STOP":
-                    self._send_coordinates("STOP", local_coords)
-                elif self.received_message.startswith(b"USER:"):
-                    new_hid = self.received_message.decode().split(":")[1]
-                    if new_hid != self._hid:
-                        self._hid = new_hid
-                        self._select_hospitalid()
-                        self.record = True
-                    self._send_coordinates("START", local_coords)
-                elif self.received_message.startswith(b"CHANGE:"):
-                    new_hid = self.received_message.decode().split(":")[1]
-                    if new_hid != self._hid:
-                        self.save_path = None      # force _select_hospitalid to make a new folder/CSV
-                        self._hid = new_hid
-                        self._select_hospitalid()
-                        self.record = True
-                    self._send_coordinates("START", local_coords)
-                elif self.received_message == b"RESET":
-                    self._send_coordinates("RESET", local_coords)
-                else:
-                    self._send_coordinates("START", local_coords)
-
-                if self.record and self.csv_writer:
-                    self.csv_writer.writerow(
-                        [datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3], *local_coords]
-                    )
+        if local_coords is not None and self.received_message:
+            self._send_coordinates(local_coords)
 
         if self.debug:
             t4 = time.perf_counter()
@@ -1300,7 +1145,7 @@ class MainClass:
                 (t1 - t0) * 1000.0,   # capture
                 (t2 - t1) * 1000.0,   # remap (undistort)
                 (t3 - t2) * 1000.0,   # detect
-                (t4 - t3) * 1000.0,   # pose + filter + send
+                (t4 - t3) * 1000.0,   # pose + send
             ))
 
             now = time.time()
@@ -1372,8 +1217,6 @@ class MainClass:
                         cam.stop()
                     except Exception:
                         pass
-            if self._csv_file is not None:
-                self._csv_file.close()
             if self._timing_log is not None:
                 self._timing_log.close()
             if self.debug:

@@ -209,7 +209,6 @@ app/
   assets/               — fonts (Nunito), audio drop-in folder
 pyscripts/
   main.py             — production tracker (Pi + dev)
-  filters.py          — EMA / Kalman / OneEuro / CornerStability
   calibrate_camera.py — fisheye intrinsics calibration
   calibrate_board.py  — per-device marker layout (board_geometry.json)
   diagnose_jitter.py  — multi-pose noise-floor measurement
@@ -232,8 +231,7 @@ pyscripts/main.py
     - solvePnP per marker → (R, t)
     - apply MARKER_OFFSETS (in marker local frame) → grip position
     - centroid across visible markers
-    - corner stability gate (skip solvePnP if corners haven't moved)
-    - temporal filter (EMA / Kalman / OneEuro, selectable)
+    - no smoothing: each frame's pose is sent as solved (§10)
     ↓ UDP 4-float packet
 app/platform/udp_receiver.gd  (port 12345)
     - background thread reads packets
@@ -282,24 +280,20 @@ Two distinct calibrations happen at session start:
 
 ---
 
-## 10. Smoothing Filters (in tracker)
+## 10. Smoothing Filters (removed 2026-09-19)
 
-Selectable via `settings.json["filter_type"]`. Implementations in `pyscripts/filters.py`.
-
-| Filter | Behaviour | Pros / Cons |
-|---|---|---|
-| `none` (NoOp) | pass-through | for noise-floor measurement only |
-| `ema` | `y = α·x + (1−α)·y_prev` | one knob, can't balance hold vs reach |
-| `kalman` | 6-D const-velocity, per-update `Δt` from monotonic clock | overshoots at reach endpoints (model violation) |
-| `one_euro` | EMA with `α` adapting to estimated speed | hold-quiet, reach-responsive; deployed default |
-
-In addition: `CornerStabilityFilter` gates `solvePnP` itself — if no corner has moved more than 2 px since the last frame, the cached `(R, t)` is reused. Eliminates jitter caused by `solvePnP` optimiser variance on near-identical inputs.
+The tracker applies **no smoothing**: every frame's pose is sent as solved. The
+EMA, Kalman and One Euro filters (`filter_type`) and the corner-stability gate
+(`corner_stability_threshold`, reuse the last pose while corners are still) were
+removed on 2026-09-19 — both had been switched off (`none`, `0.0`) since the
+rigid-body solve made them unnecessary. They remain in git history
+(`pyscripts/filters.py` before commit of that date) if ever needed.
 
 ---
 
 ## 11. Data Logging
 
-- **Per-trial CSV** — per-apple rows logged by tracker (`Time, X, Y, Z`) in `~/Documents/NOARK/data/<hospital_id>/Session-YYYY-MM-DD/MovementData/`.
+- **Hand and target CSVs** — written by Godot (not the tracker) in `~/Documents/NOARK/data/<patient>/GameData/`. The tracker's own `Time, X, Y, Z` CSV was never triggered (Godot never sent `USER:`) and was removed 2026-09-19.
 - **Session graphs** — stop-session overlay shows apple lifetime vs apple number (caught/missed) and per-trial success rate vs trial number.
 - **CSV name** uses internal name `RandomReach`, not the on-screen "Apple Catch".
 
