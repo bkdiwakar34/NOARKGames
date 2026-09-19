@@ -10,6 +10,8 @@ dependencies = [
 	"opencv-contrib-python>=4.13.0.92,<5",
 	"scipy>=1.17.1",
 	"toml>=0.10.2",
+	# recorder.py: edge events on the OptiTrack sync pin (libgpiod v2 API).
+	"gpiod>=2.2",
 ]
 
 # This is a Godot project, not a Python package — pyproject.toml exists only

@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import json
 import os
 import socket
@@ -72,6 +73,34 @@ class _FrameQueue:
             return min(self._items, key=lambda item: abs(item[1] - ts))
 
 
+@dataclasses.dataclass
+class FrameResult:
+    """What one process_frame() pass computed. Pairs are (cam0, cam1);
+    an entry is None when that camera had no frame / saw no marker / was not
+    solved this pass.
+
+    t_cap         capture time of each camera's frame, monotonic seconds
+                  (same clock as time.monotonic() and gpiod edge events)
+    seq           kernel frame sequence number of each camera's frame
+    corners, ids  detected markers, corners in undistorted full-frame pixels
+    reproj        each camera's board-solve reprojection error, px — kept
+                  even when the solve was then rejected (> stereo_max_reproj_px)
+    fusion        "cam0", "cam1", "both", "cam0_disagree", "cam1_disagree", None
+    stereo_gap    (m, rad) between the two cameras' poses when both solved
+    fused         (rvec, tvec, reproj) board pose in cam0's frame, or None
+    local_coords  grip point in the game (origin-lock) frame, m — what Godot
+                  receives; None until the origin is locked"""
+    t_cap: tuple
+    seq: tuple
+    corners: tuple
+    ids: tuple
+    reproj: tuple
+    fusion: Optional[str]
+    stereo_gap: Optional[tuple]
+    fused: Optional[tuple]
+    local_coords: Optional[np.ndarray]
+
+
 def _weighted_quaternion_average(Ra: np.ndarray, Rb: np.ndarray,
                                   wa: float, wb: float) -> np.ndarray:
     """Two-rotation weighted average: flip to the same quaternion
@@ -110,7 +139,8 @@ class Config:
 
 
 class MainClass:
-    def __init__(self, cam_calib_path: str, settings: Optional[dict] = None) -> None:
+    def __init__(self, cam_calib_path: str, settings: Optional[dict] = None,
+                 udp: bool = True) -> None:
         if settings is None:
             settings = {}
 
@@ -307,7 +337,22 @@ class MainClass:
         self._last_seq_driver  = None
         self._missed_count     = 0
 
-        self._init_udp_socket()
+        # What this pass used and found, per camera — reset at the start of
+        # every process_frame() and returned in its FrameResult (read by
+        # recorder.py; the Godot path ignores it).
+        self._frame_ts     = [None, None]   # capture time of each camera's frame (monotonic s)
+        self._frame_seqs   = [None, None]   # kernel sequence number of each camera's frame
+        self._last_reproj  = [None, None]   # each camera's board-solve reprojection error (px),
+                                            # kept even when the solve is then rejected
+        self._last_fusion  = None           # which camera(s) the pose came from (_fuse_board_poses)
+        self._last_stereo_gap = None        # (m, rad) between cam0's and cam1's poses, both solved
+
+        # udp=False (recorder.py): no socket, so no port clash with a running
+        # game and no dependence on Godot's heartbeat.
+        self._udp_enabled = udp
+        self.udp_socket = None
+        if udp:
+            self._init_udp_socket()
 
     # ── detector ─────────────────────────────────────────────────────────────
 
@@ -497,6 +542,7 @@ class MainClass:
         self._last_seq[0] = seq
         self._count_missed(seq)
         self._frame_t_cap = ts
+        self._frame_ts[0], self._frame_seqs[0] = ts, seq
         return frame
 
     def _capture_dual_frames(self):
@@ -533,6 +579,7 @@ class MainClass:
         self._last_seq[driver] = seq_d
         self._count_missed(seq_d)
         self._frame_t_cap = ts_d
+        self._frame_ts[driver], self._frame_seqs[driver] = ts_d, seq_d
 
         frame_o = None
         if self._cam_errors[other] is None:
@@ -545,6 +592,7 @@ class MainClass:
                     frame_o = None
                 else:
                     self._last_seq[other] = seq_o
+                    self._frame_ts[other], self._frame_seqs[other] = ts_o, seq_o
 
         frames = [None, None]
         frames[driver], frames[other] = frame_d, frame_o
@@ -647,6 +695,7 @@ class MainClass:
             self._board_rvec, self._board_tvec = rvec, tvec
         else:
             self._board_rvec_1, self._board_tvec_1 = rvec, tvec
+        self._last_reproj[cam_index] = float(reproj)
 
         if self._dual_camera and reproj > self._stereo_max_reproj_px:
             return None
@@ -679,13 +728,22 @@ class MainClass:
         Otherwise fuses via inverse-reprojection-error-squared-weighted
         translation mean and a simple weighted quaternion average for
         rotation (full Markley-style averaging is unnecessary for N=2 with
-        this disagreement gate already in place)."""
+        this disagreement gate already in place).
+
+        Sets self._last_fusion to what was used — "cam0", "cam1", "both",
+        or "cam0_disagree"/"cam1_disagree" (both seen, too far apart, the
+        named one kept) — and self._last_stereo_gap to (distance m, angle rad)
+        between the two cameras' poses whenever both were solved."""
+        self._last_stereo_gap = None
         if pose0 is None and pose1 is None:
+            self._last_fusion = None
             return None
         if pose1 is None:
+            self._last_fusion = "cam0"
             return pose0
         R1p, t1p, e1 = self._transform_pose_to_cam0(pose1)
         if pose0 is None:
+            self._last_fusion = "cam1"
             return cv2.Rodrigues(R1p)[0].flatten(), t1p, e1
 
         rvec0, tvec0, e0 = pose0
@@ -693,15 +751,21 @@ class MainClass:
 
         ang  = rotation_angle(R0 @ R1p.T)
         dist = float(np.linalg.norm(tvec0 - t1p))
+        self._last_stereo_gap = (dist, float(ang))
         if ang > self._stereo_disagree_rot_rad or dist > self._stereo_disagree_trans_m:
             self._disagree_count += 1
             if self._disagree_count >= 30 and not self._disagree_warned:
                 print("[warn] cam0/cam1 board poses disagree persistently — "
                       "stereo extrinsic calibration may be stale; re-run calibrate_stereo.py.")
                 self._disagree_warned = True
-            return pose0 if e0 <= e1 else (cv2.Rodrigues(R1p)[0].flatten(), t1p, e1)
+            if e0 <= e1:
+                self._last_fusion = "cam0_disagree"
+                return pose0
+            self._last_fusion = "cam1_disagree"
+            return cv2.Rodrigues(R1p)[0].flatten(), t1p, e1
         self._disagree_count  = 0
         self._disagree_warned = False
+        self._last_fusion     = "both"
 
         w0, w1  = 1.0 / max(e0, 1e-3) ** 2, 1.0 / max(e1, 1e-3) ** 2
         t_fused = (w0 * tvec0 + w1 * t1p) / (w0 + w1)
@@ -1053,20 +1117,28 @@ class MainClass:
             int(min(h, np.ceil(pts[:, 1].max() + margin))),
         )
 
-    def process_frame(self) -> None:
+    def process_frame(self) -> Optional[FrameResult]:
+        """One pass: capture, detect, solve, fuse, and (with udp) send to
+        Godot. Returns what the pass computed, or None when no new frame
+        arrived within FRAME_WAIT_S."""
         t0 = time.perf_counter() if self.debug else 0.0
+        self._frame_ts     = [None, None]
+        self._frame_seqs   = [None, None]
+        self._last_reproj  = [None, None]
+        self._last_fusion  = None
+        self._last_stereo_gap = None
 
         # Capture frame(s)
         if self._dual_camera:
             frame0, frame1 = self._capture_dual_frames()
             if frame0 is None and frame1 is None:
-                return
+                return None
             t1 = time.perf_counter() if self.debug else 0.0
         else:
             frame0 = self._capture_single_frame()
             frame1 = None
             if frame0 is None:
-                return
+                return None
             t1 = time.perf_counter() if self.debug else 0.0
 
         # INTER_LINEAR: ~half the cost of INTER_CUBIC; corner sub-pixel accuracy
@@ -1099,15 +1171,17 @@ class MainClass:
             t3 = time.perf_counter() if self.debug else 0.0
 
         # Poll command from Godot
-        cmd = self._recv_command()
-        if cmd.startswith(b"SETUP:"):
-            self._apply_setup(cmd)   # demo mode switch, not a dispatch command
-        elif cmd == b"RELOCK":
-            self._relock_origin()    # installer origin ritual, not a dispatch command
-        elif cmd:
-            self.received_message = cmd
+        if self._udp_enabled:
+            cmd = self._recv_command()
+            if cmd.startswith(b"SETUP:"):
+                self._apply_setup(cmd)   # demo mode switch, not a dispatch command
+            elif cmd == b"RELOCK":
+                self._relock_origin()    # installer origin ritual, not a dispatch command
+            elif cmd:
+                self.received_message = cmd
 
         local_coords = None
+        fused = None
         if self._dual_camera and self.board is not None and self._use_rigid:
             # Joint fusion path: each camera solves independently, cam1's pose
             # gets transformed into cam0's frame, then combined — see
@@ -1132,6 +1206,8 @@ class MainClass:
             if self.board is not None and self._use_rigid:
                 pose0 = self._solve_camera_pose(0, corners0, ids0)
                 if pose0 is not None:
+                    fused = pose0
+                    self._last_fusion = "cam0"
                     local_coords = self._process_board(pose0[0], pose0[1], corners0, ids0)
             else:
                 local_coords = self._process_per_marker(corners0, ids0)
@@ -1186,6 +1262,37 @@ class MainClass:
                 self.video_frame = cv2.resize(self.video_frame, (350, 200))
                 cv2.imshow("frame", self.video_frame)
 
+        return FrameResult(
+            t_cap=tuple(self._frame_ts),
+            seq=tuple(self._frame_seqs),
+            corners=(corners0, corners1),
+            ids=(ids0, ids1),
+            reproj=tuple(self._last_reproj),
+            fusion=self._last_fusion,
+            stereo_gap=self._last_stereo_gap,
+            fused=fused,
+            local_coords=local_coords,
+        )
+
+    def close(self) -> None:
+        """Stop the cameras and worker threads, close the timing log."""
+        if self._cam_pool is not None:
+            self._cam_pool.shutdown(wait=True)
+        if self._camera_backend in ("rcam_single", "rcam_dual"):
+            self._stop_capture.set()
+            for t in self._cam_threads:
+                if t is not None:
+                    t.join(timeout=1.0)
+            for cam in self._rcam:
+                try:
+                    cam.stop()
+                except Exception:
+                    pass
+        if self._timing_log is not None:
+            self._timing_log.close()
+        if self.debug:
+            cv2.destroyAllWindows()
+
     def run(self) -> None:
         try:
             while True:
@@ -1205,35 +1312,22 @@ class MainClass:
                 if self._debug_preview and cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
-            if self._cam_pool is not None:
-                self._cam_pool.shutdown(wait=True)
-            if self._camera_backend in ("rcam_single", "rcam_dual"):
-                self._stop_capture.set()
-                for t in self._cam_threads:
-                    if t is not None:
-                        t.join(timeout=1.0)
-                for cam in self._rcam:
-                    try:
-                        cam.stop()
-                    except Exception:
-                        pass
-            if self._timing_log is not None:
-                self._timing_log.close()
-            if self.debug:
-                cv2.destroyAllWindows()
+            self.close()
+
+
+def calib_path(settings: dict) -> str:
+    """cam0's intrinsics file. settings.json["calibration_file"] picks it; a
+    bare filename is resolved relative to pyscripts/, an absolute path is
+    used as-is."""
+    name = settings.get("calibration_file", "camera_calib.toml")
+    if os.path.isabs(name):
+        return name
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
 
 
 if __name__ == "__main__":
     settings = _load_settings()
-
-    _pyscripts_dir = os.path.dirname(os.path.abspath(__file__))
-    # settings.json["calibration_file"] picks which .toml to load. A bare
-    # filename is resolved relative to pyscripts/; an absolute path is used as-is.
-    _calib_name = settings.get("calibration_file", "camera_calib.toml")
-    CAMERA_CALIB_PATH = (
-        _calib_name if os.path.isabs(_calib_name)
-        else os.path.join(_pyscripts_dir, _calib_name)
-    )
+    CAMERA_CALIB_PATH = calib_path(settings)
     print(f"Loading calibration from: {CAMERA_CALIB_PATH}")
 
     main = MainClass(cam_calib_path=CAMERA_CALIB_PATH, settings=settings)
