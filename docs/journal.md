@@ -16,6 +16,89 @@ New entries go at the **top**, under the date.
 
 ---
 
+## 2026-09-20 — A new goal: validate the device against motion capture
+
+**Goal changed.** The July list (data audit → healthy-user test → analysis script) is
+on hold. Before the data means anything, the device has to be checked against the
+lab's OptiTrack system. This entry is the decisions and the build; the protocol
+itself lives in [validation_plan.md](validation_plan.md) and is the file to read.
+
+### 1. What we decided, and why
+
+The plan doc has the detail. The choices worth remembering here:
+
+- **Motive drives the sync, not us.** The eSync 2 sends a "Recording Gate" — high
+  for the whole take — into the Dragon's GPIO pin 15 (ground on pin 16). The kernel
+  stamps each edge on the same clock the camera frames carry, so the alignment error
+  is microseconds instead of the 8.3 ms of waiting for Motive to react to a pulse
+  from us. Both edges are logged, so the two clocks' drift (up to 30 ms over 10 min
+  at 50 ppm) can be scaled out.
+- **3.3 V both sides** (OptiTrack's docs and Radxa's), so the wire connects directly.
+- **Save the raw marker corners, not only the pose.** Then cam0 alone, cam1 alone,
+  today's pose averaging and a proper joint solve can all be recomputed offline from
+  the same recording and compared against the mocap. The mocap decides which is best;
+  no re-recording.
+- **Save both cameras' capture times.** The cameras are not triggered together, so
+  the paired frame can be up to 5 ms away; during movement that biases the fused
+  position by about 2.5 mm at 1 m/s. The first recording measures the real offset.
+- **The device is planar** (it slides on a table), so a rotations trial was dropped.
+  Height and tilt are physically constant, which makes any change the tracker reports
+  in them a free error measurement.
+- **Vigour** is defined in the literature as peak speed divided by the speed expected
+  for that reach distance. Both parts come from position, so the validation checks
+  peak speed and amplitude per reach and leaves the definition to the analysis.
+
+### 2. Tracker cleanup before building anything
+
+Removed what never runs on this board (409 lines): the smoothing filters and all of
+`filters.py` (`filter_type` has been `"none"` since the rigid-body solve), the
+corner-stability pose reuse (threshold `0.0` — it never triggered), the tracker's own
+`Time,X,Y,Z` CSV (it only started on a `USER:` command Godot never sends), the
+detect-on-raw-frame option, and the START/RESET packet codes. The code slot in each
+packet stayed, at `2.0` — which turned out to be useful hours later (see below).
+
+Still to go, and deliberately not done until the recorder is proven on the board:
+the per-marker solver, the `SETUP:` demo switch, single-camera mode,
+`diagnose_jitter.py` (broken here anyway — it opens the camera through picamera2),
+and `tools/`'s jitter harness.
+
+### 3. The recorder, built twice
+
+**First version: a standalone Python window** (Tk) that ran the tracker in its own
+process. It worked, but it ran at **50 samples/s**. Pinned to the fast cores
+(`taskset -c 4-7`) it reached **80–93**, still not 100, and the number was the same
+whether it was recording or not — so the cost was the window's own process, not the
+file writing.
+
+**Second version: the recorder moved into the game**, where the split already
+measured at exactly 100/s stays intact:
+
+| | Cores | Does |
+|---|---|---|
+| Godot | 0–3 | the screen: name dropdowns, Record/Stop, live status |
+| Tracker | 4–7 | tracks, writes the files, watches the sync pin |
+
+Godot sends `REC_START:<name>` / `REC_STOP` with its existing 100 ms keepalive and
+**repeats the command until the tracker's status agrees**, so a lost packet cannot
+leave the two disagreeing. The tracker sends a status packet back twice a second —
+told apart from position samples by that leftover code slot: `2.0` = sample,
+`7.0` = status. Opened from the installer (F10) → **Validation recorder**.
+
+`recorder.py` was deleted; its file-writing and sync-pin code live in
+`pyscripts/recording.py`. Not yet run on the board.
+
+### 4. Repo clean-up
+
+- `.conda` (156 MB): a Python environment VS Code once created here; nothing used it.
+- `rcam/.venv` (481 MB) and `rcam/target` (282 MB): build output for **this** machine,
+  never in git, never used here since code only runs on the board. 861 MB → 98 MB.
+- `debug.json`: `{"debug":true}` from the original codebase; nothing has ever read it.
+  The real flag is `settings.json["debug"]`.
+- `.python-version`: 3.11 → 3.13, which is what `rcam` needs.
+- Stale claim in setup.md that `main.py` still carries the Pi's picamera2 path.
+
+---
+
 ## 2026-09-19 — Checking the camera-to-camera calibration; monitor from 60 to 100 Hz
 
 **Goal:** two checks before the data audit. Is the camera-to-camera calibration
