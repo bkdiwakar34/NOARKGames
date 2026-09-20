@@ -85,7 +85,6 @@ id_rsa.pub
 known_hosts
 
 # Debug files
-debug.json
 *.stackdump
 crash_handler_*.txt
 *.md5

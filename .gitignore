@@ -58,9 +58,6 @@ pyscripts/stereo_extrinsics.json
 # rcam (Dragon Q6A camera driver): build artifacts (target/, module build
 # output, sample captures) are already handled by rcam/.gitignore.
 
-# Debug settings (uncomment if you want to keep debug.json in version control)
-# debug.json
-
 # macOS specific
 .DS_Store
 .AppleDouble
