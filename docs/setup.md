@@ -17,8 +17,8 @@ How to set up the hardware and run the system on the Radxa Dragon Q6A. For what 
 
 The Raspberry Pi 5 version of this system lives in its own repository,
 [NOARKGames-pi](https://github.com/bkdiwakar34/NOARKGames-pi) — this repo is the
-Dragon Q6A one only. `pyscripts/main.py` still carries the Pi's picamera2 path for
-now; it is unused here and comes out once a Q6A run confirms the tracker is healthy.
+Dragon Q6A one only. `pyscripts/main.py` takes its frames from `rcam` and refuses
+any other `camera_backend`; the Pi's picamera2 path is gone from this repo.
 
 ---
 
