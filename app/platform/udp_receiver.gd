@@ -19,6 +19,15 @@ var packets_per_sec: int = 0     # measured arrival rate, updated once a second
 var _pkt_count: int = 0
 var _pkt_window_ms: int = 0
 
+# Validation recorder (docs/validation_plan.md): the tracker writes the files,
+# this is only the remote control. _rec_wanted is the name the installer screen
+# asked for ("" = not recording); the tracker's own state comes back in its
+# status packets, and the command is repeated until the two agree, so a lost
+# packet cannot leave a recording un-started or un-stopped.
+var _rec_wanted: String = ""
+var _status: Dictionary = {}
+var _status_mutex: Mutex = Mutex.new()
+
 # Per-packet log buffer: filled on the network thread at tracker rate (~100 Hz),
 # drained by the game scene once per frame via take_samples().
 var log_enabled: bool = false
@@ -79,6 +88,11 @@ func _network_loop() -> void:
 		var got_any: bool = false
 		while _udp.get_available_packet_count() > 0:
 			var packet: PackedByteArray = _udp.get_packet()
+			# First float32 says which kind of packet this is: 2.0 = position
+			# sample, 7.0 = validation-recorder status (4 bytes + JSON).
+			if packet.size() >= 4 and packet.decode_float(0) == 7.0:
+				_apply_status(packet.slice(4).get_string_from_utf8())
+				continue
 			# 24-byte packets: 4 × float32 (code, x, y, z) + float64 capture
 			# time in Unix seconds (see the tracker's _send_coordinates).
 			# Older 16-byte packets carry no capture time — use arrival time.
@@ -89,10 +103,55 @@ func _network_loop() -> void:
 			got_any = true
 		var now: int = Time.get_ticks_msec()
 		if now - last_send >= 100:
-			_udp.put_packet(_outgoing.to_utf8_buffer())   # keepalive / sticky command
+			# A recording command replaces the keepalive while the tracker's
+			# state differs from what was asked for; either way the tracker
+			# hears from Godot every 100 ms (its 3 s heartbeat).
+			_udp.put_packet(_recording_command().to_utf8_buffer())
 			last_send = now
 		if not got_any:
 			OS.delay_msec(2)
+
+# Which message goes out with this keepalive tick. Runs on the network thread.
+func _recording_command() -> String:
+	var running: String = ""
+	_status_mutex.lock()
+	if _status.get("rec", false):
+		running = str(_status.get("name", ""))
+	_status_mutex.unlock()
+	if _rec_wanted == running:
+		return _outgoing
+	if _rec_wanted == "":
+		return "REC_STOP"
+	return "REC_START:" + _rec_wanted
+
+
+func _apply_status(payload: String) -> void:
+	var parsed = JSON.parse_string(payload)
+	if parsed is Dictionary:
+		_status_mutex.lock()
+		_status = parsed
+		_status_mutex.unlock()
+
+
+# Latest validation-recorder status from the tracker (empty until one arrives).
+# Keys: rec, name, n, missed, rise, fall, folder, last, gate, sync_err,
+# m0, m1, fusion, and x_mm/z_mm/h_mm/yaw_deg while the device is seen.
+func recorder_status() -> Dictionary:
+	_status_mutex.lock()
+	var out: Dictionary = _status.duplicate(true)
+	_status_mutex.unlock()
+	return out
+
+
+# Ask the tracker to start a validation recording, or "" to stop. The request
+# is repeated with the keepalive until the tracker's status agrees.
+func request_recording(name: String) -> void:
+	_rec_wanted = name
+
+
+func requested_recording() -> String:
+	return _rec_wanted
+
 
 func _apply_packet(f: PackedFloat32Array, t_cap: float) -> void:
 	if f.size() < 4:

@@ -18,6 +18,7 @@ from scipy.spatial.transform import Rotation as ScipyRotation
 import board as board_model
 from board import BoardGeometry, estimate_board_pose
 from pose_averaging import rotation_angle
+from recording import Recording, SyncWatcher, sanitize_name
 
 
 # Longest the loop waits for a new camera frame before handing control back to
@@ -30,6 +31,13 @@ FRAME_WAIT_S = 0.05
 # falls more than this many frames behind is the oldest one dropped (and
 # counted as missed). 3 frames = 30 ms of slack at 100 fps.
 FRAME_QUEUE_DEPTH = 3
+
+# First float32 of a UDP packet to Godot: 2.0 = a position sample (24 bytes,
+# see _send_coordinates), 7.0 = a validation-recorder status packet (4 bytes
+# + JSON). udp_receiver.gd branches on this.
+SAMPLE_CODE = 2.0
+STATUS_CODE = 7.0
+STATUS_PERIOD_S = 0.5
 
 
 class _FrameQueue:
@@ -347,8 +355,22 @@ class MainClass:
         self._last_fusion  = None           # which camera(s) the pose came from (_fuse_board_poses)
         self._last_stereo_gap = None        # (m, rad) between cam0's and cam1's poses, both solved
 
-        # udp=False (recorder.py): no socket, so no port clash with a running
-        # game and no dependence on Godot's heartbeat.
+        # Validation recording (docs/validation_plan.md), driven by Godot's
+        # installer screen: nothing is written unless it sends REC_START.
+        self._settings  = settings      # copied into each recording's meta.json
+        self._rec_lock  = threading.Lock()
+        self._recording = None
+        self._rec_dir   = os.path.expanduser(
+            settings.get("validation_data_dir", "~/Documents/NOARK/validation"))
+        self._rec_last  = ""            # summary of the last recording, shown in Godot
+        self._rec_error = ""            # why the last REC_START failed (name in use, ...)
+        self._status_t  = 0.0           # when the last status packet went out
+        self._sync = None
+        self._sync_error = None
+        self._init_sync_watcher(settings)
+
+        # udp=False: no socket, so no port clash with a running game and no
+        # dependence on Godot's heartbeat.
         self._udp_enabled = udp
         self.udp_socket = None
         if udp:
@@ -606,6 +628,113 @@ class MainClass:
         self.udp_socket.setblocking(False)
         print("UDP socket bound to", self.udp_socket.getsockname())
 
+    # ── validation recording (docs/validation_plan.md) ────────────────────────
+
+    def _init_sync_watcher(self, settings: dict) -> None:
+        """Watch the OptiTrack sync pin from start-up, so the installer screen
+        can show the gate's state before a recording starts. A missing library,
+        a busy line or no permission is reported, not fatal: tracking and the
+        game do not depend on the pin."""
+        chip = settings.get("sync_gpio_chip", "/dev/gpiochip4")
+        line = int(settings.get("sync_gpio_line", 1))
+        self._sync_desc = {"chip": chip, "line": line, "bias": None}
+        try:
+            self._sync = SyncWatcher(chip, line, self._on_sync_edge)
+            self._sync_desc["bias"] = self._sync.bias
+            print(f"Sync pin: {chip} line {line}, bias {self._sync.bias}")
+        except Exception as exc:                 # no gpiod, no permission, line busy
+            self._sync_error = f"{type(exc).__name__}: {exc}"
+            print(f"[warn] sync pin {chip} line {line} unavailable: {self._sync_error}")
+
+    def _on_sync_edge(self, t: float, rising: bool) -> None:
+        """Called from the SyncWatcher thread for every edge."""
+        with self._rec_lock:
+            if self._recording is not None:
+                self._recording.write_edge(t, rising)
+
+    def _start_recording(self, raw_name: str) -> None:
+        name = sanitize_name(raw_name)
+        with self._rec_lock:
+            if self._recording is not None:
+                if self._recording.name == name:
+                    return                       # Godot re-sends until it sees the status
+                self._close_recording_locked()
+            folder = os.path.join(self._rec_dir, name)
+            extra = {"sync_pin": self._sync_desc,
+                     "sync_error": self._sync_error,
+                     "mono_to_unix_s": self._mono_to_unix}
+            try:
+                self._recording = Recording(folder, name, self._settings, extra)
+            except OSError as exc:               # name already used, disk full, ...
+                # Godot repeats REC_START until the status says "recording";
+                # this tells it to stop asking instead of retrying forever.
+                self._rec_error = f"{name}: {exc}"
+                print(f"[warn] recording {name} not started: {exc}")
+                return
+            self._rec_last = ""
+            self._rec_error = ""
+            print(f"Recording {name} -> {folder}")
+
+    def _stop_recording(self) -> None:
+        with self._rec_lock:
+            self._close_recording_locked()
+
+    def _close_recording_locked(self) -> None:
+        if self._recording is None:
+            return
+        rec = self._recording
+        self._recording = None
+        rec.close()
+        self._rec_last = rec.summary()
+        print(self._rec_last)
+
+    def _send_status(self, result: Optional[FrameResult]) -> None:
+        """Small JSON packet for Godot's validation-recorder screen: what the
+        tracker sees and what it is writing. Sent a few times a second, not
+        per frame."""
+        if self.addr is None:
+            return
+        with self._rec_lock:
+            rec = self._recording
+            status = {
+                "rec":    rec is not None,
+                "name":   rec.name if rec else "",
+                "n":      rec.n_samples if rec else 0,
+                "missed": rec.missed_frames if rec else 0,
+                "rise":   len(rec.rising) if rec else 0,
+                "fall":   len(rec.falling) if rec else 0,
+                "folder": rec.folder if rec else self._rec_dir,
+                "last":   self._rec_last,
+                "rec_error": self._rec_error,
+            }
+        status["gate"] = bool(self._sync.high) if self._sync is not None else False
+        status["sync_err"] = self._sync_error or ""
+        status["m0"] = status["m1"] = 0
+        status["fusion"] = ""
+        if result is not None:
+            status["m0"] = 0 if result.ids[0] is None else len(result.ids[0])
+            status["m1"] = 0 if result.ids[1] is None else len(result.ids[1])
+            status["fusion"] = result.fusion or ""
+            status.update(self._placement(result))
+        payload = struct.pack("<f", STATUS_CODE) + json.dumps(status).encode()
+        try:
+            self.udp_socket.sendto(payload, self.addr)
+        except OSError:
+            pass
+
+    def _placement(self, result: FrameResult) -> dict:
+        """Where the device is, for placing it during validation trials:
+        displacement from the locked origin in mm, and the heading (yaw).
+        The device is used flat on a table and board +Y is device-up, so the
+        table plane is x-z and yaw is the turn about Y."""
+        if result.fused is None or result.local_coords is None or self._origin_R is None:
+            return {}
+        d = -np.asarray(result.local_coords).reshape(3) * 1000.0
+        R = cv2.Rodrigues(np.asarray(result.fused[0], dtype=np.float64).reshape(3))[0]
+        yaw = ScipyRotation.from_matrix(self._origin_R.T @ R).as_euler("YXZ", degrees=True)[0]
+        return {"x_mm": round(float(d[0]), 1), "z_mm": round(float(d[2]), 1),
+                "h_mm": round(float(d[1]), 1), "yaw_deg": round(float(yaw), 1)}
+
     # ── transport send / receive ──────────────────────────────────────────────
 
     def _recv_command(self) -> bytes:
@@ -628,7 +757,7 @@ class MainClass:
         and falls back to its own arrival time otherwise."""
         if self.addr is None:
             return
-        data = np.append(2.0, coords).flatten()
+        data = np.append(SAMPLE_CODE, coords).flatten()
         t_cap = (self._frame_t_cap + self._mono_to_unix
                  if self._frame_t_cap is not None else time.time())
         data_bytes = struct.pack("<" + "f" * len(data), *data) + struct.pack("<d", t_cap)
@@ -1177,6 +1306,12 @@ class MainClass:
                 self._apply_setup(cmd)   # demo mode switch, not a dispatch command
             elif cmd == b"RELOCK":
                 self._relock_origin()    # installer origin ritual, not a dispatch command
+            elif cmd.startswith(b"REC_START:"):
+                # Godot repeats this until its status shows the recording is
+                # running, so a lost packet cannot leave the two disagreeing.
+                self._start_recording(cmd.decode(errors="replace").split(":", 1)[1])
+            elif cmd == b"REC_STOP":
+                self._stop_recording()
             elif cmd:
                 self.received_message = cmd
 
@@ -1262,7 +1397,7 @@ class MainClass:
                 self.video_frame = cv2.resize(self.video_frame, (350, 200))
                 cv2.imshow("frame", self.video_frame)
 
-        return FrameResult(
+        result = FrameResult(
             t_cap=tuple(self._frame_ts),
             seq=tuple(self._frame_seqs),
             corners=(corners0, corners1),
@@ -1274,8 +1409,20 @@ class MainClass:
             local_coords=local_coords,
         )
 
+        with self._rec_lock:
+            if self._recording is not None:
+                self._recording.write_sample(result)
+        now = time.monotonic()
+        if self._udp_enabled and now - self._status_t >= STATUS_PERIOD_S:
+            self._status_t = now
+            self._send_status(result)
+        return result
+
     def close(self) -> None:
         """Stop the cameras and worker threads, close the timing log."""
+        self._stop_recording()
+        if self._sync is not None:
+            self._sync.close()
         if self._cam_pool is not None:
             self._cam_pool.shutdown(wait=True)
         if self._camera_backend in ("rcam_single", "rcam_dual"):

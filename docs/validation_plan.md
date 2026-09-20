@@ -96,13 +96,28 @@ so a typo cannot break the pairing; it is typed into Motive by hand.
 
 ## 3. Recording on the device
 
-### Recorder
+### Recorder — in the game, not a separate program
 
-`python pyscripts/recorder.py` (on the board's desktop, venv active). A
-**standalone Python window** (not part of the Godot app): Record / Stop, name
-dropdowns, and a live status line: samples/s, markers seen, sync gate high/low, and
-the device's current x, y, yaw. It runs the tracker code directly, so the pose,
-the raw corners, the camera clock and the sync pin are all in one process.
+**Godot installer (F10) → Validation recorder.** Name dropdowns (trial, condition,
+repeat; the date is added), Record / Stop, and a live status: packets/s, markers per
+camera, which camera(s) the pose came from, gate HIGH/LOW with the edge count, and
+the device's x, z and yaw for placing it.
+
+The work is split the way the 100 Hz measurement already runs:
+
+| | Runs on | Does |
+|---|---|---|
+| Godot | cores 0–3 | the screen; sends `REC_START:<name>` / `REC_STOP`, repeated with the 100 ms keepalive until the tracker's status agrees, so a lost packet cannot desynchronise them |
+| Tracker (`main.py` + `recording.py`) | cores 4–7 | tracks, writes the files, watches the sync pin; sends a status packet twice a second (first float32 = 7.0, then JSON; position samples are 2.0) |
+
+The files and the pin stay in the tracker: the pin's edges and the camera frames must
+be stamped with the same kernel clock, and Godot cannot read GPIO.
+
+**Rejected 2026-09-20:** a standalone Tk window running the tracker in its own
+process (`pyscripts/recorder.py`, deleted). It ran at 50/s unpinned and 80–93/s
+pinned to cores 4–7, recording or not, i.e. the window's own process cost, not the
+file writing. Nothing is written during a patient session: recording starts only when
+Godot asks.
 
 ### Sync with OptiTrack
 
@@ -198,7 +213,7 @@ criteria (not yet set).
 - **Acceptance criteria:** what error counts as good enough, per measure.
 - **Reflective markers on the device:** how many, where, rigid body definition in
   Motive.
-- **T5 (game):** the cameras cannot be opened by two programs. The recorder must run
-  inside the tracker when the game starts it.
-- **Recorder:** written 2026-09-19 (`pyscripts/recorder.py`), **not yet run on the
-  board**. First run = a `T0_test` dry run with Motive.
+- **T5 (game):** now possible in principle (the recorder lives in the game), but not
+  built: it needs Record to survive the change of scene into Random Reach.
+- **Recorder:** rebuilt inside Godot 2026-09-20, **not yet run on the board**.
+  First run = a `T0_test` dry run, checking it holds 100 samples/s while recording.

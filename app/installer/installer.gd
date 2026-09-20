@@ -16,6 +16,28 @@ var _refresh_timer: Timer
 var _player_pos: Vector2 = Vector2.ZERO
 var _test_targets: Array = []        # [{pos, hit}]
 
+# Validation recorder (docs/validation_plan.md §2): trial -> conditions.
+# T0 is a dry run; T5 (record during a real game) is not built yet.
+const VAL_TRIALS: Dictionary = {
+	"T0": ["test"],
+	"T1": ["grid"],
+	"T2": ["circle_slow", "circle_comfortable", "circle_fast",
+		   "eight_slow", "eight_comfortable", "eight_fast"],
+	"T3": ["comfortable", "fast"],
+}
+const VAL_REPEATS: Array = ["r1", "r2", "r3", "r4", "r5"]
+
+var _val_trial: OptionButton
+var _val_cond: OptionButton
+var _val_rep: OptionButton
+var _val_name: Label
+var _val_rec_btn: Button
+var _val_stop_btn: Button
+var _val_status: Label
+var _val_gate: Label
+var _val_device: Label
+var _val_last: Label
+
 const CHECKS: Array = [
 	"Camera calibrated",
 	"Board geometry",
@@ -40,6 +62,7 @@ func _ready() -> void:
 	_build_checklist_page()
 	_build_origin_page()
 	_build_test_page()
+	_build_validation_page()
 	_show_page("checklist")
 
 	_refresh_timer = Timer.new()
@@ -175,6 +198,7 @@ func _build_checklist_page() -> void:
 	_add_button(tools, "Origin ritual", func(): _show_page("origin"))
 	_add_button(tools, "Workspace calibration", _on_workspace_cal)
 	_add_button(tools, "Test drive", _on_test_drive)
+	_add_button(tools, "Validation recorder", func(): _show_page("validation"))
 
 	var row2 := HBoxContainer.new()
 	row2.add_theme_constant_override("separation", 10)
@@ -322,7 +346,149 @@ func _build_test_page() -> void:
 	_add_button(box, "Back", func(): _show_page("checklist"))
 
 
+# ── Validation recorder page (docs/validation_plan.md) ────────────────────────
+
+func _build_validation_page() -> void:
+	var box := _new_page("validation", "Validation Recorder")
+	var instr := Label.new()
+	instr.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	instr.add_theme_color_override("font_color", UITheme.INK)
+	instr.text = ("Records the tracker's full output next to an OptiTrack take " +
+		"(docs/validation_plan.md).\n" +
+		"1. Pick the name.   2. Record.   3. Start the Motive take.   " +
+		"4. Do the trial.   5. Stop the Motive take.   6. Stop.\n" +
+		"The eSync 2 Recording Gate must be wired to pin 15 (signal) and pin 16 (ground).")
+	box.add_child(instr)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	box.add_child(row)
+	_val_trial = OptionButton.new()
+	for trial in VAL_TRIALS:
+		_val_trial.add_item(trial)
+	_val_trial.item_selected.connect(func(_i: int): _val_fill_conditions())
+	row.add_child(_val_trial)
+	_val_cond = OptionButton.new()
+	_val_cond.item_selected.connect(func(_i: int): _val_update_name())
+	row.add_child(_val_cond)
+	_val_rep = OptionButton.new()
+	for rep in VAL_REPEATS:
+		_val_rep.add_item(rep)
+	_val_rep.item_selected.connect(func(_i: int): _val_update_name())
+	row.add_child(_val_rep)
+
+	_val_name = Label.new()
+	_val_name.add_theme_font_size_override("font_size", 24)
+	_val_name.add_theme_color_override("font_color", UITheme.INK)
+	box.add_child(_val_name)
+
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 10)
+	box.add_child(buttons)
+	_val_rec_btn = _add_button(buttons, "● Record", func():
+		UDPReceiver.request_recording(_val_name.text))
+	_val_stop_btn = _add_button(buttons, "■ Stop", _on_val_stop)
+
+	_val_status = Label.new()
+	_val_status.add_theme_color_override("font_color", UITheme.INK)
+	box.add_child(_val_status)
+	_val_gate = Label.new()
+	_val_gate.add_theme_font_size_override("font_size", 20)
+	_val_gate.add_theme_color_override("font_color", UITheme.INK)
+	box.add_child(_val_gate)
+	_val_device = Label.new()
+	_val_device.add_theme_font_size_override("font_size", 20)
+	_val_device.add_theme_color_override("font_color", UITheme.INK)
+	box.add_child(_val_device)
+	_val_last = Label.new()
+	_val_last.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_val_last.add_theme_color_override("font_color", UITheme.INK)
+	box.add_child(_val_last)
+
+	_add_button(box, "Back", func(): _show_page("checklist"))
+	_val_fill_conditions()
+
+
+func _on_val_stop() -> void:
+	UDPReceiver.request_recording("")
+	# Next repeat, so the same name is never recorded twice by accident.
+	if _val_rep.selected + 1 < VAL_REPEATS.size():
+		_val_rep.select(_val_rep.selected + 1)
+		_val_update_name()
+
+
+func _val_fill_conditions() -> void:
+	_val_cond.clear()
+	for cond in VAL_TRIALS[_val_trial.get_item_text(_val_trial.selected)]:
+		_val_cond.add_item(cond)
+	_val_cond.select(0)
+	_val_update_name()
+
+
+func _val_update_name() -> void:
+	_val_name.text = "%s_%s_%s_%s" % [
+		Time.get_date_string_from_system(),
+		_val_trial.get_item_text(_val_trial.selected),
+		_val_cond.get_item_text(_val_cond.selected),
+		_val_rep.get_item_text(_val_rep.selected)]
+
+
+func _refresh_validation_page() -> void:
+	var st: Dictionary = UDPReceiver.recorder_status()
+	if st.is_empty():
+		_val_status.text = "No status from the tracker yet."
+		return
+	var recording: bool = st.get("rec", false)
+	var wanted: String = UDPReceiver.requested_recording()
+	# The tracker refused to start (name already used, disk problem): stop
+	# asking, or Godot would repeat the request every 100 ms.
+	var rec_error: String = st.get("rec_error", "")
+	if rec_error != "" and wanted != "" and rec_error.begins_with(wanted):
+		UDPReceiver.request_recording("")
+		wanted = ""
+	var pending := (wanted != "") != recording
+
+	for box in [_val_trial, _val_cond, _val_rep]:
+		box.disabled = recording or pending
+	_val_rec_btn.disabled = recording or pending
+	_val_stop_btn.disabled = not recording
+
+	if recording:
+		_val_status.text = "RECORDING %s — %d samples, %d missed frames\n%s" % [
+			st.get("name", ""), st.get("n", 0), st.get("missed", 0), st.get("folder", "")]
+	elif pending:
+		_val_status.text = "Waiting for the tracker…"
+	else:
+		_val_status.text = "Not recording.   %d packets/s   cam0: %d markers   cam1: %d markers   pose: %s" % [
+			UDPReceiver.packets_per_sec, st.get("m0", 0), st.get("m1", 0),
+			st.get("fusion", "none")]
+
+	var sync_err: String = st.get("sync_err", "")
+	if sync_err != "":
+		_val_gate.text = "Sync pin UNAVAILABLE: " + sync_err
+	else:
+		_val_gate.text = "Gate: %s      edges this recording: %d rising, %d falling" % [
+			"HIGH (Motive recording)" if st.get("gate", false) else "LOW",
+			st.get("rise", 0), st.get("fall", 0)]
+
+	if st.has("yaw_deg"):
+		_val_device.text = "Device:  x = %.0f mm   z = %.0f mm   yaw = %.1f°   (height %.0f mm)" % [
+			st.get("x_mm", 0.0), st.get("z_mm", 0.0), st.get("yaw_deg", 0.0), st.get("h_mm", 0.0)]
+	else:
+		_val_device.text = "Device: not seen, or origin not locked"
+
+	var last: String = st.get("last", "")
+	if rec_error != "":
+		_val_last.text = "Could not start: " + rec_error
+	elif last != "":
+		_val_last.text = "Last recording — " + last
+	else:
+		_val_last.text = ""
+
+
 func _process(_delta: float) -> void:
+	if _pages.has("validation") and _pages["validation"].visible:
+		_refresh_validation_page()
 	if not _pages.has("test") or not _pages["test"].visible:
 		return
 	_player_pos = UDPReceiver.screen_pos if UDPReceiver.connected \
