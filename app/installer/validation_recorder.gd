@@ -31,6 +31,10 @@ const T3_DIRECTIONS := 8
 # the near and far thirds of the table unmeasured.)
 const MARGIN := Vector2(0.04, 0.05)
 const T2_SECONDS := 30.0       # one T2 condition; the recording stops itself
+# T2 pacer speeds, on the TABLE (mm/s) — the workspace calibration converts
+# them to screen pixels, so "300 mm/s" really is 300 mm/s of device movement.
+# Reaches peak around 300-1000 mm/s, so these bracket the useful range.
+const T2_SPEEDS := {"slow": 100.0, "comfortable": 300.0, "fast": 600.0}
 
 var _trial: OptionButton
 var _cond: OptionButton
@@ -47,6 +51,10 @@ var _holding: bool = false     # T1: a spacebar-started hold is running
 var _cursor: Vector2 = Vector2.ZERO
 var _trail: Array = []         # T2: recent cursor positions
 var _elapsed: float = 0.0      # T2: seconds recorded so far
+var _path: PackedVector2Array  # T2: the shape to trace
+var _path_cum: Array = []      # cumulative length along _path, for the pacer
+var _laps: int = 0
+var _pacer_marked: bool = false
 var _status: Dictionary = {}
 
 
@@ -127,7 +135,7 @@ func _build_ui() -> void:
 	_trial.item_selected.connect(func(_i: int): _on_trial_changed())
 	top.add_child(_trial)
 	_cond = OptionButton.new()
-	_cond.item_selected.connect(func(_i: int): _update_name())
+	_cond.item_selected.connect(func(_i: int): _on_condition_changed())
 	top.add_child(_cond)
 	_rep = OptionButton.new()
 	for r in REPEATS:
@@ -186,6 +194,13 @@ func _on_trial_changed() -> void:
 	_rebuild_targets()
 
 
+func _on_condition_changed() -> void:
+	_update_name()
+	if _trial_name() == "T2":
+		_build_path()      # circle <-> eight
+	queue_redraw()
+
+
 func _update_name() -> void:
 	_name_lbl.text = "%s_%s_%s_%s" % [
 		Time.get_date_string_from_system(),
@@ -207,6 +222,7 @@ func _on_record_pressed() -> void:
 	else:
 		_rebuild_targets()
 		UDPReceiver.request_recording(_name_lbl.text)
+		_pacer_marked = false
 
 
 # ── targets ───────────────────────────────────────────────────────────────────
@@ -220,7 +236,10 @@ func _rebuild_targets() -> void:
 	_hold_t = 0.0
 	_holding = false
 	_elapsed = 0.0
+	_laps = 0
 	_trail = []
+	if _trial_name() == "T2":
+		_build_path()
 
 	match _trial_name():
 		"T1":
@@ -276,6 +295,11 @@ func _process(delta: float) -> void:
 		else get_global_mouse_position()
 
 	if _status.get("rec", false):
+		if _trial_name() == "T2" and not _pacer_marked:
+			# Sent once the tracker is actually recording (REC_START takes a
+			# moment), so the mark lands in the file.
+			_pacer_marked = true
+			UDPReceiver.send_mark("pacer %s %.0f mm_s" % [_condition(), _speed_mm_s()])
 		_elapsed += delta
 		_advance_targets(delta)
 		_update_trail()
@@ -412,21 +436,79 @@ func _draw_targets() -> void:
 # The path to trace: one big ellipse ("circle"), or the same ellipse crossed
 # in the middle ("eight"). The eight's two reversals are what let the analysis
 # measure the device's lag; a steady circle looks the same at every instant.
-func _draw_guide_shape(vp: Vector2) -> void:
+func _build_path() -> void:
+	var vp := get_viewport_rect().size
 	var centre := vp * 0.5
 	var rx := vp.x * (0.5 - MARGIN.x - 0.02)
 	var ry := vp.y * (0.5 - MARGIN.y - 0.02)
-	var eight := _cond.get_item_text(_cond.selected).begins_with("eight")
-	var pts := PackedVector2Array()
-	var n := 160
+	var eight := _condition().begins_with("eight")
+	_path = PackedVector2Array()
+	var n := 240
 	for i in n + 1:
 		var t: float = TAU * float(i) / float(n)
 		if eight:
 			# Lemniscate of Gerono: one stroke, crossing itself at the centre.
-			pts.append(centre + Vector2(cos(t) * rx, sin(2.0 * t) * ry * 0.5))
+			_path.append(centre + Vector2(cos(t) * rx, sin(2.0 * t) * ry * 0.5))
 		else:
-			pts.append(centre + Vector2(cos(t) * rx, sin(t) * ry))
-	draw_polyline(pts, Color(UITheme.INK, 0.22), 3.0)
+			_path.append(centre + Vector2(cos(t) * rx, sin(t) * ry))
+	_path_cum = [0.0]
+	for i in range(1, _path.size()):
+		_path_cum.append(_path_cum[i - 1] + _path[i].distance_to(_path[i - 1]))
+
+
+func _condition() -> String:
+	return _cond.get_item_text(_cond.selected)
+
+
+# Screen pixels per metre on the table, from the 4-corner calibration: the
+# linear part of its affine maps metres to pixels, and the square root of its
+# determinant is the average scale (it is near-uniform for a flat table).
+func _px_per_m() -> float:
+	var a: Array = WorkspaceConfig.affine
+	var det: float = absf(a[0][0] * a[1][1] - a[0][1] * a[1][0])
+	return sqrt(det) if det > 0.0 else 1000.0
+
+
+func _speed_mm_s() -> float:
+	var parts := _condition().split("_")
+	return float(T2_SPEEDS.get(parts[parts.size() - 1], 300.0))
+
+
+func _pacer_speed_px() -> float:
+	return _speed_mm_s() * 0.001 * _px_per_m()
+
+
+# Where the pacer is after _elapsed seconds: a constant distance along the
+# path, so the speed is the same everywhere on it (unlike a constant step in
+# the shape's parameter, which would race through the straight parts).
+func _pacer_pos() -> Vector2:
+	if _path.size() < 2:
+		return get_viewport_rect().size * 0.5
+	var total: float = _path_cum[_path_cum.size() - 1]
+	var travelled: float = _pacer_speed_px() * _elapsed
+	var lap := int(travelled / total)
+	if lap > _laps:
+		_laps = lap
+		if _status.get("rec", false):
+			UDPReceiver.send_mark("lap %d" % lap)
+	var s: float = fmod(travelled, total)
+	for i in range(1, _path_cum.size()):
+		if _path_cum[i] >= s:
+			var seg: float = _path_cum[i] - _path_cum[i - 1]
+			var f: float = 0.0 if seg <= 0.0 else (s - _path_cum[i - 1]) / seg
+			return _path[i - 1].lerp(_path[i], f)
+	return _path[_path.size() - 1]
+
+
+func _draw_guide_shape(_vp: Vector2) -> void:
+	if _path.size() < 2:
+		_build_path()
+	draw_polyline(_path, Color(UITheme.INK, 0.18), 3.0)
+	if _status.get("rec", false):
+		# The pacer: keep the cursor on it. Its speed is the condition.
+		var p := _pacer_pos()
+		draw_circle(p, 26.0, Color(UITheme.APPLE_RED, 0.22))
+		draw_circle(p, 14.0, UITheme.APPLE_RED)
 
 
 func _draw_trail() -> void:
@@ -464,7 +546,7 @@ func _draw_status_strip(vp: Vector2) -> void:
 		draw_string(font, Vector2(260.0, y), "%d / %d" % [_current, _targets.size()],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, UITheme.INK)
 	elif _trial_name() == "T2":
-		draw_string(font, Vector2(260.0, y), "%.0f s" % T2_SECONDS,
+		draw_string(font, Vector2(260.0, y), "%.0f s at %.0f mm/s" % [T2_SECONDS, _speed_mm_s()],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, UITheme.INK)
 
 	# Two indicators, right-hand side: sample rate and the OptiTrack gate.
@@ -491,6 +573,7 @@ func _draw_running_line(vp: Vector2) -> void:
 		"T3":
 			bits.append("%d / %d" % [_current, _targets.size()])
 		"T2":
+			bits.append("%.0f mm/s" % _speed_mm_s())
 			bits.append("%.0f s left" % max(T2_SECONDS - _elapsed, 0.0))
 	bits.append("%d /s" % UDPReceiver.packets_per_sec)
 	bits.append("gate " + ("HIGH" if _status.get("gate", false) else "low"))
