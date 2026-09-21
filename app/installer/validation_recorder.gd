@@ -57,8 +57,12 @@ func _input(event: InputEvent) -> void:
 		KEY_ESCAPE:
 			_close()
 		KEY_SPACE:
+			# Swallowed here: space would otherwise press whichever button has
+			# focus — which used to stop the recording.
+			get_viewport().set_input_as_handled()
 			_start_hold()
 		KEY_BACKSPACE:
+			get_viewport().set_input_as_handled()
 			_redo_previous()
 
 
@@ -151,6 +155,11 @@ func _build_ui() -> void:
 	add_child(back)
 	back.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	back.position = Vector2(get_viewport_rect().size.x - 150.0, 28.0)
+
+	# Nothing here takes keyboard focus: the trials are driven by the spacebar,
+	# and a focused control would eat it (and press itself).
+	for node in [_trial, _cond, _rep, _rec_btn, back]:
+		node.focus_mode = Control.FOCUS_NONE
 
 	_on_trial_changed()
 
