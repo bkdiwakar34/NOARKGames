@@ -11,6 +11,7 @@ waits on a pin — so the gate's state can be shown before recording starts.
 import csv
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -124,11 +125,13 @@ class Recording:
         os.makedirs(folder)                      # refuses an existing name
         self.folder = folder
         self.name = name
-        self.n_samples = 0
+        self.n_samples = 0                       # queued by the tracker loop
         self.n_marks = 0
+        self.dropped_rows = 0                    # queue full — writer fell behind
         self.rising = []
         self.falling = []
         self.missed_frames = 0                   # gaps in cam0's sequence numbers
+        self._rows_written = 0                   # written by the writer thread
         self._last_seq0 = None
         self._t_first = None
         self._t_last = None
@@ -177,6 +180,12 @@ class Recording:
         for f in (self._samples_f, self._corners_f, self._sync_f, self._marks_f):
             f.flush()
 
+        # 400 frames of slack (4 s): a burst of slow writes delays rows rather
+        # than losing them, and a queue that fills anyway is counted, not hidden.
+        self._queue = queue.Queue(maxsize=400)
+        self._writer = threading.Thread(target=self._writer_loop, daemon=True)
+        self._writer.start()
+
     def _copy_calibration(self, settings: dict):
         names = [
             settings.get("calibration_file", "camera_calib.toml"),
@@ -198,9 +207,33 @@ class Recording:
         return copied, missing
 
     def write_sample(self, r) -> None:
-        """One FrameResult (main.py) -> one samples.csv row + one corners.csv
-        row per marker each camera saw."""
-        n = self.n_samples
+        """Hand one FrameResult (main.py) to the writer thread.
+
+        The tracker loop has ~10 ms per frame and was already using 9.95 of
+        it, so formatting and writing ten CSV rows must not happen here: this
+        only queues the result (microseconds) and the writer thread does the
+        work between frames."""
+        self.n_samples += 1
+        try:
+            self._queue.put_nowait(r)
+        except queue.Full:
+            self.dropped_rows += 1
+
+    def _writer_loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            try:
+                self._write_sample_now(item)
+            except Exception as exc:                  # never kill the thread
+                print(f"[warn] recording writer: {exc}")
+
+    def _write_sample_now(self, r) -> None:
+        """One FrameResult -> one samples.csv row + one corners.csv row per
+        marker each camera saw. Runs on the writer thread."""
+        n = self._rows_written
+        self._rows_written += 1
         if r.seq[0] is not None:
             if self._last_seq0 is not None and r.seq[0] > self._last_seq0 + 1:
                 self.missed_frames += r.seq[0] - self._last_seq0 - 1
@@ -246,7 +279,6 @@ class Recording:
             self._last_flush = now
             self._samples_f.flush()
             self._corners_f.flush()
-        self.n_samples += 1
 
     def write_edge(self, t: float, rising: bool) -> None:
         # Flushed at once, unlike the sample rows: there are only two of these
@@ -279,10 +311,15 @@ class Recording:
         line = (f"{self.name}: {self.n_samples} samples, {self.duration_s:.1f} s, "
                 f"{self.missed_frames} missed frames, {self.n_marks} marks, "
                 f"{len(self.rising)} rising + {len(self.falling)} falling edges")
+        if self.dropped_rows:
+            line += f", {self.dropped_rows} ROWS DROPPED (writer fell behind)"
         if ok:
             return line + f" — OK (Motive take {self.falling[0] - self.rising[0]:.3f} s)"
         return line + " — CHECK SYNC (expected 1 rising then 1 falling)"
 
     def close(self) -> None:
+        # Let the writer finish what is queued before the files are closed.
+        self._queue.put(None)
+        self._writer.join(timeout=10.0)
         for f in (self._samples_f, self._corners_f, self._sync_f, self._marks_f):
             f.close()

@@ -247,6 +247,8 @@ class MainClass:
         # Per-stage timing buffer (filled by process_frame, drained by the debug print
         # once a second). Each entry is [capture_ms, remap_ms, detect_ms, pose_send_ms].
         self._stage_times = []
+        # Finer split of the pose stage: [(both solvePnPs ms, search boxes ms)]
+        self._sub_times = []
         # Tracker timing log — opened only when debug is on. Plays nice with
         # `tail -f` from another terminal even when Godot launches main.py.
         self._timing_log = open("/tmp/tracker_timing.log", "a", buffering=1) if self.debug else None
@@ -1348,10 +1350,16 @@ class MainClass:
                 self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners0, ids0)
             pose0 = self._solve_camera_pose(0, corners0, ids0) if ids0 is not None else None
             pose1 = self._solve_camera_pose(1, corners1, ids1) if ids1 is not None else None
+            ta = time.perf_counter() if self.debug else 0.0
             if self._roi_enabled:
                 self._roi_from_pose(0, pose0, self.camera_matrix)
                 self._roi_from_pose(1, pose1, self.camera_matrix_1)
+            tb = time.perf_counter() if self.debug else 0.0
             fused = self._fuse_board_poses(pose0, pose1)
+            if self.debug:
+                # Where the "pose+send" time actually goes — the two solves,
+                # the search-box projection, then the rest (fuse, origin, UDP).
+                self._sub_times.append(((ta - t3) * 1000.0, (tb - ta) * 1000.0))
             if fused is not None and self._joint_solve and pose0 is not None \
                     and pose1 is not None:
                 # One pose from both cameras' corners, started from the averaged
@@ -1416,9 +1424,15 @@ class MainClass:
                     else:
                         stages = (f"remap: {means[1]:5.2f} ms  |  "
                                   f"detect: {means[2]:5.2f} ms  |  ")
+                    pose_split = ""
+                    if self._sub_times:
+                        sub = np.array(self._sub_times).mean(axis=0)
+                        pose_split = (f"(solve {sub[0]:4.2f} + boxes {sub[1]:4.2f} + "
+                                      f"rest {max(means[3] - sub.sum(), 0.0):4.2f})  ")
+                        self._sub_times.clear()
                     line = (f"wait+capture: {means[0]:5.2f} ms  |  "
                             + stages +
-                            f"pose+send: {means[3]:5.2f} ms  |  "
+                            f"pose+send: {means[3]:5.2f} ms {pose_split} |  "
                             f"total: {total:5.2f} ms  ({len(arr)} frames, "
                             f"{self._missed_count} missed)")
                     self._missed_count = 0
