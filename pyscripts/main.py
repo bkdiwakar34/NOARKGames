@@ -328,6 +328,12 @@ class MainClass:
         # the whole picture.
         self._roi_enabled    = bool(settings.get("roi_enabled", True)) and not self._debug_preview
         self._roi_margin     = float(settings.get("roi_margin_markers", 2.0))
+        # The margin is measured in marker widths, so it balloons exactly when
+        # the device is near a camera (a marker can be 300 px across) and the
+        # box then approaches the full frame — the pass overruns 10 ms and a
+        # frame is lost. It only has to cover movement between two frames:
+        # 1 m/s at 10 ms is ~10 mm, about 60 px close up. Capped 2026-09-21.
+        self._roi_margin_max_px = float(settings.get("roi_margin_max_px", 120.0))
         self._roi_full_every = int(settings.get("roi_full_every", 100))
         # All marker corners of the device in the board frame (from
         # board_geometry.json). Projected with a camera's latest pose, they give
@@ -1230,7 +1236,7 @@ class MainClass:
                                    camera_matrix, np.zeros(5))
         quads = pix.reshape(-1, 4, 2)
         side = float(np.linalg.norm(quads - np.roll(quads, -1, axis=1), axis=2).max())
-        margin = self._roi_margin * side
+        margin = min(self._roi_margin * side, self._roi_margin_max_px)
         pts = quads.reshape(-1, 2)
         w, h = self.frame_size
         x0 = int(max(0, np.floor(pts[:, 0].min() - margin)))
@@ -1253,7 +1259,7 @@ class MainClass:
         pts = np.concatenate(quads)
         side = max(float(np.linalg.norm(q - np.roll(q, -1, axis=0), axis=1).max())
                    for q in quads)
-        margin = self._roi_margin * side
+        margin = min(self._roi_margin * side, self._roi_margin_max_px)
         w, h = self.frame_size
         self._roi[cam] = (
             int(max(0, np.floor(pts[:, 0].min() - margin))),
