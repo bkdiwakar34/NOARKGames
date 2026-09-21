@@ -527,8 +527,15 @@ class MainClass:
         max_attempts = int(settings.get("cam_phase_max_attempts", 20))
 
         def measure() -> float:
+            # A freshly started sensor may not be on its final rhythm for its
+            # first frames — measuring those judged a phase the camera then
+            # left (aligned to 0.14 ms at start-up, ~4 ms apart in the
+            # recording that followed). Let both settle first.
+            for _ in range(10):
+                self._rcam[0].capture_with_meta()
+                self._rcam[1].capture_with_meta()
             offs = []
-            for _ in range(5):
+            for _ in range(10):
                 t0 = self._rcam[0].capture_with_meta()[2]
                 t1 = self._rcam[1].capture_with_meta()[2]
                 d = (t0 - t1) % period            # 0 .. period
