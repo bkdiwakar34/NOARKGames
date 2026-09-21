@@ -34,7 +34,9 @@ const T2_SECONDS := 30.0       # one T2 condition; the recording stops itself
 # T2 pacer speeds, on the TABLE (mm/s) — the workspace calibration converts
 # them to screen pixels, so "300 mm/s" really is 300 mm/s of device movement.
 # Reaches peak around 300-1000 mm/s, so these bracket the useful range.
-const T2_SPEEDS := {"slow": 100.0, "comfortable": 300.0, "fast": 600.0}
+# Ladder raised 2026-09-21 after trying it: the old "fast" (600) is what the
+# hand does comfortably, so it became the middle rung.
+const T2_SPEEDS := {"slow": 200.0, "comfortable": 600.0, "fast": 1000.0}
 
 var _trial: OptionButton
 var _cond: OptionButton
