@@ -121,29 +121,49 @@ def average_poses(p0, p1, Rx, tx):
     return r, t
 
 
+# A joint fit is rejected when it disagrees with the pictures by more than this,
+# or when it has wandered this far from the pose it started at. Weak geometry —
+# one small marker at the edge of the table — can otherwise send the optimiser
+# somewhere absurd (a 210 mm jump, seen on 2026-09-21).
+JOINT_MAX_REPROJ_PX = 3.0
+JOINT_MAX_JUMP_M = 0.02
+
+
 def solve_joint(obj0, img0, obj1, img1, K0, K1, Rx, tx, guess):
     """One pose in cam0's frame fitted to both cameras' corners at once.
 
     A board point b sits at  p0 = R b + t  in cam0, and the same point is at
-    p1 = Rx^T (p0 - tx) in cam1, so one (R, t) predicts both images."""
+    p1 = Rx^T (p0 - tx) in cam1, so one (R, t) predicts both images.
+
+    Returns (rvec, tvec, accepted). On a rejected fit the guess is returned
+    unchanged, which is what a tracker would have to do."""
     RxT = Rx.T
 
-    def residuals(x):
+    def predict(x):
         rvec, tvec = x[:3], x[3:]
         out = []
         if obj0 is not None:
             proj = cv2.projectPoints(obj0, rvec, tvec, K0, np.zeros(5))[0].reshape(-1, 2)
-            out.append((proj - img0).ravel())
+            out.append(proj - img0)
         if obj1 is not None:
             R = cv2.Rodrigues(rvec)[0]
             r1 = cv2.Rodrigues(RxT @ R)[0].flatten()
             t1 = RxT @ (tvec - tx)
             proj = cv2.projectPoints(obj1, r1, t1, K1, np.zeros(5))[0].reshape(-1, 2)
-            out.append((proj - img1).ravel())
+            out.append(proj - img1)
         return np.concatenate(out)
 
-    res = least_squares(residuals, np.concatenate(guess), method="lm", xtol=1e-10)
-    return res.x[:3], res.x[3:]
+    x0 = np.concatenate(guess)
+    try:
+        res = least_squares(lambda x: predict(x).ravel(), x0, method="lm", xtol=1e-10)
+    except Exception:
+        return guess[0], guess[1], False
+
+    err = float(np.linalg.norm(predict(res.x), axis=1).mean())
+    jump = float(np.linalg.norm(res.x[3:] - x0[3:]))
+    if err > JOINT_MAX_REPROJ_PX or jump > JOINT_MAX_JUMP_M or not np.all(np.isfinite(res.x)):
+        return guess[0], guess[1], False
+    return res.x[:3], res.x[3:], True
 
 
 def analyse(folder: str, stride: int) -> None:
@@ -163,6 +183,7 @@ def analyse(folder: str, stride: int) -> None:
               f"SD {offs.std():.2f}")
 
     per_hold = []
+    rejected, attempted = [0], [0]
     for index in sorted(holds):
         a, b, _, _ = holds[index]
         positions = {m: [] for m in METHODS}
@@ -182,8 +203,11 @@ def analyse(folder: str, stride: int) -> None:
             if fused is not None:
                 positions["avg"].append(fused[1])
                 guess = (fused[0], fused[1])
-                positions["joint"].append(
-                    solve_joint(obj0, img0, obj1, img1, K0, K1, Rx, tx, guess)[1])
+                rvec, tvec, accepted = solve_joint(
+                    obj0, img0, obj1, img1, K0, K1, Rx, tx, guess)
+                positions["joint"].append(tvec)
+                rejected[0] += 0 if accepted else 1
+                attempted[0] += 1
         row = {"place": index, "n": len(positions["joint"])}
         for m in METHODS:
             p = np.array(positions[m])
@@ -197,6 +221,12 @@ def analyse(folder: str, stride: int) -> None:
     for row in per_hold:
         print(f"{row['place']:>5} {row['n']:>4} " +
               " ".join(f"{row[m]:>8.3f}" for m in METHODS))
+
+    if attempted[0]:
+        print(f"\njoint fits rejected (kept the averaged pose instead): "
+              f"{rejected[0]} of {attempted[0]} "
+              f"({100.0 * rejected[0] / attempted[0]:.2f} %) — limits: "
+              f"{JOINT_MAX_REPROJ_PX} px, {JOINT_MAX_JUMP_M * 1000:.0f} mm")
 
     print("\nsummary (mm)")
     base = np.array([r["avg"] for r in per_hold], dtype=float)
