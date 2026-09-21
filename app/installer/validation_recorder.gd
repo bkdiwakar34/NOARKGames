@@ -31,6 +31,7 @@ const T3_DIRECTIONS := 8
 # the near and far thirds of the table unmeasured.)
 const MARGIN := Vector2(0.04, 0.05)
 const T2_SECONDS := 30.0       # one T2 condition; the recording stops itself
+const T2_LEAD_S := 3.0         # pacer waits at the start, so you can get on it
 # T2 pacer speeds, on the TABLE (mm/s) — the workspace calibration converts
 # them to screen pixels, so "300 mm/s" really is 300 mm/s of device movement.
 # Reaches peak around 300-1000 mm/s, so these bracket the useful range.
@@ -301,12 +302,13 @@ func _process(delta: float) -> void:
 			# Sent once the tracker is actually recording (REC_START takes a
 			# moment), so the mark lands in the file.
 			_pacer_marked = true
-			UDPReceiver.send_mark("pacer %s %.0f mm_s" % [_condition(), _speed_mm_s()])
+			UDPReceiver.send_mark("pacer %s %.0f mm_s lead %.1f s" % [
+				_condition(), _speed_mm_s(), T2_LEAD_S])
 		_elapsed += delta
 		_advance_targets(delta)
 		_update_trail()
 		# T2 conditions are all the same length, so the screen ends them.
-		if _trial_name() == "T2" and _elapsed >= T2_SECONDS:
+		if _trial_name() == "T2" and _elapsed >= T2_LEAD_S + T2_SECONDS:
 			_on_record_pressed()
 
 	_layout_status_bar()
@@ -487,7 +489,9 @@ func _pacer_pos() -> Vector2:
 	if _path.size() < 2:
 		return get_viewport_rect().size * 0.5
 	var total: float = _path_cum[_path_cum.size() - 1]
-	var travelled: float = _pacer_speed_px() * _elapsed
+	# It waits at the start of the path through the lead-in.
+	var moving: float = max(_elapsed - T2_LEAD_S, 0.0)
+	var travelled: float = _pacer_speed_px() * moving
 	var lap := int(travelled / total)
 	if lap > _laps:
 		_laps = lap
@@ -511,6 +515,13 @@ func _draw_guide_shape(_vp: Vector2) -> void:
 		var p := _pacer_pos()
 		draw_circle(p, 26.0, Color(UITheme.APPLE_RED, 0.22))
 		draw_circle(p, 14.0, UITheme.APPLE_RED)
+		var left: float = T2_LEAD_S - _elapsed
+		if left > 0.0:
+			# Waiting for you: get the cursor onto the dot.
+			draw_arc(p, 40.0, -PI * 0.5, -PI * 0.5 + TAU * (1.0 - left / T2_LEAD_S),
+				48, UITheme.GOLD, 5.0)
+			draw_string(ThemeDB.fallback_font, p + Vector2(52.0, 8.0),
+				"%d" % (int(ceil(left))), HORIZONTAL_ALIGNMENT_LEFT, -1, 34, UITheme.INK)
 
 
 func _draw_trail() -> void:
@@ -522,11 +533,11 @@ func _draw_progress(vp: Vector2) -> void:
 	var left := vp.x * 0.25
 	var width := vp.x * 0.5
 	var y := vp.y - 40.0
-	var frac: float = clampf(_elapsed / T2_SECONDS, 0.0, 1.0)
+	var frac: float = clampf((_elapsed - T2_LEAD_S) / T2_SECONDS, 0.0, 1.0)
 	draw_rect(Rect2(Vector2(left, y), Vector2(width, 10.0)), Color(UITheme.INK, 0.12))
 	draw_rect(Rect2(Vector2(left, y), Vector2(width * frac, 10.0)), UITheme.LEAF)
 	draw_string(ThemeDB.fallback_font, Vector2(left + width + 16.0, y + 11.0),
-		"%.0f s" % max(T2_SECONDS - _elapsed, 0.0),
+		"%.0f s" % max(T2_LEAD_S + T2_SECONDS - _elapsed, 0.0),
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 18, UITheme.INK)
 
 
@@ -576,7 +587,7 @@ func _draw_running_line(vp: Vector2) -> void:
 			bits.append("%d / %d" % [_current, _targets.size()])
 		"T2":
 			bits.append("%.0f mm/s" % _speed_mm_s())
-			bits.append("%.0f s left" % max(T2_SECONDS - _elapsed, 0.0))
+			bits.append("%.0f s left" % max(T2_LEAD_S + T2_SECONDS - _elapsed, 0.0))
 	bits.append("%d /s" % UDPReceiver.packets_per_sec)
 	bits.append("gate " + ("HIGH" if _status.get("gate", false) else "low"))
 	bits.append("esc = stop")
