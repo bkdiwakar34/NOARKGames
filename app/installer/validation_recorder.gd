@@ -25,7 +25,13 @@ const GRID_ROWS := 8           # T1 places near-to-far  (12 x 8 = 96, ~10 min)
 const HOLD_S := 3.0            # length of a T1 hold, once you start it
 const REACH_HOLD_S := 0.4      # T3 only needs the target touched, not held
 const T3_DIRECTIONS := 8
-const MARGIN := Vector2(0.07, 0.22)   # fraction of the viewport kept free (targets never at the edges)
+# The workspace calibration maps the table onto the whole viewport, so the
+# screen IS the table: targets are inset by this little only to keep a dot from
+# sitting half off the edge. (Was 7% / 22% until 2026-09-21, which quietly left
+# the near and far thirds of the table unmeasured.)
+const MARGIN := Vector2(0.04, 0.05)
+const COVER_COLS := 24         # T2 coverage cells across the whole screen
+const COVER_ROWS := 16
 
 var _trial: OptionButton
 var _cond: OptionButton
@@ -300,8 +306,8 @@ func _update_coverage() -> void:
 	if _trial_name() != "T2":
 		return
 	var vp := get_viewport_rect().size
-	var cell := Vector2i(int(_cursor.x / (vp.x / GRID_COLS)),
-						 int(_cursor.y / (vp.y / GRID_ROWS)))
+	var cell := Vector2i(int(_cursor.x / (vp.x / COVER_COLS)),
+						 int(_cursor.y / (vp.y / COVER_ROWS)))
 	_cells[cell] = true
 	_trail.append(_cursor)
 	if _trail.size() > 220:
@@ -358,9 +364,9 @@ func _draw() -> void:
 
 
 func _draw_table_edge(vp: Vector2) -> void:
-	var lo := Vector2(vp.x * MARGIN.x, vp.y * MARGIN.y)
-	var hi := Vector2(vp.x * (1.0 - MARGIN.x), vp.y * (1.0 - MARGIN.y))
-	draw_rect(Rect2(lo, hi - lo), Color(UITheme.INK, 0.10), false, 2.0)
+	# The table's own edge: the whole screen, not the target area.
+	draw_rect(Rect2(Vector2(3.0, 3.0), vp - Vector2(6.0, 6.0)),
+		Color(UITheme.INK, 0.14), false, 2.0)
 
 
 func _draw_targets() -> void:
@@ -380,10 +386,12 @@ func _draw_targets() -> void:
 
 
 func _draw_coverage(vp: Vector2) -> void:
-	var cell := Vector2(vp.x / GRID_COLS, vp.y / GRID_ROWS)
+	var cell := Vector2(vp.x / COVER_COLS, vp.y / COVER_ROWS)
 	for key in _cells:
 		var c: Vector2i = key
-		draw_rect(Rect2(Vector2(c.x, c.y) * cell, cell), Color(UITheme.LEAF, 0.13))
+		# Inset a little so the cells read as a stippled area, not as blocks.
+		draw_rect(Rect2(Vector2(c.x, c.y) * cell + cell * 0.18, cell * 0.64),
+			Color(UITheme.LEAF, 0.22))
 	for i in range(1, _trail.size()):
 		draw_line(_trail[i - 1], _trail[i], Color(UITheme.LASER, 0.55), 2.0)
 
@@ -402,7 +410,7 @@ func _draw_status_strip(vp: Vector2) -> void:
 		draw_string(font, Vector2(260.0, y), "%d / %d" % [_current, _targets.size()],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, UITheme.INK)
 	elif _trial_name() == "T2":
-		var covered := int(round(100.0 * float(_cells.size()) / float(GRID_COLS * GRID_ROWS)))
+		var covered := int(round(100.0 * float(_cells.size()) / float(COVER_COLS * COVER_ROWS)))
 		draw_string(font, Vector2(260.0, y), "covered %d%%" % covered,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, UITheme.INK)
 
