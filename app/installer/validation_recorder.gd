@@ -193,11 +193,15 @@ func _on_trial_changed() -> void:
 	for c in TRIALS[_trial.get_item_text(_trial.selected)]:
 		_cond.add_item(c)
 	_cond.select(0)
+	_rep.select(0)
 	_update_name()
 	_rebuild_targets()
 
 
 func _on_condition_changed() -> void:
+	# A different condition starts its own repeat count: the number advances
+	# only when the same condition is recorded again.
+	_rep.select(0)
 	_update_name()
 	if _trial_name() == "T2":
 		_build_path()      # circle <-> eight

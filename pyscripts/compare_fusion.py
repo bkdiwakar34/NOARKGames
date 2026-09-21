@@ -38,7 +38,41 @@ from scipy.optimize import least_squares
 from analyse_holds import newest_recording, read_marks
 from board import BoardGeometry, estimate_board_pose
 
-METHODS = ["cam0", "cam1", "avg", "joint"]
+METHODS = ["cam0", "cam1", "avg", "joint", "joint_corr"]
+
+
+def corrected_cam1(sample: int, corners: dict, times: dict):
+    """cam1's corners carried forward to cam0's capture time.
+
+    The two cameras are not triggered together: cam1's frame is ~1.6 ms older
+    than cam0's (steady, since they share a clock). Standing still that does
+    not matter; moving, the two images show the device in different places.
+    Each corner is moved along the line to where the same marker is in cam1's
+    NEXT frame:
+
+        uv(t0) = uv(t1) + (uv_next - uv(t1)) * (t0 - t1) / (t1_next - t1)
+
+    Offline only — it needs the next frame, i.e. 10 ms of hindsight.
+    Returns cam1's corners unchanged when the next frame is missing.
+    """
+    seen = corners.get(sample, {}).get(1, [])
+    nxt = corners.get(sample + 1, {}).get(1, [])
+    if not seen or not nxt or sample not in times or (sample + 1) not in times:
+        return seen
+    t0, t1 = times[sample]
+    t1_next = times[sample + 1][1]
+    step = t1_next - t1
+    if step <= 0:
+        return seen
+    alpha = (t0 - t1) / step
+    later = {marker_id: uv for marker_id, uv in nxt}
+    out = []
+    for marker_id, uv in seen:
+        if marker_id in later:
+            out.append((marker_id, uv + (later[marker_id] - uv) * alpha))
+        else:
+            out.append((marker_id, uv))
+    return out
 
 
 def load_calibration(folder: str):
@@ -166,6 +200,122 @@ def solve_joint(obj0, img0, obj1, img1, K0, K1, Rx, tx, guess):
     return res.x[:3], res.x[3:], True
 
 
+def _smoothness(points: list) -> tuple:
+    """How much of this trajectory the hand cannot have produced.
+
+    A hand at 100 Hz puts almost nothing into the third difference, so its RMS
+    is mostly noise; the second difference still carries real acceleration and
+    is shown for scale. Both in mm.
+    """
+    p = np.array(points)
+    if len(p) < 4:
+        return float("nan"), float("nan")
+    second = p[2:] - 2 * p[1:-1] + p[:-2]
+    third = p[3:] - 3 * p[2:-1] + 3 * p[1:-2] - p[:-3]
+    return (float(np.sqrt((second ** 2).sum(axis=1).mean()) * 1000.0),
+            float(np.sqrt((third ** 2).sum(axis=1).mean()) * 1000.0))
+
+
+def analyse_moving(folder: str, stride: int) -> None:
+    """A recording with no holds (T2/T3): how smooth is the trajectory each
+    method produces, and does taking the 1.6 ms camera offset out help?
+
+    No motion capture needed. Consecutive samples must be used (stride 1), or
+    the differences would straddle gaps.
+    """
+    K0, K1, Rx, tx, board = load_calibration(folder)
+    corners = read_corners(folder)
+    times, speeds = {}, {}
+    prev = None
+    with open(os.path.join(folder, "samples.csv")) as f:
+        for row in csv.DictReader(f):
+            i = int(row["sample"])
+            if row["t_cam0_s"] and row["t_cam1_s"]:
+                times[i] = (float(row["t_cam0_s"]), float(row["t_cam1_s"]))
+            if row["tx_m"]:
+                p = np.array([float(row["tx_m"]), float(row["ty_m"]), float(row["tz_m"])])
+                if prev is not None:
+                    speeds[i] = float(np.linalg.norm(p - prev[1])) / max(
+                        times.get(i, (0, 0))[0] - times.get(prev[0], (0, 0))[0], 1e-6)
+                prev = (i, p)
+
+    offs = np.array([(a - b) * 1000.0 for a, b in times.values()])
+    if offs.size:
+        print(f"\ncamera time offset (cam0 - cam1): median {np.median(offs):+.2f} ms   "
+              f"5th {np.percentile(offs, 5):+.2f}   95th {np.percentile(offs, 95):+.2f}")
+
+    tracks = {m: [] for m in METHODS}
+    bands = [(0.0, 0.05), (0.05, 0.15), (0.15, 0.30), (0.30, 5.0)]
+    resid = {b: {"n": 0, "raw": 0.0, "corr": 0.0} for b in bands}
+    rejected = 0
+    for sample in sorted(corners):
+        seen = corners[sample]
+        obj0, img0 = board_points(board, seen[0])
+        obj1, img1 = board_points(board, seen[1])
+        if obj0 is None or obj1 is None:
+            continue
+        p0 = solve_single(board, seen[0], K0)
+        p1 = solve_single(board, seen[1], K1)
+        fused = average_poses(p0, p1, Rx, tx)
+        if p0 is None or p1 is None or fused is None:
+            continue
+        tracks["cam0"].append(p0[1])
+        tracks["cam1"].append(to_cam0(p1[0], p1[1], Rx, tx)[1])
+        tracks["avg"].append(fused[1])
+        guess = (fused[0], fused[1])
+        rj, tj, ok = solve_joint(obj0, img0, obj1, img1, K0, K1, Rx, tx, guess)
+        tracks["joint"].append(tj)
+        rejected += 0 if ok else 1
+        objc, imgc = board_points(board, corrected_cam1(sample, corners, times))
+        rc, tc, _ = solve_joint(obj0, img0, objc, imgc, K0, K1, Rx, tx, guess)
+        tracks["joint_corr"].append(tc)
+
+        speed = speeds.get(sample)
+        if speed is not None:
+            for b in bands:
+                if b[0] <= speed < b[1]:
+                    resid[b]["n"] += 1
+                    resid[b]["raw"] += _joint_residual(obj0, img0, obj1, img1,
+                                                       K0, K1, Rx, tx, (rj, tj))
+                    resid[b]["corr"] += _joint_residual(obj0, img0, objc, imgc,
+                                                        K0, K1, Rx, tx, (rc, tc))
+                    break
+
+    print(f"\ntrajectory noise (mm; lower is smoother), {len(tracks['avg'])} samples\n")
+    print(f"{'method':>12} {'2nd diff':>10} {'3rd diff':>10}")
+    print("-" * 34)
+    for m in METHODS:
+        s2, s3 = _smoothness(tracks[m])
+        print(f"{m:>12} {s2:>10.3f} {s3:>10.3f}")
+    print(f"\njoint fits rejected: {rejected}")
+
+    print("\nhow well one pose explains BOTH images, by speed"
+          "\n(mean reprojection error of the joint fit, px)\n")
+    print(f"{'speed m/s':>12} {'n':>7} {'raw':>8} {'offset fixed':>14}")
+    print("-" * 44)
+    for b in bands:
+        t = resid[b]
+        if t["n"]:
+            print(f"{b[0]:5.2f}-{b[1]:<6.2f} {t['n']:>7} "
+                  f"{t['raw'] / t['n']:>8.3f} {t['corr'] / t['n']:>14.3f}")
+
+
+def _joint_residual(obj0, img0, obj1, img1, K0, K1, Rx, tx, pose) -> float:
+    """Mean pixel error of one pose against both images."""
+    RxT = Rx.T
+    rvec, tvec = np.asarray(pose[0]).reshape(3), np.asarray(pose[1]).reshape(3)
+    out = []
+    if obj0 is not None:
+        proj = cv2.projectPoints(obj0, rvec, tvec, K0, np.zeros(5))[0].reshape(-1, 2)
+        out.append(proj - img0)
+    if obj1 is not None:
+        r1 = cv2.Rodrigues(RxT @ cv2.Rodrigues(rvec)[0])[0].flatten()
+        t1 = RxT @ (tvec - tx)
+        proj = cv2.projectPoints(obj1, r1, t1, K1, np.zeros(5))[0].reshape(-1, 2)
+        out.append(proj - img1)
+    return float(np.linalg.norm(np.concatenate(out), axis=1).mean())
+
+
 def analyse(folder: str, stride: int) -> None:
     K0, K1, Rx, tx, board = load_calibration(folder)
     holds = read_marks(folder)
@@ -208,6 +358,10 @@ def analyse(folder: str, stride: int) -> None:
                 positions["joint"].append(tvec)
                 rejected[0] += 0 if accepted else 1
                 attempted[0] += 1
+                # Same fit, but with cam1's corners carried to cam0's instant.
+                objc, imgc = board_points(board, corrected_cam1(sample, corners, times))
+                positions["joint_corr"].append(solve_joint(
+                    obj0, img0, objc, imgc, K0, K1, Rx, tx, guess)[1])
         row = {"place": index, "n": len(positions["joint"])}
         for m in METHODS:
             p = np.array(positions[m])
@@ -252,7 +406,12 @@ def main() -> None:
     args = ap.parse_args()
     folder = args.folder or newest_recording()
     print(folder)
-    analyse(folder, max(1, args.stride))
+    # T1 has holds to compare on; T2/T3 are judged on how smooth the
+    # trajectory is instead.
+    if read_marks(folder):
+        analyse(folder, max(1, args.stride))
+    else:
+        analyse_moving(folder, 1)
 
 
 if __name__ == "__main__":
