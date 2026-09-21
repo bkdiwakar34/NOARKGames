@@ -284,8 +284,14 @@ class MainClass:
         self._origin_stable_rad         = float(settings.get("origin_stable_rad", 0.0175))
         # Joint two-camera solve (board.estimate_board_pose_dual): one pose
         # fitted to both cameras' corners instead of averaging two poses.
-        # Measured -35% jitter while still on the 2026-09-21 T1 grid.
-        self._joint_solve    = bool(settings.get("joint_solve", True))
+        # Offline it cut the jitter while still by a third on the 2026-09-21 T1
+        # grid, but live it is OFF by default (2026-09-21): the fit cost ~1 ms
+        # the 10 ms budget does not have (100 -> 85 samples/s), and it assumes
+        # both cameras saw the same instant, while cam1's frame is ~1.6 ms
+        # older — harmless standing still, wrong while moving. It belongs in
+        # the offline analysis (compare_fusion.py) until cam1's corners are
+        # carried to cam0's capture time first.
+        self._joint_solve    = bool(settings.get("joint_solve", False))
         self._joint_rejected = 0              # fits thrown out since the last timing line
         self._disagree_count  = 0             # consecutive frames cam0/cam1 poses disagreed too much
         self._disagree_warned = False
