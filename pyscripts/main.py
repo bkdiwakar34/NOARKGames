@@ -740,7 +740,9 @@ class MainClass:
     def _recv_command(self) -> bytes:
         """Return the latest command from Godot, or b'' if none."""
         try:
-            data, self.addr = self.udp_socket.recvfrom(30)
+            # 256, not 30: a REC_START carries a recording name, and a 30-byte
+            # buffer silently truncated it (2026-09-21, "..._r1" arrived as "..._r").
+            data, self.addr = self.udp_socket.recvfrom(256)
             self._last_msg_time = time.time()
             return data
         except socket.error:

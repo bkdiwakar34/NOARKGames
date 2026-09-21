@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from datetime import datetime
 
 import numpy as np
@@ -109,8 +110,15 @@ class SyncWatcher:
 
 
 class Recording:
-    """The files of one recording. Every row is flushed to disk as written, so
-    a crash or a power cut loses at most the row being written."""
+    """The files of one recording.
+
+    Rows are written as they come, but forced to disk only every
+    FLUSH_PERIOD_S: flushing all three files 100 times a second cost about 3
+    dropped camera frames per 40 s (2026-09-21 T0 run). A crash then loses at
+    most that half-second of a validation recording — the patient game's own
+    CSVs still flush per row, where losing rows would matter."""
+
+    FLUSH_PERIOD_S = 0.5
 
     def __init__(self, folder: str, name: str, settings: dict, extra_meta: dict) -> None:
         os.makedirs(folder)                      # refuses an existing name
@@ -123,6 +131,7 @@ class Recording:
         self._last_seq0 = None
         self._t_first = None
         self._t_last = None
+        self._last_flush = time.monotonic()
 
         copied, missing = self._copy_calibration(settings)
         meta = {
@@ -228,11 +237,16 @@ class Recording:
             for c, marker_id in zip(corners, np.asarray(ids).flatten()):
                 uv = np.asarray(c, dtype=np.float64).reshape(8)
                 self._corners.writerow([n, cam, int(marker_id)] + [f"{x:.4f}" for x in uv])
-        self._samples_f.flush()
-        self._corners_f.flush()
+        now = time.monotonic()
+        if now - self._last_flush >= self.FLUSH_PERIOD_S:
+            self._last_flush = now
+            self._samples_f.flush()
+            self._corners_f.flush()
         self.n_samples += 1
 
     def write_edge(self, t: float, rising: bool) -> None:
+        # Flushed at once, unlike the sample rows: there are only two of these
+        # per recording and the whole alignment depends on them.
         (self.rising if rising else self.falling).append(t)
         self._sync.writerow([f"{t:.6f}", "rising" if rising else "falling"])
         self._sync_f.flush()
