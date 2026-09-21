@@ -57,23 +57,29 @@ is the number of movements, not people.
 
 | Trial | What | Design | Count | Answers |
 |---|---|---|---|---|
-| **T1** Static holds | Device still, 5 s per hold | 9 points (3 × 3 grid over the workspace) × 3 headings (≈ −30°, 0°, +30° yaw); whole grid done twice, re-placing the device | 54 holds | 1, 2, 3 |
+| **T1** Static holds | Device still, 3 s per hold | **96 places** (12 across × 8 deep, spread over the whole table) held once each, natural grip; the whole grid done twice | 192 holds | 1, 2, 3 |
 | **T2** Continuous | Circles and figure-eights over the whole workspace, 30 s each | 3 speeds × 2 shapes × 2 repeats | 12 × 30 s | 4, 5 |
 | **T3** Discrete reaches | Still → reach → hold, self-paced (no go cue) | 8 directions × 2 distances × 2 speeds (comfortable, fast) × 3 repeats | 96 reaches | 6, 7 |
 | **T5** Real game | Random Reach, 3 min | 2 runs | 2 × 3 min | all, under real use |
 
-(T4, rotations about each axis, was dropped: the device is planar.)
+(T4, rotations about each axis, was dropped: the device is planar. Deliberately
+turning the device at each place was dropped too, 2026-09-21: held by hand it sits
+in a natural rotation anyway, and the time is better spent on more places. The yaw
+error is still measured, over whatever rotation range the grip produces.)
 
-- Points and headings are **rough**. The mocap is the truth, so each hold is judged
-  at whatever pose it actually has. Guidance is the live x, y, yaw readout in the
-  recorder (§3), with no marks on the table.
+- Places are **rough**: the mocap is the truth, so each hold is judged at whatever
+  pose it actually has. Guidance is on screen — the workspace calibration maps the
+  table onto the viewport, so the dots the recorder draws (§3) are places on the
+  table. 3 s at 100 samples/s = 300 samples per place, enough for its jitter.
+- The second grid (device re-placed) separates "this spot on the table is bad" from
+  noise.
 - The go cue is not needed for measure 6:
   $\text{RT}_\text{dev} - \text{RT}_\text{moc} = \text{onset}_\text{dev} - \text{onset}_\text{moc}$.
 - ~96 reaches gives a 95 % margin on each Bland–Altman limit of about
   $\pm 1.96\sqrt{3/n}\,s = \pm 0.34\,s$ ($s$ = SD of the differences).
 - Holds and reaches within a recording are found automatically from the movement
   (still → moving → still) in both systems.
-- Total ≈ 40 min of recording, one lab session.
+- Total ≈ 50 min of recording (T1 ~20, T2 ~10, T3 ~10, T5 ~8), one lab session.
 
 ### Naming
 
@@ -84,7 +90,7 @@ One recording per block; the **Motive take gets the identical name**.
 
 | Trial | One recording holds | Conditions | Recordings |
 |---|---|---|---|
-| T1 | a whole grid, 27 holds | `grid` | 2 |
+| T1 | a whole grid, 96 holds | `grid` | 2 |
 | T2 | one shape at one speed | `circle` / `eight` × `slow` / `comfortable` / `fast` | 12 |
 | T3 | one speed: 8 directions × 2 distances = 16 reaches | `comfortable` / `fast` | 6 |
 | T5 | one game run | `game` | 2 |
@@ -98,10 +104,22 @@ so a typo cannot break the pairing; it is typed into Motive by hand.
 
 ### Recorder — in the game, not a separate program
 
-**Godot installer (F10) → Validation recorder.** Name dropdowns (trial, condition,
-repeat; the date is added), Record / Stop, and a live status: packets/s, markers per
-camera, which camera(s) the pose came from, gate HIGH/LOW with the edge count, and
-the device's x, z and yaw for placing it.
+**Godot installer (F10) → Validation recorder** (`app/installer/validation_recorder.gd`).
+Name dropdowns (trial, condition, repeat; the date is added), Record / Stop, and a
+screen that guides the movement. **The screen is the table**: the 4-corner workspace
+calibration maps the table onto the viewport, so Record stays disabled until that
+calibration exists.
+
+| Trial | What the screen shows |
+|---|---|
+| T1 | 96 dots (12 × 8) over the whole table, walked in serpentine order. The next one is ringed; holding the device still inside it fills the ring over 3 s, then it turns green. Counter: `17 / 96`. |
+| T2 | No targets: the cursor, its trail, and cells that colour in as they are covered, with "covered 78 %". Near-full coverage is enough. |
+| T3 | Centre-out targets, 8 directions × 2 distances, lit one at a time. |
+| T0 | Cursor only — dry run. |
+
+Bottom strip: Record/Stop, progress, and two indicators — sample rate (green at
+≥ 95/s) and the OptiTrack gate (green while Motive records). Nothing drawn on this
+screen enters the data files; the analysis finds holds and reaches from the movement.
 
 The work is split the way the 100 Hz measurement already runs:
 
@@ -172,6 +190,12 @@ Why the raw corners and both capture times:
 2. **Common time base:** interpolate the mocap pose to each device sample time.
    Worst-case linear-interpolation error $a h^2/8$: 0.125 mm at 100 Hz for
    $a = 10$ m/s².
+2b. **Report errors in the table's frame** (decided 2026-09-21). Both systems see the
+   device moving in one plane, which defines the table; the error at each place is
+   then three numbers that mean something physical: **left-right**, **near-far**, and
+   **height** (out of the plane, physically ~0). The screen mapping is not used for
+   this — it is a 2D fit for drawing targets, while the error analysis needs the
+   physical plane.
 3. **Space:** two fixed unknowns, $\text{Pose}_\text{moc}(t) = X\cdot\text{Pose}_\text{dev}(t)\cdot Y$
    ($X$ = cameras relative to the mocap origin, $Y$ = reflective markers relative to
    the device frame), found by least squares. **Fit on `T1_grid_r1` only, test on
@@ -187,7 +211,7 @@ Why the raw corners and both capture times:
 | Measure | Graph |
 |---|---|
 | 1, 2 | Time series from one T2 recording: device and mocap $x, y$, yaw overlaid, error underneath |
-| 1 | Workspace map: each T1 hold at its position, coloured by its error |
+| 1 | Error map of the table: the 96 T1 places at their positions, coloured by error (left-right, near-far and height as three panels) |
 | 3 | Hold jitter (SD) per hold, device next to mocap |
 | 4 | Error against speed, with RMSE per speed band |
 | 5 | Cross-correlation against time shift $\tau$, peak marked |
