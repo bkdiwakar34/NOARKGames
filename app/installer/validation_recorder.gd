@@ -22,11 +22,10 @@ const REPEATS: Array = ["r1", "r2", "r3", "r4", "r5"]
 
 const GRID_COLS := 12          # T1 places across the table
 const GRID_ROWS := 8           # T1 places near-to-far  (12 x 8 = 96, ~10 min)
-const HOLD_S := 3.0            # still time that completes a T1 place
+const HOLD_S := 3.0            # length of a T1 hold, once you start it
 const REACH_HOLD_S := 0.4      # T3 only needs the target touched, not held
-const STILL_PX := 9.0          # cursor motion that counts as "still"
 const T3_DIRECTIONS := 8
-const MARGIN := Vector2(0.07, 0.16)   # fraction of the viewport kept free (targets never at the edges)
+const MARGIN := Vector2(0.07, 0.22)   # fraction of the viewport kept free (targets never at the edges)
 
 var _trial: OptionButton
 var _cond: OptionButton
@@ -38,8 +37,8 @@ var _hint: Label
 var _targets: Array = []       # [{pos: Vector2, done: bool}]
 var _current: int = 0
 var _hold_t: float = 0.0
+var _holding: bool = false     # T1: a spacebar-started hold is running
 var _cursor: Vector2 = Vector2.ZERO
-var _last_cursor: Vector2 = Vector2.ZERO
 var _trail: Array = []         # T2: recent cursor positions
 var _cells: Dictionary = {}    # T2: visited coverage cells
 var _status: Dictionary = {}
@@ -52,9 +51,44 @@ func _ready() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode == KEY_ESCAPE:
-		_close()
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	match event.keycode:
+		KEY_ESCAPE:
+			_close()
+		KEY_SPACE:
+			_start_hold()
+		KEY_BACKSPACE:
+			_redo_previous()
+
+
+# T1: you place the device, let your hand settle, then press space. The hold
+# then runs its full 3 s — deliberately with no "did it move?" check, since
+# that would judge the tracker by its own output. Redo a fumbled one with
+# backspace; the mocap decides afterwards whether a hold was really still.
+func _start_hold() -> void:
+	if _trial_name() != "T1" or _holding or _current >= _targets.size():
+		return
+	if not _status.get("rec", false):
+		return
+	_holding = true
+	_hold_t = 0.0
+	_mark("hold_start")
+
+
+func _redo_previous() -> void:
+	if _trial_name() != "T1" or _holding or _current == 0:
+		return
+	_current -= 1
+	_targets[_current]["done"] = false
+	_mark("redo")
+
+
+func _mark(what: String) -> void:
+	if _current >= _targets.size():
+		return
+	var pos: Vector2 = _targets[_current]["pos"]
+	UDPReceiver.send_mark("%s %d %.1f %.1f" % [what, _current, pos.x, pos.y])
 
 
 func _close() -> void:
@@ -162,6 +196,7 @@ func _rebuild_targets() -> void:
 	_targets = []
 	_current = 0
 	_hold_t = 0.0
+	_holding = false
 	_cells = {}
 	_trail = []
 
@@ -196,6 +231,12 @@ func _hold_time() -> float:
 	return HOLD_S if _trial_name() == "T1" else REACH_HOLD_S
 
 
+func _fill_fraction() -> float:
+	if _trial_name() == "T1" and not _holding:
+		return 0.0
+	return clampf(_hold_t / _hold_time(), 0.0, 1.0)
+
+
 # ── per-frame ─────────────────────────────────────────────────────────────────
 
 func _process(delta: float) -> void:
@@ -206,7 +247,6 @@ func _process(delta: float) -> void:
 	var rec_error: String = str(_status.get("rec_error", ""))
 	if rec_error != "" and wanted != "" and rec_error.begins_with(wanted):
 		UDPReceiver.request_recording("")
-	_last_cursor = _cursor
 	_cursor = UDPReceiver.screen_pos if UDPReceiver.connected \
 		else get_global_mouse_position()
 
@@ -223,11 +263,23 @@ func _advance_targets(delta: float) -> void:
 	if _current >= _targets.size():
 		return
 	var target: Dictionary = _targets[_current]
-	var near: bool = _cursor.distance_to(target["pos"]) < _target_radius()
-	var still: bool = _cursor.distance_to(_last_cursor) < STILL_PX
-	if near and (still or _trial_name() != "T1"):
+	if _trial_name() == "T1":
+		# Started by the spacebar, runs to the end (see _start_hold).
+		if not _holding:
+			return
 		_hold_t += delta
-		if _hold_t >= _hold_time():
+		if _hold_t >= HOLD_S:
+			_mark("hold_end")
+			target["done"] = true
+			_current += 1
+			_holding = false
+			_hold_t = 0.0
+		return
+	# T3: hands-free — touching the lit target advances it.
+	if _cursor.distance_to(target["pos"]) < _target_radius():
+		_hold_t += delta
+		if _hold_t >= REACH_HOLD_S:
+			_mark("reached")
 			target["done"] = true
 			_current += 1
 			_hold_t = 0.0
@@ -261,15 +313,17 @@ func _refresh_buttons() -> void:
 
 	var rec_error: String = str(_status.get("rec_error", ""))
 	if not WorkspaceConfig.is_calibrated:
-		_hint.text = "Workspace not calibrated — run the 4-corner calibration first (installer)."
+		_hint.text = "workspace not calibrated — run the 4-corner calibration first"
 	elif rec_error != "":
 		_hint.text = "could not start: " + rec_error
 	elif pending:
 		_hint.text = "waiting for the tracker…"
-	elif _status.get("sync_err", "") != "":
-		_hint.text = "sync pin unavailable: " + str(_status["sync_err"])
+	elif str(_status.get("sync_err", "")) != "":
+		_hint.text = "sync pin unavailable"
+	elif recording and _trial_name() == "T1":
+		_hint.text = "space = hold 3 s      backspace = redo the last one"
 	elif recording:
-		_hint.text = str(_status.get("folder", ""))
+		_hint.text = ""
 	else:
 		_hint.text = str(_status.get("last", ""))
 
@@ -309,7 +363,7 @@ func _draw_targets() -> void:
 			draw_circle(pos, r * 0.38, UITheme.LEAF)
 		elif i == _current:
 			draw_arc(pos, r, 0.0, TAU, 48, UITheme.APPLE_RED, 3.0)
-			var frac: float = clampf(_hold_t / _hold_time(), 0.0, 1.0)
+			var frac: float = _fill_fraction()
 			if frac > 0.0:
 				draw_arc(pos, r, -PI * 0.5, -PI * 0.5 + TAU * frac, 48, UITheme.GOLD, 6.0)
 		else:

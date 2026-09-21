@@ -125,6 +125,7 @@ class Recording:
         self.folder = folder
         self.name = name
         self.n_samples = 0
+        self.n_marks = 0
         self.rising = []
         self.falling = []
         self.missed_frames = 0                   # gaps in cam0's sequence numbers
@@ -164,13 +165,16 @@ class Recording:
         self._samples_f = open(os.path.join(folder, "samples.csv"), "w", newline="")
         self._corners_f = open(os.path.join(folder, "corners.csv"), "w", newline="")
         self._sync_f    = open(os.path.join(folder, "sync.csv"), "w", newline="")
+        self._marks_f   = open(os.path.join(folder, "marks.csv"), "w", newline="")
         self._samples = csv.writer(self._samples_f)
         self._corners = csv.writer(self._corners_f)
         self._sync    = csv.writer(self._sync_f)
+        self._marks   = csv.writer(self._marks_f)
         self._samples.writerow(SAMPLE_COLUMNS)
         self._corners.writerow(CORNER_COLUMNS)
         self._sync.writerow(["t_s", "edge"])
-        for f in (self._samples_f, self._corners_f, self._sync_f):
+        self._marks.writerow(["t_s", "sample", "label"])
+        for f in (self._samples_f, self._corners_f, self._sync_f, self._marks_f):
             f.flush()
 
     def _copy_calibration(self, settings: dict):
@@ -251,6 +255,16 @@ class Recording:
         self._sync.writerow([f"{t:.6f}", "rising" if rising else "falling"])
         self._sync_f.flush()
 
+    def write_mark(self, t: float, label: str) -> None:
+        """One labelled moment from Godot's recorder screen — the start and end
+        of each T1 hold, each T3 target reached. `sample` is the row in
+        samples.csv written most recently, so a hold is the rows between its
+        two marks. Flushed at once: there are only a few hundred per recording
+        and the analysis depends on them."""
+        self.n_marks += 1
+        self._marks.writerow([f"{t:.6f}", self.n_samples, label])
+        self._marks_f.flush()
+
     @property
     def duration_s(self) -> float:
         if self._t_first is None:
@@ -263,12 +277,12 @@ class Recording:
         ok = (len(self.rising) == 1 and len(self.falling) == 1
               and self.rising[0] < self.falling[0])
         line = (f"{self.name}: {self.n_samples} samples, {self.duration_s:.1f} s, "
-                f"{self.missed_frames} missed frames, "
+                f"{self.missed_frames} missed frames, {self.n_marks} marks, "
                 f"{len(self.rising)} rising + {len(self.falling)} falling edges")
         if ok:
             return line + f" — OK (Motive take {self.falling[0] - self.rising[0]:.3f} s)"
         return line + " — CHECK SYNC (expected 1 rising then 1 falling)"
 
     def close(self) -> None:
-        for f in (self._samples_f, self._corners_f, self._sync_f):
+        for f in (self._samples_f, self._corners_f, self._sync_f, self._marks_f):
             f.close()

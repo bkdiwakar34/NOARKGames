@@ -77,8 +77,8 @@ error is still measured, over whatever rotation range the grip produces.)
   $\text{RT}_\text{dev} - \text{RT}_\text{moc} = \text{onset}_\text{dev} - \text{onset}_\text{moc}$.
 - ~96 reaches gives a 95 % margin on each Bland–Altman limit of about
   $\pm 1.96\sqrt{3/n}\,s = \pm 0.34\,s$ ($s$ = SD of the differences).
-- Holds and reaches within a recording are found automatically from the movement
-  (still → moving → still) in both systems.
+- Holds and reaches are **labelled in `marks.csv`** (§3), so each place's samples are
+  known exactly rather than inferred from the movement.
 - Total ≈ 50 min of recording (T1 ~20, T2 ~10, T3 ~10, T5 ~8), one lab session.
 
 ### Naming
@@ -112,10 +112,15 @@ calibration exists.
 
 | Trial | What the screen shows |
 |---|---|
-| T1 | 96 dots (12 × 8) over the whole table, walked in serpentine order. The next one is ringed; holding the device still inside it fills the ring over 3 s, then it turns green. Counter: `17 / 96`. |
+| T1 | 96 dots (12 × 8) over the whole table, walked in serpentine order. The next one is ringed. Place the device, let your hand settle, then **press space**: the ring fills over 3 s and the dot turns green. **Backspace** redoes the last place. Counter: `17 / 96`. |
 | T2 | No targets: the cursor, its trail, and cells that colour in as they are covered, with "covered 78 %". Near-full coverage is enough. |
 | T3 | Centre-out targets, 8 directions × 2 distances, lit one at a time. |
 | T0 | Cursor only — dry run. |
+
+A hold runs its full 3 s once started, with **no "did it move?" check** (dropped
+2026-09-21): such a check would read the tracker's own output, so marker noise or a
+bad solve would abort a good hold — judging the tracker by the thing under test. The
+mocap decides afterwards whether a hold was really still.
 
 Bottom strip: Record/Stop, progress, and two indicators — sample rate (green at
 ≥ 95/s) and the OptiTrack gate (green while Motive records). Nothing drawn on this
@@ -165,6 +170,7 @@ Godot asks.
 | `samples.csv` | sample (100/s) | sample number; cam0 and cam1 capture times and frame sequence numbers; camera(s) used (`fusion`); markers seen per camera; reprojection error per camera; cam0-vs-cam1 pose gap (mm, °); combined board pose in cam0's frame (`tx..tz`, quaternion `qx..qw`); grip point in the game frame (`game_x..z`) |
 | `corners.csv` | marker seen by a camera | sample number, camera, marker ID, 4 corners (8 numbers) |
 | `sync.csv` | pin edge | kernel time, rising / falling |
+| `marks.csv` | labelled moment | `t_s`, `sample` (the row in `samples.csv` at that moment), `label`. T1 writes `hold_start i x y` and `hold_end i x y` per place (`i` = place index, `x y` = where it was drawn), plus `redo i x y`; T3 writes `reached i x y`. **This is what maps data to places** — no segmentation by guesswork. |
 | `calib/` | — | copies of `camera_calib.toml`, `camera_calib_1.toml`, `stereo_extrinsics.json`, `board_geometry.json`, `origin_lock.json` |
 | `meta.json` | — | date, settings, git commit |
 

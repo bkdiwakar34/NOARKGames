@@ -153,6 +153,13 @@ func requested_recording() -> String:
 	return _rec_wanted
 
 
+# Label a moment in the running recording (validation recorder: hold start/end,
+# target reached). Sent at once, not with the 100 ms keepalive, so the mark's
+# time is the moment it happened.
+func send_mark(label: String) -> void:
+	_udp.put_packet(("MARK:" + label).to_utf8_buffer())
+
+
 func _apply_packet(f: PackedFloat32Array, t_cap: float) -> void:
 	if f.size() < 4:
 		return

@@ -703,6 +703,7 @@ class MainClass:
                 "missed": rec.missed_frames if rec else 0,
                 "rise":   len(rec.rising) if rec else 0,
                 "fall":   len(rec.falling) if rec else 0,
+                "marks":  rec.n_marks if rec else 0,
                 "folder": rec.folder if rec else self._rec_dir,
                 "last":   self._rec_last,
                 "rec_error": self._rec_error,
@@ -1314,6 +1315,14 @@ class MainClass:
                 self._start_recording(cmd.decode(errors="replace").split(":", 1)[1])
             elif cmd == b"REC_STOP":
                 self._stop_recording()
+            elif cmd.startswith(b"MARK:"):
+                # A labelled moment from the recorder screen (hold start/end,
+                # target reached) — see Recording.write_mark.
+                with self._rec_lock:
+                    if self._recording is not None:
+                        self._recording.write_mark(
+                            time.monotonic(),
+                            cmd.decode(errors="replace").split(":", 1)[1])
             elif cmd:
                 self.received_message = cmd
 
