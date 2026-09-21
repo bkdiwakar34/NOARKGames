@@ -30,8 +30,7 @@ const T3_DIRECTIONS := 8
 # sitting half off the edge. (Was 7% / 22% until 2026-09-21, which quietly left
 # the near and far thirds of the table unmeasured.)
 const MARGIN := Vector2(0.04, 0.05)
-const COVER_COLS := 24         # T2 coverage cells across the whole screen
-const COVER_ROWS := 16
+const T2_SECONDS := 30.0       # one T2 condition; the recording stops itself
 
 var _trial: OptionButton
 var _cond: OptionButton
@@ -47,7 +46,7 @@ var _hold_t: float = 0.0
 var _holding: bool = false     # T1: a spacebar-started hold is running
 var _cursor: Vector2 = Vector2.ZERO
 var _trail: Array = []         # T2: recent cursor positions
-var _cells: Dictionary = {}    # T2: visited coverage cells
+var _elapsed: float = 0.0      # T2: seconds recorded so far
 var _status: Dictionary = {}
 
 
@@ -220,7 +219,7 @@ func _rebuild_targets() -> void:
 	_current = 0
 	_hold_t = 0.0
 	_holding = false
-	_cells = {}
+	_elapsed = 0.0
 	_trail = []
 
 	match _trial_name():
@@ -234,14 +233,17 @@ func _rebuild_targets() -> void:
 					var x: float = lo.x + (hi.x - lo.x) * (float(col) / float(GRID_COLS - 1))
 					_targets.append({"pos": Vector2(x, y), "done": false})
 		"T3":
-			# Centre-out reaches: 8 directions at two distances, near first.
+			# Centre-out reaches: centre, out to a target, back to centre, out
+			# to the next. Each reach then starts from the same place and its
+			# distance is the one it was designed to be.
 			var centre := (lo + hi) * 0.5
 			var far: float = min(hi.x - lo.x, hi.y - lo.y) * 0.5
 			for d in [far * 0.45, far * 0.95]:
 				for k in T3_DIRECTIONS:
 					var a: float = TAU * float(k) / float(T3_DIRECTIONS)
+					_targets.append({"pos": centre, "done": false, "kind": "centre"})
 					_targets.append({"pos": centre + Vector2(cos(a), sin(a)) * d,
-									 "done": false})
+									 "done": false, "kind": "target"})
 	queue_redraw()
 
 
@@ -274,8 +276,12 @@ func _process(delta: float) -> void:
 		else get_global_mouse_position()
 
 	if _status.get("rec", false):
+		_elapsed += delta
 		_advance_targets(delta)
-		_update_coverage()
+		_update_trail()
+		# T2 conditions are all the same length, so the screen ends them.
+		if _trial_name() == "T2" and _elapsed >= T2_SECONDS:
+			_on_record_pressed()
 
 	_layout_status_bar()
 	_refresh_buttons()
@@ -302,7 +308,7 @@ func _advance_targets(delta: float) -> void:
 	if _cursor.distance_to(target["pos"]) < _target_radius():
 		_hold_t += delta
 		if _hold_t >= REACH_HOLD_S:
-			_mark("reached")
+			_mark("at_" + str(target.get("kind", "target")))
 			target["done"] = true
 			_current += 1
 			_hold_t = 0.0
@@ -310,13 +316,9 @@ func _advance_targets(delta: float) -> void:
 		_hold_t = 0.0
 
 
-func _update_coverage() -> void:
+func _update_trail() -> void:
 	if _trial_name() != "T2":
 		return
-	var vp := get_viewport_rect().size
-	var cell := Vector2i(int(_cursor.x / (vp.x / COVER_COLS)),
-						 int(_cursor.y / (vp.y / COVER_ROWS)))
-	_cells[cell] = true
 	_trail.append(_cursor)
 	if _trail.size() > 220:
 		_trail.pop_front()
@@ -369,11 +371,18 @@ func _draw() -> void:
 	var vp := get_viewport_rect().size
 	draw_rect(Rect2(Vector2.ZERO, vp), UITheme.PAPER)
 	_draw_table_edge(vp)
+	# Idle, the controls sit over the table, so the dots stay hidden until
+	# there is something to record.
+	var recording: bool = _status.get("rec", false)
 	match _trial_name():
 		"T1", "T3":
-			_draw_targets()
+			if recording:
+				_draw_targets()
 		"T2":
-			_draw_coverage(vp)
+			_draw_guide_shape(vp)
+			_draw_trail()
+			if recording:
+				_draw_progress(vp)
 	_draw_cursor()
 	_draw_status_strip(vp)
 
@@ -400,15 +409,41 @@ func _draw_targets() -> void:
 			draw_circle(pos, 3.0, Color(UITheme.INK, 0.22))
 
 
-func _draw_coverage(vp: Vector2) -> void:
-	var cell := Vector2(vp.x / COVER_COLS, vp.y / COVER_ROWS)
-	for key in _cells:
-		var c: Vector2i = key
-		# Inset a little so the cells read as a stippled area, not as blocks.
-		draw_rect(Rect2(Vector2(c.x, c.y) * cell + cell * 0.18, cell * 0.64),
-			Color(UITheme.LEAF, 0.22))
+# The path to trace: one big ellipse ("circle"), or the same ellipse crossed
+# in the middle ("eight"). The eight's two reversals are what let the analysis
+# measure the device's lag; a steady circle looks the same at every instant.
+func _draw_guide_shape(vp: Vector2) -> void:
+	var centre := vp * 0.5
+	var rx := vp.x * (0.5 - MARGIN.x - 0.02)
+	var ry := vp.y * (0.5 - MARGIN.y - 0.02)
+	var eight := _cond.get_item_text(_cond.selected).begins_with("eight")
+	var pts := PackedVector2Array()
+	var n := 160
+	for i in n + 1:
+		var t: float = TAU * float(i) / float(n)
+		if eight:
+			# Lemniscate of Gerono: one stroke, crossing itself at the centre.
+			pts.append(centre + Vector2(cos(t) * rx, sin(2.0 * t) * ry * 0.5))
+		else:
+			pts.append(centre + Vector2(cos(t) * rx, sin(t) * ry))
+	draw_polyline(pts, Color(UITheme.INK, 0.22), 3.0)
+
+
+func _draw_trail() -> void:
 	for i in range(1, _trail.size()):
 		draw_line(_trail[i - 1], _trail[i], Color(UITheme.LASER, 0.55), 2.0)
+
+
+func _draw_progress(vp: Vector2) -> void:
+	var left := vp.x * 0.25
+	var width := vp.x * 0.5
+	var y := vp.y - 40.0
+	var frac: float = clampf(_elapsed / T2_SECONDS, 0.0, 1.0)
+	draw_rect(Rect2(Vector2(left, y), Vector2(width, 10.0)), Color(UITheme.INK, 0.12))
+	draw_rect(Rect2(Vector2(left, y), Vector2(width * frac, 10.0)), UITheme.LEAF)
+	draw_string(ThemeDB.fallback_font, Vector2(left + width + 16.0, y + 11.0),
+		"%.0f s" % max(T2_SECONDS - _elapsed, 0.0),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 18, UITheme.INK)
 
 
 func _draw_cursor() -> void:
@@ -429,8 +464,7 @@ func _draw_status_strip(vp: Vector2) -> void:
 		draw_string(font, Vector2(260.0, y), "%d / %d" % [_current, _targets.size()],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, UITheme.INK)
 	elif _trial_name() == "T2":
-		var covered := int(round(100.0 * float(_cells.size()) / float(COVER_COLS * COVER_ROWS)))
-		draw_string(font, Vector2(260.0, y), "covered %d%%" % covered,
+		draw_string(font, Vector2(260.0, y), "%.0f s" % T2_SECONDS,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, UITheme.INK)
 
 	# Two indicators, right-hand side: sample rate and the OptiTrack gate.
@@ -457,8 +491,7 @@ func _draw_running_line(vp: Vector2) -> void:
 		"T3":
 			bits.append("%d / %d" % [_current, _targets.size()])
 		"T2":
-			bits.append("covered %d%%" % int(round(
-				100.0 * float(_cells.size()) / float(COVER_COLS * COVER_ROWS))))
+			bits.append("%.0f s left" % max(T2_SECONDS - _elapsed, 0.0))
 	bits.append("%d /s" % UDPReceiver.packets_per_sec)
 	bits.append("gate " + ("HIGH" if _status.get("gate", false) else "low"))
 	bits.append("esc = stop")
