@@ -144,8 +144,14 @@ Godot asks.
 - **Voltage:** eSync 2 output is 3.3 V; Dragon header pins are 3.3 V (tolerant to
   3.63 V), so the wire goes straight in. A 1 kΩ series resistor is optional
   protection.
-- **Wiring:** signal → **pin 15** (`GPIO_1`, `/dev/gpiochip4` line 1, checked
-  `unused` with `gpioinfo` on 2026-09-19); ground → **pin 16** (GND).
+- **Wiring:** signal → **header pin 35** (`GPIO_100`, `/dev/gpiochip4` line 100);
+  ground → **header pin 34** (GND, next to it).
+  Pin 15 (line 1) was the first choice and was dropped on 2026-09-21: with nothing
+  connected it reads HIGH, because the board pulls it up harder than the chip's
+  internal pull-down. The eSync would have overridden that, but then an unplugged or
+  broken cable looks exactly like "Motive recording". Checked with
+  `gpioget -B pull-down gpiochip4 <line>` over every free header pin; line 100 idles
+  LOW and is header pin 35 in both Radxa's pinout and the board's own naming.
 - **Timing:** the kernel timestamps each edge (µs precision) on `CLOCK_MONOTONIC`,
   the same clock as each camera frame's capture time.
 - **Drift:** both edges are logged, so clock drift between the systems is removed by

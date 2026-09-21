@@ -32,6 +32,6 @@
 	"origin_stable_rad": 0.0175,
 
 	"sync_gpio_chip": "/dev/gpiochip4",
-	"sync_gpio_line": 1,
+	"sync_gpio_line": 100,
 	"validation_data_dir": "~/Documents/NOARK/validation"
 }

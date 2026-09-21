@@ -27,7 +27,7 @@ imports without extra path plumbing.
 
 | File | Purpose |
 |---|---|
-| `recording.py` | Validation recording: the per-recording files and the OptiTrack sync pin (GPIO pin 15). Driven by `main.py` when Godot's installer screen asks. See [../docs/validation_plan.md](../docs/validation_plan.md). |
+| `recording.py` | Validation recording: the per-recording files and the OptiTrack sync pin (header pin 35, ground pin 34). Driven by `main.py` when Godot's installer screen asks. See [../docs/validation_plan.md](../docs/validation_plan.md). |
 | `derive_offsets.py` | Back-solves a wrong/unknown `MARKER_OFFSETS` entry from the calibrated board geometry plus the markers that are trusted. |
 | `pose_averaging.py` | Shared rigid-transform averaging with outlier trimming, used by both `calibrate_board.py` and `calibrate_stereo.py`. |
 | `diagnose_jitter.py` | Multi-pose noise-floor measurement for the tracker itself. (For the old-vs-rigid comparison harness see [../tools/](../tools/).) |

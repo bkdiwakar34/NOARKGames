@@ -28,7 +28,8 @@ itself lives in [validation_plan.md](validation_plan.md) and is the file to read
 The plan doc has the detail. The choices worth remembering here:
 
 - **Motive drives the sync, not us.** The eSync 2 sends a "Recording Gate" — high
-  for the whole take — into the Dragon's GPIO pin 15 (ground on pin 16). The kernel
+  for the whole take — into a Dragon GPIO pin (pin 15 that day; moved to pin 35 on
+  2026-09-21, see that entry). The kernel
   stamps each edge on the same clock the camera frames carry, so the alignment error
   is microseconds instead of the 8.3 ms of waiting for Motive to react to a pulse
   from us. Both edges are logged, so the two clocks' drift (up to 30 ms over 10 min

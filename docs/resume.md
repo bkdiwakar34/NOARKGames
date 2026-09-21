@@ -51,7 +51,7 @@ board). Calibration scripts must be run in a terminal on the board, not over SSH
      `corners.csv`, `sync.csv`, `calib/`, `meta.json`, and run the usual gap check on
      `samples.csv` column `t_cam0_s` (expect all 10 ms).
    - Also confirm the game itself still behaves (Trace test `rx: 100 pkt/s`).
-2. **In the lab:** eSync 2 output → pin 15 (signal) and pin 16 (ground). Record →
+2. **In the lab:** eSync 2 output → pin 35 (signal) and pin 34 (ground). Record →
    start the Motive take → stop it → Stop. Expect 1 rising + 1 falling edge.
 3. **Then the trials** of [validation_plan.md §2](validation_plan.md) (T1, T2, T3).
 
