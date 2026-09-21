@@ -32,19 +32,28 @@ import cv2
 import numpy as np
 
 from analyse_holds import newest_recording, read_marks
-from board import BoardGeometry, estimate_board_pose
+from board import BoardGeometry, estimate_board_pose, marker_object_points
 from compare_fusion import load_calibration, read_corners
 
 
 def grip_from_marker(board: BoardGeometry, marker_id: int, uv, K):
-    """Where this marker alone says the grip point is, in the camera's frame."""
-    obj = board.corners_in_board(marker_id).astype(np.float64)
-    ok, rvec, tvec = cv2.solvePnP(obj, uv.astype(np.float64), K, np.zeros(5),
-                                  flags=cv2.SOLVEPNP_IPPE_SQUARE)
+    """Where this marker alone says the grip point is, in the camera's frame.
+
+    Solved in the MARKER's own frame — IPPE_SQUARE needs a square centred on
+    the origin, which board-frame corners are not — then composed with the
+    marker's stored pose on the device, exactly as board.estimate_board_pose
+    does for a lone marker.
+    """
+    ok, rvec, tvec = cv2.solvePnP(
+        marker_object_points(board.marker_length).astype(np.float64),
+        uv.astype(np.float64), K, np.zeros(5), flags=cv2.SOLVEPNP_IPPE_SQUARE)
     if not ok:
         return None
-    R = cv2.Rodrigues(rvec)[0]
-    return (R @ board.grip_point + tvec.flatten())
+    R_pnp = cv2.Rodrigues(rvec)[0]
+    R_bm, t_bm = board.marker_poses[marker_id]
+    R_cb = R_pnp @ R_bm.T                      # camera <- board
+    t_cb = tvec.flatten() - R_cb @ t_bm
+    return R_cb @ board.grip_point + t_cb
 
 
 def pose_with(board: BoardGeometry, seen, K, allowed):
