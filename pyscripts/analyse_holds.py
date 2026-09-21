@@ -56,10 +56,15 @@ def read_marks(folder: str) -> dict:
     with open(os.path.join(folder, "marks.csv")) as f:
         for row in csv.DictReader(f):
             parts = row["label"].split()
-            if len(parts) < 4:
+            # Only hold marks are read here; T2 writes "pacer ..." and "lap n"
+            # into the same file.
+            if len(parts) < 4 or parts[0] not in ("hold_start", "hold_end"):
                 continue
-            what, index = parts[0], int(parts[1])
-            x, y = float(parts[2]), float(parts[3])
+            try:
+                what, index = parts[0], int(parts[1])
+                x, y = float(parts[2]), float(parts[3])
+            except ValueError:
+                continue
             sample = int(row["sample"])
             if what == "hold_start":
                 open_start[index] = sample
