@@ -489,6 +489,9 @@ class MainClass:
             cam.start()
             self._rcam.append(cam)
 
+        if settings.get("cam_phase_align", True):
+            self._align_camera_phase(settings, controls)
+
         self._frame_slots      = [_FrameQueue(), _FrameQueue()]
         self._cam_errors       = [None, None]
         self._cam_error_logged = [False, False]
@@ -499,6 +502,56 @@ class MainClass:
 
         self._load_second_intrinsics(settings)
         self._load_stereo_extrinsics(settings)
+
+    def _align_camera_phase(self, settings: dict, controls: dict) -> None:
+        """Bring the two cameras' frames into step by restarting cam1.
+
+        Both sensors run at exactly the same rate (they share a clock, so the
+        offset does not drift within a session), but each starts its frame
+        timer when its stream is switched on, one after the other. So
+
+            offset = (gap between the two starts) mod frame period
+
+        — 1.6 ms in one recording, 4.6 ms in the next, never predictable.
+        Restarting cam1 draws a new offset; after a random pause the draws are
+        spread over the whole period, so a handful of tries lands one within
+        the tolerance (1 in 10 per try for 0.5 ms of a 10 ms period).
+
+        Runs before the capture threads, reading frames directly. Offsets use
+        the kernel's own capture times, so any frame from each camera will do.
+        """
+        import random
+
+        period = 1.0 / float(self._framerate)
+        tol = float(settings.get("cam_phase_tolerance_ms", 0.5)) / 1000.0
+        max_attempts = int(settings.get("cam_phase_max_attempts", 20))
+
+        def measure() -> float:
+            offs = []
+            for _ in range(5):
+                t0 = self._rcam[0].capture_with_meta()[2]
+                t1 = self._rcam[1].capture_with_meta()[2]
+                d = (t0 - t1) % period            # 0 .. period
+                offs.append(d - period if d > period / 2 else d)
+            return float(np.median(offs))
+
+        try:
+            phase = measure()
+            first = phase
+            attempts = 0
+            while abs(phase) > tol and attempts < max_attempts:
+                attempts += 1
+                self._rcam[1].stop()
+                time.sleep(random.uniform(0.0, period))
+                self._rcam[1].set_controls(controls)
+                self._rcam[1].start()
+                phase = measure()
+        except Exception as exc:                  # never block tracking on this
+            print(f"[warn] camera phase alignment skipped: {exc}")
+            return
+        self._phase_offset_ms = phase * 1000.0
+        print(f"Camera phase: {first * 1000.0:+.2f} ms -> {phase * 1000.0:+.2f} ms "
+              f"after {attempts} restart(s) of cam1")
 
     def _load_second_intrinsics(self, settings: dict) -> None:
         """Cam1's own fisheye intrinsics — each OV9281 needs its own
