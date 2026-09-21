@@ -38,6 +38,7 @@ var _cond: OptionButton
 var _rep: OptionButton
 var _name_lbl: Label
 var _rec_btn: Button
+var _close_btn: Button
 var _hint: Label
 
 var _targets: Array = []       # [{pos: Vector2, done: bool}]
@@ -61,7 +62,13 @@ func _input(event: InputEvent) -> void:
 		return
 	match event.keycode:
 		KEY_ESCAPE:
-			_close()
+			# While recording the controls are hidden (they would sit on top of
+			# the table), so Escape is how a run is stopped; a second Escape
+			# leaves the screen.
+			if _status.get("rec", false):
+				_on_record_pressed()
+			else:
+				_close()
 		KEY_SPACE:
 			# Swallowed here: space would otherwise press whichever button has
 			# focus — which used to stop the recording.
@@ -150,17 +157,18 @@ func _build_ui() -> void:
 	_rec_btn.pressed.connect(_on_record_pressed)
 	add_child(_rec_btn)
 
-	var back := Button.new()
-	back.text = "Close"
-	back.custom_minimum_size = Vector2(110.0, 52.0)
-	back.add_theme_stylebox_override("normal", UITheme.button_style(UITheme.INK))
-	back.add_theme_stylebox_override("hover", UITheme.button_style(UITheme.INK.lightened(0.18)))
-	back.add_theme_color_override("font_color", Color.WHITE)
-	back.add_theme_color_override("font_hover_color", Color.WHITE)
-	back.pressed.connect(_close)
-	add_child(back)
-	back.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	back.position = Vector2(get_viewport_rect().size.x - 150.0, 28.0)
+	_close_btn = Button.new()
+	_close_btn.text = "Close"
+	_close_btn.custom_minimum_size = Vector2(110.0, 52.0)
+	_close_btn.add_theme_stylebox_override("normal", UITheme.button_style(UITheme.INK))
+	_close_btn.add_theme_stylebox_override("hover", UITheme.button_style(UITheme.INK.lightened(0.18)))
+	_close_btn.add_theme_color_override("font_color", Color.WHITE)
+	_close_btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	_close_btn.pressed.connect(_close)
+	add_child(_close_btn)
+	_close_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_close_btn.position = Vector2(get_viewport_rect().size.x - 150.0, 28.0)
+	var back := _close_btn
 
 	# Nothing here takes keyboard focus: the trials are driven by the spacebar,
 	# and a focused control would eat it (and press itself).
@@ -317,6 +325,13 @@ func _update_coverage() -> void:
 func _refresh_buttons() -> void:
 	var recording: bool = _status.get("rec", false)
 	var pending: bool = (UDPReceiver.requested_recording() != "") != recording
+
+	# The table fills the screen, so nothing may sit on top of it during a run:
+	# every control hides, and the one status line is drawn in the corner.
+	for node in [_trial, _cond, _rep, _name_lbl, _hint, _rec_btn, _close_btn]:
+		node.visible = not recording
+	if recording:
+		return
 	var colour: Color = UITheme.INK if recording else UITheme.APPLE_RED
 	_rec_btn.text = "■  Stop" if recording else "●  Record"
 	_rec_btn.disabled = pending or not WorkspaceConfig.is_calibrated
@@ -406,6 +421,10 @@ func _draw_status_strip(vp: Vector2) -> void:
 	var y := vp.y - 56.0
 	var recording: bool = _status.get("rec", false)
 
+	if recording:
+		_draw_running_line(vp)
+		return
+
 	if _trial_name() in ["T1", "T3"]:
 		draw_string(font, Vector2(260.0, y), "%d / %d" % [_current, _targets.size()],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, UITheme.INK)
@@ -424,6 +443,30 @@ func _draw_status_strip(vp: Vector2) -> void:
 	if recording:
 		var n: int = int(_status.get("n", 0))
 		_draw_pill(vp.x - 150.0, y, "%d" % n, UITheme.APPLE_RED)
+
+
+# While recording: one small line in the top-left corner, on a chip so it stays
+# readable over a dot. Everything else on screen belongs to the table.
+func _draw_running_line(vp: Vector2) -> void:
+	var font := ThemeDB.fallback_font
+	var bits := ["● " + str(_status.get("name", ""))]
+	match _trial_name():
+		"T1":
+			bits.append("%d / %d" % [_current, _targets.size()])
+			bits.append("space = hold")
+		"T3":
+			bits.append("%d / %d" % [_current, _targets.size()])
+		"T2":
+			bits.append("covered %d%%" % int(round(
+				100.0 * float(_cells.size()) / float(COVER_COLS * COVER_ROWS))))
+	bits.append("%d /s" % UDPReceiver.packets_per_sec)
+	bits.append("gate " + ("HIGH" if _status.get("gate", false) else "low"))
+	bits.append("esc = stop")
+	var text := "      ".join(bits)
+	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x + 32.0
+	draw_rect(Rect2(Vector2(16.0, 14.0), Vector2(w, 34.0)), Color(UITheme.PAPER, 0.88))
+	var colour: Color = UITheme.INK if UDPReceiver.packets_per_sec >= 95 else UITheme.APPLE_RED
+	draw_string(font, Vector2(32.0, 37.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, colour)
 
 
 func _draw_pill(x: float, y: float, text: String, col: Color) -> void:
