@@ -156,7 +156,9 @@ class Recording:
                 "reproj_*_px": "board-solve reprojection error, kept even when "
                                "the solve was rejected (> stereo_max_reproj_px)",
                 "stereo_gap_*": "cam0 pose vs cam1 pose moved into cam0's frame",
-                "corners.csv u, v": "px in the undistorted image (pinhole, "
+                "corners.csv u, v": "pipeline 'raw_joint': px in the RAW fisheye "
+                                    "image (lens.* below). Otherwise: "
+                                    "px in the undistorted image (pinhole, "
                                     "intrinsics = undistorted.camera_matrix_cam0/1 "
                                     "below — the calibrated matrix with its centre "
                                     "moved by the border — zero distortion); ArUco "

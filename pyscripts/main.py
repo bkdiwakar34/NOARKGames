@@ -16,7 +16,8 @@ from cv2 import aruco
 from scipy.spatial.transform import Rotation as ScipyRotation
 
 import board as board_model
-from board import BoardGeometry, estimate_board_pose, estimate_board_pose_dual
+from board import (BoardGeometry, estimate_board_pose, estimate_board_pose_dual,
+                   estimate_board_pose_raw)
 from pose_averaging import rotation_angle
 from recording import Recording, SyncWatcher, sanitize_name
 
@@ -185,6 +186,11 @@ class MainClass:
         # pinhole-equivalent with intrinsics = camera_matrix (the lens matrix
         # with its centre moved by the border), so it is called with np.zeros(5).
         self.camera_matrix = self._undistorted_matrix(lens_matrix)
+        # The fisheye lens itself, for the "raw_joint" pipeline, which finds the
+        # markers on the raw image and never straightens it.
+        self._lens0 = (np.asarray(lens_matrix, np.float64),
+                       np.asarray(self.dist_coeffs, np.float64).reshape(4, 1))
+        self._lens1 = None
         self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
             lens_matrix, self.dist_coeffs, np.eye(3),
             self.camera_matrix, self.ud_size, cv2.CV_16SC2,
@@ -311,6 +317,16 @@ class MainClass:
         # carried to cam0's capture time first.
         self._joint_solve    = bool(settings.get("joint_solve", False))
         self._joint_rejected = 0              # fits thrown out since the last timing line
+        # Pipeline (2026-09-22). "current": each camera's frame is straightened,
+        # markers found, each camera solved alone, the two poses averaged.
+        # "raw_joint": markers found on the RAW image (no straightening), then
+        # ONE solve over all corners from both cameras, each predicted through
+        # its own fisheye model (board.estimate_board_pose_raw), started from
+        # the previous frame's pose. Dual camera + board geometry only.
+        self._pipeline = str(settings.get("pipeline", "current")).lower()
+        self._raw = self._pipeline == "raw_joint"
+        self._raw_guess = None                # last accepted raw_joint pose (cam0 frame)
+        print(f"Pipeline: {self._pipeline}")
         self._disagree_count  = 0             # consecutive frames cam0/cam1 poses disagreed too much
         self._disagree_warned = False
         self._prev_fused_pose = None          # pose-space stability gate for dual-camera origin lock
@@ -603,6 +619,8 @@ class MainClass:
         lens_matrix_1 = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
         dist_coeffs_1 = np.array(calib_data["calibration"]["dist_coeffs"])
         self.camera_matrix_1 = self._undistorted_matrix(lens_matrix_1)
+        self._lens1 = (np.asarray(lens_matrix_1, np.float64),
+                       np.asarray(dist_coeffs_1, np.float64).reshape(4, 1))
         self.map1_1, self.map2_1 = cv2.fisheye.initUndistortRectifyMap(
             lens_matrix_1, dist_coeffs_1, np.eye(3),
             self.camera_matrix_1, self.ud_size, cv2.CV_16SC2,
@@ -768,6 +786,15 @@ class MainClass:
             extra = {"sync_pin": self._sync_desc,
                      "sync_error": self._sync_error,
                      "mono_to_unix_s": self._mono_to_unix,
+                     "pipeline": self._pipeline,
+                     # raw_joint: corners.csv holds RAW fisheye pixels; these
+                     # are the lens models they were found with.
+                     "lens": {"camera_matrix_cam0": self._lens0[0].tolist(),
+                              "dist_coeffs_cam0": self._lens0[1].flatten().tolist(),
+                              "camera_matrix_cam1": (None if self._lens1 is None
+                                                     else self._lens1[0].tolist()),
+                              "dist_coeffs_cam1": (None if self._lens1 is None
+                                                   else self._lens1[1].flatten().tolist())},
                      "undistorted": {
                          "size": list(self.ud_size),
                          "border_px": list(self._ud_pad),
@@ -1232,7 +1259,7 @@ class MainClass:
 
         R = cv2.Rodrigues(rvec)[0]
         grip = R @ self.board.grip_point + tvec
-        if self._debug_preview:            # overlay exists only to be shown
+        if self._debug_preview and not self._raw:   # overlay is for the straightened image
             self._draw_board_overlay(rvec, tvec, grip)
         return self._origin_R.T @ (self._origin_grip - grip)
 
@@ -1315,6 +1342,88 @@ class MainClass:
         self._update_roi(cam, corners, 0 if ids is None else len(ids))
         return frame, corners, ids
 
+    def _raw_detect(self, cam, frame, detector):
+        """raw_joint pipeline, one camera: find the markers on the RAW frame —
+        inside the search box when there is one, else full-frame. Same box
+        logic as _remap_detect, minus the straightening. Corners come out in
+        raw (distorted) pixels."""
+        self._roi_age[cam] += 1
+        roi = self._roi[cam]
+        if (self._roi_enabled and roi is not None
+                and self._roi_age[cam] < self._roi_full_every):
+            x0, y0, x1, y1 = roi
+            crop = frame[y0:y1, x0:x1]
+            corners, ids, _ = detector.detectMarkers(crop)
+            corners, ids = self._filter_markers(corners, ids)
+            n = 0 if ids is None else len(ids)
+            if n > 0:
+                offset = np.array([x0, y0], dtype=np.float32)
+                corners = tuple(c + offset for c in corners)
+                self._update_roi(cam, corners, n)
+                return frame, corners, ids
+            # Box found nothing: fall through to a full-frame search, same pass.
+
+        self._roi_age[cam] = 0
+        self._full_count[cam] += 1
+        corners, ids, _ = detector.detectMarkers(frame)
+        corners, ids = self._filter_markers(corners, ids)
+        self._update_roi(cam, corners, 0 if ids is None else len(ids))
+        return frame, corners, ids
+
+    def _roi_from_pose_raw(self, cam, rvec, tvec) -> None:
+        """raw_joint pipeline: like _roi_from_pose, with the device projected
+        through this camera's fisheye lens onto the raw image."""
+        if self._device_pts is None:
+            return
+        K, D = self._lens0 if cam == 0 else self._lens1
+        pix, _ = cv2.fisheye.projectPoints(
+            self._device_pts.reshape(-1, 1, 3),
+            np.asarray(rvec, np.float64).reshape(3, 1),
+            np.asarray(tvec, np.float64).reshape(3, 1), K, D)
+        quads = pix.reshape(-1, 4, 2)
+        side = float(np.linalg.norm(quads - np.roll(quads, -1, axis=1), axis=2).max())
+        margin = min(self._roi_margin * side, self._roi_margin_max_px)
+        self._set_roi(cam, quads.reshape(-1, 2), margin)
+
+    def _solve_raw_joint(self, corners0, ids0, corners1, ids1):
+        """raw_joint pipeline: one pose (cam0 frame) from both cameras' raw
+        corners. Starts from the previous frame's pose; a poor fit
+        (> stereo_max_reproj_px) is retried from a fresh start, and rejected if
+        still poor. Sets _last_reproj per camera and _last_fusion to which
+        cameras contributed. Returns (rvec, tvec, reproj) or None."""
+        if ids0 is None and ids1 is None:
+            self._raw_guess = None
+            return None
+        args = (self.board, corners0, ids0, corners1, ids1, self._lens0, self._lens1,
+                self._stereo_Rx, self._stereo_tx)
+        result = estimate_board_pose_raw(*args, guess=self._raw_guess)
+
+        def worst(r):
+            return np.nanmax([r[2], r[3]]) if r is not None else np.inf
+
+        if self._raw_guess is not None and worst(result) > self._stereo_max_reproj_px:
+            fresh = estimate_board_pose_raw(*args, guess=None)
+            if worst(fresh) < worst(result):
+                result = fresh
+        if result is None or worst(result) > self._stereo_max_reproj_px:
+            if result is not None:
+                self._last_reproj = [None if np.isnan(e) else float(e) for e in result[2:]]
+            self._raw_guess = None
+            self._joint_rejected += 1
+            return None
+        rvec, tvec, e0, e1 = result
+        self._last_reproj = [None if np.isnan(e0) else float(e0),
+                             None if np.isnan(e1) else float(e1)]
+        self._last_fusion = ("both" if ids0 is not None and ids1 is not None
+                             else "cam0" if ids0 is not None else "cam1")
+        self._raw_guess = (rvec, tvec)
+        if self._roi_enabled:
+            self._roi_from_pose_raw(0, rvec, tvec)
+            R1 = self._stereo_Rx.T @ cv2.Rodrigues(np.asarray(rvec).reshape(3, 1))[0]
+            t1 = self._stereo_Rx.T @ (np.asarray(tvec).flatten() - self._stereo_tx)
+            self._roi_from_pose_raw(1, cv2.Rodrigues(R1)[0], t1)
+        return rvec, tvec, float(np.nanmean([e0, e1]))
+
     def _roi_from_pose(self, cam, pose, camera_matrix) -> None:
         """Replace this camera's next search box with one around the whole
         device: all marker corners projected with this frame's pose, widened
@@ -1331,7 +1440,15 @@ class MainClass:
         side = float(np.linalg.norm(quads - np.roll(quads, -1, axis=1), axis=2).max())
         margin = min(self._roi_margin * side, self._roi_margin_max_px)
         pts = quads.reshape(-1, 2)
-        w, h = self.ud_size
+        self._set_roi(cam, pts, margin)
+
+    def _search_size(self) -> tuple:
+        """Size of the image the markers are searched in: the raw frame in the
+        raw_joint pipeline, the straightened image otherwise."""
+        return self.frame_size if self._raw else self.ud_size
+
+    def _set_roi(self, cam, pts, margin) -> None:
+        w, h = self._search_size()
         x0 = int(max(0, np.floor(pts[:, 0].min() - margin)))
         y0 = int(max(0, np.floor(pts[:, 1].min() - margin)))
         x1 = int(min(w, np.ceil(pts[:, 0].max() + margin)))
@@ -1353,7 +1470,7 @@ class MainClass:
         side = max(float(np.linalg.norm(q - np.roll(q, -1, axis=0), axis=1).max())
                    for q in quads)
         margin = min(self._roi_margin * side, self._roi_margin_max_px)
-        w, h = self.ud_size
+        w, h = self._search_size()
         self._roi[cam] = (
             int(max(0, np.floor(pts[:, 0].min() - margin))),
             int(max(0, np.floor(pts[:, 1].min() - margin))),
@@ -1395,12 +1512,19 @@ class MainClass:
         if self._dual_camera:
             # Both cameras' remap + detect at once (see _cam_pool in __init__).
             fut0 = fut1 = None
-            if frame0 is not None:
-                fut0 = self._cam_pool.submit(self._remap_detect, 0, frame0,
-                                             self.map1, self.map2, self.detector)
-            if frame1 is not None:
-                fut1 = self._cam_pool.submit(self._remap_detect, 1, frame1,
-                                             self.map1_1, self.map2_1, self.detector_1)
+            if self._raw:
+                # raw_joint: search the raw frames, no straightening.
+                if frame0 is not None:
+                    fut0 = self._cam_pool.submit(self._raw_detect, 0, frame0, self.detector)
+                if frame1 is not None:
+                    fut1 = self._cam_pool.submit(self._raw_detect, 1, frame1, self.detector_1)
+            else:
+                if frame0 is not None:
+                    fut0 = self._cam_pool.submit(self._remap_detect, 0, frame0,
+                                                 self.map1, self.map2, self.detector)
+                if frame1 is not None:
+                    fut1 = self._cam_pool.submit(self._remap_detect, 1, frame1,
+                                                 self.map1_1, self.map2_1, self.detector_1)
             if fut0 is not None:
                 frame0, corners0, ids0 = fut0.result()
                 self.video_frame = frame0
@@ -1443,7 +1567,18 @@ class MainClass:
 
         local_coords = None
         fused = None
-        if self._dual_camera and self.board is not None and self._use_rigid:
+        if self._raw and self._dual_camera and self.board is not None:
+            # raw_joint: one solve over both cameras' raw corners (see
+            # _solve_raw_joint); it also places the next search boxes.
+            if ids0 is not None and self._debug_preview:
+                self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners0, ids0)
+            ta = time.perf_counter() if self.debug else 0.0
+            fused = self._solve_raw_joint(corners0, ids0, corners1, ids1)
+            if self.debug:
+                self._sub_times.append(((time.perf_counter() - ta) * 1000.0, 0.0))
+            if fused is not None:
+                local_coords = self._process_board(fused[0], fused[1])
+        elif self._dual_camera and self.board is not None and self._use_rigid:
             # Joint fusion path: each camera solves independently, cam1's pose
             # gets transformed into cam0's frame, then combined — see
             # _fuse_board_poses for the disagreement/fallback handling that
@@ -1519,7 +1654,7 @@ class MainClass:
                     if self._dual_camera:
                         stages = (f"remap+detect (both cams, parallel): {means[1]:5.2f} ms  |  "
                                   f"full-frame searches: {self._full_count[0]}+{self._full_count[1]}  |  ")
-                        if self._joint_solve:
+                        if self._joint_solve or self._raw:
                             stages += f"joint rejects: {self._joint_rejected}  |  "
                             self._joint_rejected = 0
                         self._full_count = [0, 0]

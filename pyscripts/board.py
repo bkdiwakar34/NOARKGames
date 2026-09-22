@@ -183,6 +183,99 @@ def estimate_board_pose_dual(board: BoardGeometry, corners0, ids0, corners1, ids
     return x[:3], x[3:], err, True
 
 
+def _project_fisheye(obj: np.ndarray, rvec, tvec, K, D) -> np.ndarray:
+    """Board points -> raw fisheye pixels (N, 2)."""
+    pix, _ = cv2.fisheye.projectPoints(obj.reshape(-1, 1, 3), np.asarray(rvec, np.float64).reshape(3, 1),
+                                       np.asarray(tvec, np.float64).reshape(3, 1), K, D)
+    return pix.reshape(-1, 2)
+
+
+def _initial_pose_raw(board: BoardGeometry, corners, ids, K, D):
+    """A starting pose from one camera's RAW corners: straighten just those
+    corners to normalised coordinates (identity intrinsics), then the ordinary
+    board solve. Returns (rvec, tvec) in that camera's frame, or None."""
+    obj, img = _board_points(board, corners, ids)
+    if obj is None:
+        return None
+    norm = cv2.fisheye.undistortPoints(img.reshape(-1, 1, 2), K, D).reshape(-1, 4, 2)
+    result = estimate_board_pose(board, [q.reshape(1, 4, 2) for q in norm],
+                                 [i for i in np.asarray(ids).flatten()
+                                  if int(i) in board.marker_poses],
+                                 np.eye(3), None)
+    if result is None:
+        return None
+    return result[0], result[1]
+
+
+def estimate_board_pose_raw(board: BoardGeometry, corners0, ids0, corners1, ids1,
+                            lens0, lens1, Rx, tx, guess=None):
+    """One board pose in cam0's frame from BOTH cameras' corners, found on the
+    RAW (distorted) images — no image straightening anywhere.
+
+    Each corner is predicted through its own camera's fisheye model and
+    compared in raw pixels, where the sensor's noise is the same everywhere; in
+    a straightened image the sides are stretched (1/cos^2 of the angle), so the
+    same noise would count up to several times more there.
+
+    A board point b sits at p0 = R b + t in cam0 and p1 = Rx^T (p0 - tx) in cam1
+    (Rx, tx: cam1 -> cam0, as everywhere in the tracker). Either camera may
+    have no markers; the solve then uses the other alone.
+
+    lens0/lens1: (K, D) fisheye intrinsics. guess: (rvec, tvec) to start from —
+    the previous frame's pose; without one, a pose from the camera seeing more
+    markers.
+
+    Returns (rvec (3,), tvec (3,), mean reprojection px cam0, cam1) with nan
+    for a camera that saw nothing, or None when neither camera has a marker or
+    no start could be found.
+    """
+    obj0, img0 = _board_points(board, corners0, ids0)
+    obj1, img1 = _board_points(board, corners1, ids1)
+    if obj0 is None and obj1 is None:
+        return None
+    RxT = np.asarray(Rx, dtype=np.float64).T
+    tx = np.asarray(tx, dtype=np.float64).flatten()
+
+    if guess is None:
+        n0 = 0 if obj0 is None else len(obj0)
+        n1 = 0 if obj1 is None else len(obj1)
+        if n0 >= n1:
+            guess = _initial_pose_raw(board, corners0, ids0, *lens0)
+        else:
+            start = _initial_pose_raw(board, corners1, ids1, *lens1)
+            if start is not None:                       # cam1 frame -> cam0 frame
+                R1 = cv2.Rodrigues(np.asarray(start[0], np.float64).reshape(3, 1))[0]
+                guess = (cv2.Rodrigues(Rx @ R1)[0].flatten(),
+                         Rx @ np.asarray(start[1]).flatten() + tx)
+        if guess is None:
+            return None
+
+    def residuals(x):
+        rvec, tvec = x[:3], x[3:]
+        out = []
+        if obj0 is not None:
+            out.append(_project_fisheye(obj0, rvec, tvec, *lens0) - img0)
+        if obj1 is not None:
+            r1 = cv2.Rodrigues(RxT @ cv2.Rodrigues(rvec)[0])[0].flatten()
+            t1 = RxT @ (tvec - tx)
+            out.append(_project_fisheye(obj1, r1, t1, *lens1) - img1)
+        return np.concatenate(out)
+
+    x0 = np.concatenate([np.asarray(guess[0], dtype=np.float64).reshape(3),
+                         np.asarray(guess[1], dtype=np.float64).reshape(3)])
+    try:
+        x = least_squares(lambda v: residuals(v).ravel(), x0, method="lm", xtol=1e-9).x
+    except Exception:
+        return None
+    if not np.all(np.isfinite(x)):
+        return None
+    err = np.linalg.norm(residuals(x), axis=1)
+    n0 = 0 if obj0 is None else len(obj0)
+    e0 = float(err[:n0].mean()) if n0 else float("nan")
+    e1 = float(err[n0:].mean()) if obj1 is not None else float("nan")
+    return x[:3], x[3:], e0, e1
+
+
 def estimate_board_pose(board: BoardGeometry, corners, ids, camera_matrix,
                         guess=None):
     """Single rigid-body pose from all visible known markers.

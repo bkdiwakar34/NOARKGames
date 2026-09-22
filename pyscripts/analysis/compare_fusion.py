@@ -81,6 +81,10 @@ def corrected_cam1(sample: int, corners: dict, times: dict):
 def load_calibration(folder: str):
     """Intrinsics, stereo extrinsic and board geometry — from the copies stored
     with this recording, not from whatever pyscripts/ holds today."""
+    with open(os.path.join(folder, "meta.json")) as f:
+        if json.load(f).get("pipeline") == "raw_joint":
+            sys.exit("This recording's corners are raw fisheye pixels (pipeline "
+                     "raw_joint); this script expects straightened ones.")
     calib = os.path.join(folder, "calib")
 
     def intrinsics(name: str):
