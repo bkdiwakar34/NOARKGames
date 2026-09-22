@@ -9,7 +9,7 @@ every session, while you still remember. The full story lives in
 
 ---
 
-**Last updated:** 2026-09-22, 17:10
+**Last updated:** 2026-09-22, 20:10
 
 **This repo is the Dragon Q6A one.** The Raspberry Pi version is `bkdiwakar34/NOARKGames-pi`.
 
@@ -32,6 +32,17 @@ every session, while you still remember. The full story lives in
 
 **Result:** big jumps gone, cursor steadier; a **very slight shimmer** remains.
 
+**Evening 2026-09-22 — start-up made reliable** (tested, starts first time):
+- camera driver loads at boot (`/etc/modules-load.d/ov9282.conf`);
+- tracker watchdog + capture times on the monotonic clock — the board has no
+  battery clock and jumps (+2 h 19 min) when it syncs online, which killed the
+  tracker ("no UDP packets from Godot for 3 s");
+- Godot's start command uses `exec`, so quitting the game stops the tracker;
+- the overlap's first pass reads Godot too (start-up longer than 3 s no longer exits).
+
+**Recorder checked:** T1 dots cover the table, T2 pacer right (fast = lap 6),
+T3 runs (16 reaches, 32 labels). T0 gate check left for the lab (real eSync).
+
 **Starting the system** (on the board):
 
 ```bash
@@ -41,16 +52,27 @@ taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOAR
 
 Frame-rate check: `tail -n 3 /tmp/tracker_timing.log` (look at `missed`).
 
-## Next action (user's plan)
+## Next action: 2026-09-23, the lab session (tracker frozen as is)
 
-1. **Validation screen (F10 → Validation recorder):** make sure it is right for tomorrow.
-2. **Jitter, a little more** — candidates, cheapest first:
-   - room-light flicker (44 % brightness pulsing measured at 5 ms): lights-off test,
-     then a non-dimmable 5 V USB COB LED strip above the cameras (not 850 nm IR);
-   - black/white window 15 → 23 px (`adaptive_thresh_win_size`) for big near tags.
-   Measure with a T1 rows 0–1 recording + `analysis/analyse_holds.py` / `find_jumps.py`.
-3. **2026-09-23: the lab session** — wire pin 35/34, T0 gate check, T1 ×2, T2 ×12, T3,
-   Motive recording at the same name. T3 still untried.
+Decided: no tracker changes before the validation — it measures today's setup.
+
+Before leaving: back up the calibration files (below). Carry the camera mount as
+one piece — if the two cameras shift relative to each other, run
+`calibration/calibrate_rig.py` (5 min) before recording.
+
+In the lab:
+1. Let the board get online (its clock syncs; wait until `date` is right).
+2. Set up, start Godot, **re-lock the origin, redo the 4-corner table calibration**.
+3. Wire eSync → pin 35, GND → pin 34; **T0**: gate low, Motive record → high → low.
+   Our cameras have no IR filter: watch whether the OptiTrack's 850 nm strobes make
+   the image pulse (tracking steady? `tail -n 3 /tmp/tracker_timing.log`).
+4. T1 ×2, T2 ×12, T3 (comfortable ×3, fast ×3), Motive take named like each recording.
+
+After the lab — jitter, one change at a time, each measured:
+light (LED strip) → corner method (contour / subpix / apriltag, on still AND moving
+raw frames) → One Euro filter for the game display only (data stays raw). Offline,
+every recording can be re-solved as cam0 / cam1 / average / joint
+(`analysis/compare_fusion.py`) and compared with the mocap.
 
 ## Small open items
 
@@ -62,9 +84,7 @@ Frame-rate check: `tail -n 3 /tmp/tracker_timing.log` (look at `missed`).
 - Dead code inside `main.py` (per-marker solver, `SETUP:` switch, single-camera mode,
   `raw_joint` pipeline if it stays unused).
 - `uv lock` on the board, then commit (`gpiod` not pinned).
-- Closing Godot leaves the tracker running a few seconds (Godot kills the bash
-  wrapper, not python) → a quick restart finds the cameras busy. Fix: `exec` in
-  `udp_receiver.gd`'s start command. Meanwhile: `pkill -f pyscripts/main.py`.
+- `compare_fusion.py`'s joint method still uses the slow fit (same answers, slower).
 - Decide on the in-game **■ Stop** button.
 
 ## Still to decide in the validation plan
