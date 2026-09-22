@@ -8,6 +8,7 @@ as the same timing.
 
     python pyscripts/diagnostics/phase_test.py            # 20 s
     python pyscripts/diagnostics/phase_test.py --seconds 60
+    python pyscripts/diagnostics/phase_test.py --debug   # + the tracker's timing line
 
 The game must be closed: both want the cameras.
 """
@@ -29,10 +30,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seconds", type=float, default=20.0)
+    ap.add_argument("--debug", action="store_true",
+                    help="keep the tracker's once-a-second timing line (ms per "
+                         "stage, frames missed); no preview window")
     args = ap.parse_args()
 
     settings = _load_settings()
-    settings["debug"] = False                       # keep the output readable
+    settings["debug"] = args.debug                  # off: keep the output readable
+    settings["debug_preview"] = False
     tracker = MainClass(cam_calib_path=calib_path(settings), settings=settings, udp=False)
     period = 1.0 / float(settings.get("framerate", 100))
     try:
