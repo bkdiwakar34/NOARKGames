@@ -17,7 +17,7 @@ from scipy.spatial.transform import Rotation as ScipyRotation
 
 import board as board_model
 from board import (BoardGeometry, estimate_board_pose, estimate_board_pose_dual,
-                   estimate_board_pose_raw)
+                   estimate_board_pose_dual_gn, estimate_board_pose_raw)
 from pose_averaging import rotation_angle
 from recording import Recording, SyncWatcher, sanitize_name
 
@@ -1055,7 +1055,10 @@ class MainClass:
                 starts.append((cv2.Rodrigues(R1p)[0].flatten(), t1p))
             break
         for guess in starts:
-            joint = estimate_board_pose_dual(
+            # The standard multi-camera fit, derivatives written out: same
+            # answers as estimate_board_pose_dual (bench_joint.py, 2026-09-22:
+            # 0.000 mm apart on 69 583 fits), worst case 8.5 ms instead of 44.
+            joint = estimate_board_pose_dual_gn(
                 self.board, corners0, ids0, corners1, ids1,
                 self.camera_matrix, self.camera_matrix_1,
                 self._stereo_Rx, self._stereo_tx, guess)
