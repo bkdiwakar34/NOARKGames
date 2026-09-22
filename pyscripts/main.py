@@ -358,7 +358,13 @@ class MainClass:
         # the same pass, and every roi_full_every-th frame is full-frame
         # regardless. Off while the debug preview is on, since the preview needs
         # the whole picture.
-        self._roi_enabled    = bool(settings.get("roi_enabled", True)) and not self._debug_preview
+        # debug_preview_box (raw_joint only): keep the box on while previewing
+        # and show both raw frames with the box searched this frame.
+        self._preview_box    = (bool(settings.get("debug_preview_box", False))
+                                and self._debug_preview and self._raw)
+        self._roi_enabled    = (bool(settings.get("roi_enabled", True))
+                                and (not self._debug_preview or self._preview_box))
+        self._roi_used       = [None, None]   # box searched this frame per camera, None = whole frame
         self._roi_margin     = float(settings.get("roi_margin_markers", 2.0))
         # The margin is measured in marker widths, so it balloons exactly when
         # the device is near a camera (a marker can be 300 px across) and the
@@ -1349,9 +1355,11 @@ class MainClass:
         raw (distorted) pixels."""
         self._roi_age[cam] += 1
         roi = self._roi[cam]
+        self._roi_used[cam] = None
         if (self._roi_enabled and roi is not None
                 and self._roi_age[cam] < self._roi_full_every):
             x0, y0, x1, y1 = roi
+            self._roi_used[cam] = roi
             crop = frame[y0:y1, x0:x1]
             corners, ids, _ = detector.detectMarkers(crop)
             corners, ids = self._filter_markers(corners, ids)
@@ -1363,12 +1371,39 @@ class MainClass:
                 return frame, corners, ids
             # Box found nothing: fall through to a full-frame search, same pass.
 
+        self._roi_used[cam] = None
         self._roi_age[cam] = 0
         self._full_count[cam] += 1
         corners, ids, _ = detector.detectMarkers(frame)
         corners, ids = self._filter_markers(corners, ids)
         self._update_roi(cam, corners, 0 if ids is None else len(ids))
         return frame, corners, ids
+
+    def _box_preview(self, frames, corners, ids) -> np.ndarray:
+        """Both raw frames side by side, on copies: the tags found, and the
+        search box of this frame — green rectangle, or a red border and FULL
+        when the whole frame was searched."""
+        tiles = []
+        for cam in (0, 1):
+            frame = frames[cam]
+            if frame is None:
+                continue
+            img = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
+            if ids[cam] is not None:
+                aruco.drawDetectedMarkers(img, corners[cam], ids[cam])
+            roi = self._roi_used[cam]
+            h, w = img.shape[:2]
+            if roi is None:
+                cv2.rectangle(img, (0, 0), (w - 1, h - 1), (0, 0, 255), 12)
+                cv2.putText(img, "FULL", (30, 90), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255), 6)
+            else:
+                cv2.rectangle(img, (roi[0], roi[1]), (roi[2], roi[3]), (0, 255, 0), 4)
+            cv2.putText(img, f"cam{cam}", (30, h - 30), cv2.FONT_HERSHEY_SIMPLEX, 2,
+                        (255, 255, 0), 4)
+            tiles.append(cv2.resize(img, (640, 400)))
+        if not tiles:
+            return np.zeros((400, 640, 3), np.uint8)
+        return np.hstack(tiles)
 
     def _roi_from_pose_raw(self, cam, rvec, tvec) -> None:
         """raw_joint pipeline: like _roi_from_pose, with the device projected
@@ -1569,9 +1604,9 @@ class MainClass:
         fused = None
         if self._raw and self._dual_camera and self.board is not None:
             # raw_joint: one solve over both cameras' raw corners (see
-            # _solve_raw_joint); it also places the next search boxes.
-            if ids0 is not None and self._debug_preview:
-                self.video_frame = aruco.drawDetectedMarkers(self.video_frame, corners0, ids0)
+            # _solve_raw_joint); it also places the next search boxes. (No
+            # drawing here: the raw frames are the camera's read-only buffers —
+            # the preview draws on copies, see _box_preview.)
             ta = time.perf_counter() if self.debug else 0.0
             fused = self._solve_raw_joint(corners0, ids0, corners1, ids1)
             if self.debug:
@@ -1684,7 +1719,10 @@ class MainClass:
             # — several ms per frame, and it lands *outside* t0..t4, so it never
             # appears in the printed stage times while still capping the frame
             # rate. debug_preview=False keeps the numbers without that cost.
-            if self._debug_preview:
+            if self._preview_box:
+                cv2.imshow("frame", self._box_preview((frame0, frame1),
+                                                      (corners0, corners1), (ids0, ids1)))
+            elif self._debug_preview:
                 self.video_frame = cv2.resize(self.video_frame, (350, 200))
                 cv2.imshow("frame", self.video_frame)
 
