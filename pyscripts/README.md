@@ -48,6 +48,7 @@ Run everything from the repo root with the venv active, e.g.
 | `analyse_holds.py` | What one T1 recording says without the mocap: per-place jitter, drift, height error, cam0-vs-cam1 disagreement, coverage, plus an optional map of the table (`--png`, `--key`). |
 | `coverage_markers.py` | Why a camera sees fewer markers at some T1 places: each unseen marker sorted into facing away / off the lens / cropped by undistortion / edge-on / missed; suggests the undistortion border. |
 | `compare_fusion.py` | Five ways of turning both cameras' corners into one pose, compared on the same recording. |
+| `camera_placement.py` | Where should the cameras sit? Scores "what if" placements (moved back / up, re-aimed) at every T1 place from the recorded device poses: usable markers, worst angle, sharpness. |
 | `check_board.py` | Is the device geometry the limit? Per-marker consistency of `board_geometry.json`. |
 
 ## diagnostics/ — on the live system (close the game first)
