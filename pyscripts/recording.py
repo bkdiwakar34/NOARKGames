@@ -157,8 +157,10 @@ class Recording:
                                "the solve was rejected (> stereo_max_reproj_px)",
                 "stereo_gap_*": "cam0 pose vs cam1 pose moved into cam0's frame",
                 "corners.csv u, v": "px in the undistorted image (pinhole, "
-                                    "intrinsics = that camera's camera_matrix, "
-                                    "zero distortion); ArUco corner order TL, TR, BR, BL",
+                                    "intrinsics = undistorted.camera_matrix_cam0/1 "
+                                    "below — the calibrated matrix with its centre "
+                                    "moved by the border — zero distortion); ArUco "
+                                    "corner order TL, TR, BR, BL",
             },
             **extra_meta,
         }

@@ -163,16 +163,31 @@ class MainClass:
 
         import toml
         calib_data = toml.load(cam_calib_path)
-        self.camera_matrix = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
-        self.dist_coeffs   = np.array(calib_data["calibration"]["dist_coeffs"])
+        lens_matrix      = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
+        self.dist_coeffs = np.array(calib_data["calibration"]["dist_coeffs"])
+
+        # The undistorted image is the sensor's size plus a border on every
+        # side. Undistorting with the lens's own focal length into 1280 x 800
+        # keeps only ~49 deg sideways / ~35 deg down of a lens that sees ~66 /
+        # ~41, and at the table corners nearest the cameras 3 of each camera's
+        # 8 markers fell in the part thrown away (coverage_markers.py,
+        # 2026-09-22). The border keeps them; the focal length is unchanged,
+        # so a marker in the middle of the image is exactly as before.
+        self._ud_pad  = (int(settings.get("undistort_pad_x_px", 0)),
+                         int(settings.get("undistort_pad_y_px", 0)))
+        self.ud_size  = (self.frame_size[0] + 2 * self._ud_pad[0],
+                         self.frame_size[1] + 2 * self._ud_pad[1])
+        print(f"Undistorted image: {self.ud_size[0]} x {self.ud_size[1]} "
+              f"(border {self._ud_pad[0]} / {self._ud_pad[1]} px)")
 
         # Lens distortion is removed by remapping the whole frame, then detecting
         # on the corrected image. The corners reaching solvePnP are therefore
-        # pinhole-equivalent with intrinsics = camera_matrix, so it is called
-        # with np.zeros(5).
+        # pinhole-equivalent with intrinsics = camera_matrix (the lens matrix
+        # with its centre moved by the border), so it is called with np.zeros(5).
+        self.camera_matrix = self._undistorted_matrix(lens_matrix)
         self.map1, self.map2 = cv2.fisheye.initUndistortRectifyMap(
-            self.camera_matrix, self.dist_coeffs, np.eye(3),
-            self.camera_matrix, self.frame_size, cv2.CV_16SC2,
+            lens_matrix, self.dist_coeffs, np.eye(3),
+            self.camera_matrix, self.ud_size, cv2.CV_16SC2,
         )
 
         # Leave cores free for Godot on the Pi — OpenCV otherwise parallelises
@@ -560,6 +575,15 @@ class MainClass:
         print(f"Camera phase: {first * 1000.0:+.2f} ms -> {phase * 1000.0:+.2f} ms "
               f"after {attempts} restart(s) of cam1")
 
+    def _undistorted_matrix(self, lens_matrix: np.ndarray) -> np.ndarray:
+        """Intrinsics of the undistorted image: the lens's own, with the image
+        centre moved by the border so the same ray lands the same distance
+        from the centre."""
+        K = np.array(lens_matrix, dtype=np.float64).copy()
+        K[0, 2] += self._ud_pad[0]
+        K[1, 2] += self._ud_pad[1]
+        return K
+
     def _load_second_intrinsics(self, settings: dict) -> None:
         """Cam1's own fisheye intrinsics — each OV9281 needs its own
         calibration file, same shape as the one MainClass.__init__ already
@@ -575,11 +599,12 @@ class MainClass:
                 f"Run calibrate_camera.py for the second OV9281 first."
             )
         calib_data = toml.load(path)
-        self.camera_matrix_1 = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
+        lens_matrix_1 = np.array(calib_data["calibration"]["camera_matrix"]).reshape(3, 3)
         dist_coeffs_1 = np.array(calib_data["calibration"]["dist_coeffs"])
+        self.camera_matrix_1 = self._undistorted_matrix(lens_matrix_1)
         self.map1_1, self.map2_1 = cv2.fisheye.initUndistortRectifyMap(
-            self.camera_matrix_1, dist_coeffs_1, np.eye(3),
-            self.camera_matrix_1, self.frame_size, cv2.CV_16SC2,
+            lens_matrix_1, dist_coeffs_1, np.eye(3),
+            self.camera_matrix_1, self.ud_size, cv2.CV_16SC2,
         )
         print(f"Loaded cam1 calibration from {path}")
 
@@ -741,7 +766,14 @@ class MainClass:
             folder = os.path.join(self._rec_dir, name)
             extra = {"sync_pin": self._sync_desc,
                      "sync_error": self._sync_error,
-                     "mono_to_unix_s": self._mono_to_unix}
+                     "mono_to_unix_s": self._mono_to_unix,
+                     "undistorted": {
+                         "size": list(self.ud_size),
+                         "border_px": list(self._ud_pad),
+                         "camera_matrix_cam0": self.camera_matrix.tolist(),
+                         "camera_matrix_cam1": (None if self.camera_matrix_1 is None
+                                                else self.camera_matrix_1.tolist()),
+                     }}
             try:
                 self._recording = Recording(folder, name, self._settings, extra)
             except OSError as exc:               # name already used, disk full, ...
@@ -1298,7 +1330,7 @@ class MainClass:
         side = float(np.linalg.norm(quads - np.roll(quads, -1, axis=1), axis=2).max())
         margin = min(self._roi_margin * side, self._roi_margin_max_px)
         pts = quads.reshape(-1, 2)
-        w, h = self.frame_size
+        w, h = self.ud_size
         x0 = int(max(0, np.floor(pts[:, 0].min() - margin)))
         y0 = int(max(0, np.floor(pts[:, 1].min() - margin)))
         x1 = int(min(w, np.ceil(pts[:, 0].max() + margin)))
@@ -1320,7 +1352,7 @@ class MainClass:
         side = max(float(np.linalg.norm(q - np.roll(q, -1, axis=0), axis=1).max())
                    for q in quads)
         margin = min(self._roi_margin * side, self._roi_margin_max_px)
-        w, h = self.frame_size
+        w, h = self.ud_size
         self._roi[cam] = (
             int(max(0, np.floor(pts[:, 0].min() - margin))),
             int(max(0, np.floor(pts[:, 1].min() - margin))),

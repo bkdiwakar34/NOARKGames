@@ -20,6 +20,8 @@
 	"roi_margin_markers": 1.0,
 	"roi_margin_max_px": 120.0,
 	"roi_full_every": 100,
+	"undistort_pad_x_px": 0,
+	"undistort_pad_y_px": 0,
 	"rcam_id_0": "CAM2",
 	"rcam_id_1": "CAM3",
 	"rcam_exposure_us": 5000,
