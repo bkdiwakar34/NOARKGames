@@ -182,16 +182,23 @@ def write_png(rows: list, path: str, key: str = "jitter") -> None:
     vals = np.array([r[key] for r in rows], dtype=float)
     lo, hi = float(np.nanmin(vals)), float(np.nanmax(vals))
     span = max(hi - lo, 1e-6)
+    # Coverage keys are better when high, the error keys when low: flip so green
+    # always means best.
+    higher_is_better = key in ("both", "mk")
+    unit = {"both": "%", "mk": "markers"}.get(key, "mm")
+    best, worst = (hi, lo) if higher_is_better else (lo, hi)
     # Screen coordinates -> image, keeping the layout
     sx = (xs - xs.min()) / max(xs.max() - xs.min(), 1e-6) * (w - 160) + 80
     sy = (ys - ys.min()) / max(ys.max() - ys.min(), 1e-6) * (h - 200) + 120
     for i, r in enumerate(rows):
         f = (vals[i] - lo) / span
+        if higher_is_better:
+            f = 1.0 - f
         colour = (60, int(200 * (1 - f)) + 40, int(200 * f) + 40)   # BGR
         cv2.circle(img, (int(sx[i]), int(sy[i])), 18, colour, -1)
         cv2.putText(img, f"{vals[i]:.1f}", (int(sx[i]) - 18, int(sy[i]) + 34),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (60, 60, 60), 1)
-    cv2.putText(img, f"{key} (mm): {lo:.2f} green -> {hi:.2f} red", (60, 60),
+    cv2.putText(img, f"{key} ({unit}): {best:.2f} green -> {worst:.2f} red", (60, 60),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (60, 60, 60), 2)
     cv2.imwrite(path, img)
     print(f"\nWrote {path}")
@@ -203,7 +210,8 @@ def main() -> None:
     ap.add_argument("folder", nargs="?", help="recording folder (default: the newest)")
     ap.add_argument("--png", help="also write a map of the table, coloured by --key")
     ap.add_argument("--key", default="jitter",
-                    choices=["jitter", "drift", "height", "gap_mean", "gap_max"],
+                    choices=["jitter", "drift", "height", "gap_mean", "gap_max",
+                             "both", "mk"],
                     help="what the map colours (default: jitter)")
     args = ap.parse_args()
 
