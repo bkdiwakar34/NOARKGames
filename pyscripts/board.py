@@ -276,6 +276,103 @@ def estimate_board_pose_raw(board: BoardGeometry, corners0, ids0, corners1, ids1
     return x[:3], x[3:], e0, e1
 
 
+def estimate_board_pose_dual_gn(board: BoardGeometry, corners0, ids0, corners1, ids1,
+                                K0, K1, Rx, tx, guess, max_iter=10, return_iters=False):
+    """The same fit as estimate_board_pose_dual — one board pose in cam0's frame
+    from all corners of both cameras, straightened pixels — done the standard
+    way for a multi-camera rig: Levenberg-Marquardt with the derivatives
+    written out, not estimated by trial.
+
+    A small pose change delta = (w, s) moves a board point p0 = R b + t (cam0
+    frame) by  w x p0 + s,  so
+
+        dp0/d delta = [ -[p0]x | I ]           p1 = Rx^T (p0 - tx):  dp1/d delta = Rx^T [ -[p0]x | I ]
+        du/dp       = [ fx/Z  0     -fx X/Z^2 ]
+                      [ 0     fy/Z  -fy Y/Z^2 ]
+        J = du/dp . dp/d delta   (2 x 6 per corner)
+
+    and each step solves (J^T J + lambda diag(J^T J)) delta = J^T r, r = seen - predicted.
+    Accepted exactly as estimate_board_pose_dual (DUAL_MAX_REPROJ_PX,
+    DUAL_MAX_JUMP_M). Returns (rvec, tvec, mean reprojection px, accepted)
+    [+ iterations with return_iters], or None when no camera has a marker.
+    """
+    obj0, img0 = _board_points(board, corners0, ids0)
+    obj1, img1 = _board_points(board, corners1, ids1)
+    if obj0 is None and obj1 is None:
+        return None
+    Rx = np.asarray(Rx, dtype=np.float64)
+    tx = np.asarray(tx, dtype=np.float64).flatten()
+    cams = []                                   # (board pts, pixels, K, A, c): p = A (p0 - c)
+    if obj0 is not None:
+        cams.append((obj0, img0, np.asarray(K0, np.float64), np.eye(3), np.zeros(3)))
+    if obj1 is not None:
+        cams.append((obj1, img1, np.asarray(K1, np.float64), Rx.T, tx))
+
+    def residuals_and_jacobian(R, t, want_j):
+        rs, js = [], []
+        for obj, img, K, A, c in cams:
+            p0 = obj @ R.T + t
+            p = (p0 - c) @ A.T
+            X, Y, Z = p[:, 0], p[:, 1], p[:, 2]
+            if np.any(Z <= 1e-6):
+                return None, None
+            fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+            rs.append(img - np.stack([fx * X / Z + cx, fy * Y / Z + cy], axis=1))
+            if want_j:
+                n = len(p0)
+                dudp = np.zeros((n, 2, 3))
+                dudp[:, 0, 0] = fx / Z
+                dudp[:, 0, 2] = -fx * X / Z ** 2
+                dudp[:, 1, 1] = fy / Z
+                dudp[:, 1, 2] = -fy * Y / Z ** 2
+                D = np.zeros((n, 3, 6))             # [ -[p0]x | I ]
+                D[:, 0, 1], D[:, 0, 2] = p0[:, 2], -p0[:, 1]
+                D[:, 1, 0], D[:, 1, 2] = -p0[:, 2], p0[:, 0]
+                D[:, 2, 0], D[:, 2, 1] = p0[:, 1], -p0[:, 0]
+                D[:, :, 3:] = np.eye(3)
+                js.append(np.einsum("nij,jk,nkl->nil", dudp, A, D).reshape(-1, 6))
+        r = np.concatenate(rs)
+        return r, (np.concatenate(js) if want_j else None)
+
+    R = cv2.Rodrigues(np.asarray(guess[0], np.float64).reshape(3, 1))[0]
+    t = np.asarray(guess[1], np.float64).flatten().copy()
+    t_start = t.copy()
+    r, J = residuals_and_jacobian(R, t, True)
+    if r is None:                               # start pose puts a point behind a camera
+        return None
+    cost = float((r ** 2).sum())
+    lam = 1e-3
+    iters = 0
+    for iters in range(1, max_iter + 1):
+        H = J.T @ J
+        g = J.T @ r.ravel()
+        try:
+            delta = np.linalg.solve(H + lam * np.diag(np.diag(H)), g)
+        except np.linalg.LinAlgError:
+            break
+        dR = cv2.Rodrigues(delta[:3].reshape(3, 1))[0]
+        R_new, t_new = dR @ R, dR @ t + delta[3:]
+        r_new, J_new = residuals_and_jacobian(R_new, t_new, True)
+        if r_new is not None and float((r_new ** 2).sum()) < cost:
+            R, t, r, J = R_new, t_new, r_new, J_new
+            cost = float((r ** 2).sum())
+            lam = max(lam / 10.0, 1e-7)
+            if np.linalg.norm(delta) < 1e-8:
+                break
+        else:
+            lam *= 10.0
+            if lam > 1e6:
+                break
+
+    rvec = cv2.Rodrigues(R)[0].flatten()
+    err = float(np.linalg.norm(r, axis=1).mean())
+    jump = float(np.linalg.norm(t - t_start))
+    accepted = bool(np.all(np.isfinite(t)) and err <= DUAL_MAX_REPROJ_PX
+                    and jump <= DUAL_MAX_JUMP_M)
+    out = (rvec, t, err, accepted)
+    return out + (iters,) if return_iters else out
+
+
 def estimate_board_pose(board: BoardGeometry, corners, ids, camera_matrix,
                         guess=None):
     """Single rigid-body pose from all visible known markers.
