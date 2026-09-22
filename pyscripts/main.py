@@ -288,7 +288,11 @@ class MainClass:
         # Timestamp of the last fresh UDP packet from Godot. run() exits if no fresh packet
         # arrives for 3 seconds — Godot sends "CONNECTED" every 100 ms by default, so this
         # only trips when Godot has actually died or stopped responding.
-        self._last_msg_time = time.time()
+        # Monotonic, not time.time(): the board has no battery clock, so the
+        # wall clock JUMPS when it syncs over the network after boot (+8321 s
+        # on 2026-09-22) and a wall-clock gap then read as "no message from
+        # Godot for 2 hours" — the tracker exited mid-session.
+        self._last_msg_time = time.monotonic()
 
         # Reuse the previous session's world origin (see _persist_origin above).
         # Must run after first_frame is initialised.
@@ -418,11 +422,12 @@ class MainClass:
         # line (gaps in the driving camera's sequence).
         self._last_seq         = [None, None]
         # Capture time of the frame this pass is processing (kernel clock,
-        # CLOCK_MONOTONIC), sent to Godot with each position. Converted to
-        # Unix time with an offset taken once at start-up; the two clocks
-        # only drift apart if the system clock is stepped mid-session.
+        # CLOCK_MONOTONIC), sent to Godot with each position as Unix time.
+        # The offset between the two clocks is read fresh each time
+        # (_mono_to_unix), because the wall clock is stepped when the board
+        # syncs over the network after boot; an offset taken once at start-up
+        # stamped every later sample 2+ hours wrong.
         self._frame_t_cap   = None
-        self._mono_to_unix  = time.time() - time.monotonic()
         self._last_seq_driver  = None
         self._missed_count     = 0
 
@@ -815,7 +820,7 @@ class MainClass:
             folder = os.path.join(self._rec_dir, name)
             extra = {"sync_pin": self._sync_desc,
                      "sync_error": self._sync_error,
-                     "mono_to_unix_s": self._mono_to_unix,
+                     "mono_to_unix_s": self._mono_to_unix(),
                      "pipeline": self._pipeline,
                      # raw_joint: corners.csv holds RAW fisheye pixels; these
                      # are the lens models they were found with.
@@ -907,13 +912,19 @@ class MainClass:
 
     # ── transport send / receive ──────────────────────────────────────────────
 
+    @staticmethod
+    def _mono_to_unix() -> float:
+        """Unix time minus monotonic time, now. Read per use: the wall clock
+        can be stepped (network time sync after boot)."""
+        return time.time() - time.monotonic()
+
     def _recv_command(self) -> bytes:
         """Return the latest command from Godot, or b'' if none."""
         try:
             # 256, not 30: a REC_START carries a recording name, and a 30-byte
             # buffer silently truncated it (2026-09-21, "..._r1" arrived as "..._r").
             data, self.addr = self.udp_socket.recvfrom(256)
-            self._last_msg_time = time.time()
+            self._last_msg_time = time.monotonic()
             return data
         except socket.error:
             return b""
@@ -930,7 +941,7 @@ class MainClass:
         if self.addr is None:
             return
         data = np.append(SAMPLE_CODE, coords).flatten()
-        t_cap = (self._frame_t_cap + self._mono_to_unix
+        t_cap = (self._frame_t_cap + self._mono_to_unix()
                  if self._frame_t_cap is not None else time.time())
         data_bytes = struct.pack("<" + "f" * len(data), *data) + struct.pack("<d", t_cap)
         self.udp_socket.sendto(data_bytes, self.addr)
@@ -1825,7 +1836,7 @@ class MainClass:
                 (t4 - t3) * 1000.0,      # pose + send
             ))
 
-            now = time.time()
+            now = time.monotonic()
             if now - self._dbg_last_print > 1.0:
                 if ids0 is not None:
                     sides = [np.linalg.norm(c[0][i] - c[0][(i + 1) % 4])
@@ -1926,7 +1937,7 @@ class MainClass:
             while True:
                 try:
                     self.process_frame()
-                    if time.time() - self._last_msg_time > 3.0:
+                    if time.monotonic() - self._last_msg_time > 3.0:
                         print("No UDP packets from Godot for 3 s — exiting.")
                         break
                 except Exception as exc:
