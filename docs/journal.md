@@ -130,7 +130,25 @@ turned 0.31° (baseline 75.0 -> 76.1 mm). Old files kept as `*.before-<date-time
 - **Border 489 px**: brings back corner tags, costs frames. Setting kept, at 0.
 - Several recordings were redone because the morning T1 grid was deleted.
 
-### 7. Housekeeping
+### 7. Evening: why the tracker "did not open" after power-on
+
+It started only after closing and re-opening the game a couple of times, and once
+quit mid-session with "No UDP packets from Godot for 3 s — exiting". Not the
+cameras (no driver errors; 100/s, 0 missed right up to it). `dmesg` audit stamps
+showed the **wall clock jumping +8321 s** at 19:34:22: the board has no battery
+clock and steps it when it gets online. The 3 s check used `time.time()`, so the
+jump looked like 2 h of silence. Fixed on the monotonic clock (also the capture
+times sent to Godot). Two more causes of failed starts, fixed too: the overlap's
+first pass did not read Godot, so a set-up longer than 3 s (camera phase
+alignment, up to ~14 restarts) tripped the check; and quitting the game killed
+only the `bash` wrapper, leaving the tracker holding the cameras (`exec` now).
+The camera driver now loads at boot (`/etc/modules-load.d/ov9282.conf`).
+
+Recorder checked for the lab: T1 dots cover the table, T2 pacer right (fast =
+lap 6), T3 works (32 labels). Decided: no tracker changes before the validation;
+jitter work (light, corner method, display-only One Euro filter) after it.
+
+### 8. Housekeeping
 
 `pyscripts/` reorganised: the tracker stays at the top (Godot starts it there);
 `calibration/`, `analysis/`, `diagnostics/` hold the rest. `tools/` and
