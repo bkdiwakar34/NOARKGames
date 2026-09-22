@@ -16,6 +16,94 @@ New entries go at the **top**, under the date.
 
 ---
 
+## 2026-09-21 — The recorder in use, and why two cameras help so little
+
+**Ended the day with:** a finished recorder screen (T1, T2, T3), a full-table T1
+grid and six T2 runs recorded with almost no lost frames, the two cameras' frame
+timing aligned at start-up, and a clear answer to "why isn't the second camera
+better?". No mocap yet — everything below is the device on its own.
+
+### 1. The recorder, made usable
+
+Each problem was found by actually doing a trial:
+
+- **Folder name lost its last character** (`…_r` instead of `…_r1`): the tracker read
+  Godot's commands into a 30-byte buffer. Now 256.
+- **Holds started before the hand settled**: the ring began filling on entering the
+  circle. Now **space** starts a 3 s hold; **backspace** redoes the last one. A
+  "did it move?" check was proposed and dropped — it would judge the tracker by its
+  own output, so marker noise could abort a good hold.
+- **Space stopped the recording**: Godot's focused button ate the key. Buttons no
+  longer take focus.
+- **No mapping from samples to places**: added `marks.csv` — every hold start/end
+  with the tracker's clock and the `samples.csv` row, so place 7 is exactly rows
+  1204–1504, not a guess.
+- **Only the middle of the table was measured**: targets were inset 7 % sideways and
+  22 % top and bottom, i.e. 56 % of the depth. Now 4–5 %, whole table.
+- **Text sat on top of the dots**: every control now hides while recording; Escape
+  stops.
+- **T2 had no shape and no pace**: now a red **pacer dot** runs along a circle or
+  figure-eight at a set speed on the table (the 4-corner calibration converts mm/s to
+  pixels), with a 3 s lead-in and an automatic stop at 30 s. Speeds tuned by trying:
+  **100 / 200 / 300 mm/s**. Lap counts came out 2 / 4 / 6 — exactly proportional,
+  which confirms the pacer's speed.
+- **Repeat numbers ran on across conditions** (first recording of each was `r5`):
+  now reset per condition.
+
+### 2. Frames: from 4.6 % lost to none
+
+| Change | Why |
+|---|---|
+| Rows flushed twice a second, not per row | 100 flushes/s cost ~3 frames per 40 s |
+| CSV writing moved to a writer thread | the loop used 9.95 of its 10 ms *before* writing, and the writing was outside the measured window |
+| Search-box margin capped at 120 px (`roi_margin_max_px`) | the margin is one marker width, ~300 px close to a camera, so the box approached the full frame exactly there |
+
+Result: full-table T1 grid **0 lost** of 64 524; six T2 runs 7 of ~20 000.
+
+### 3. The sync pin moved: 15 → 35
+
+With nothing connected, pin 15 read HIGH — the board pulls it up harder than the
+chip's pull-down. A cable fault would then look like "Motive recording". Every free
+pin was read with `gpioget -B pull-down`; **header pin 35** (line 100) idles LOW,
+ground next to it on **pin 34**.
+
+### 4. Why doesn't the second camera reduce the jitter? (the long part)
+
+- **Joint solve** (one pose fitted to both cameras' corners): −35 % jitter standing
+  still (0.72 → 0.47 mm), but live it cost ~1 ms the budget lacked (100 → 85/s) and
+  gave a jittery trail. Off.
+- **Camera timing**: the two cameras were 1.6 ms apart in one recording and 4.6 ms in
+  the next. Cause: both run at exactly the same rate but start one after the other,
+  so `offset = (start gap) mod 10 ms`. **Fix:** at start-up the tracker measures the
+  offset and restarts cam1 until it is under 0.5 ms (after discarding 10 frames each
+  time — without that, the first fix measured an unsettled camera and did not hold).
+  Now **~0.2–0.4 ms**, steady (`phase_test.py`). Hardware sync was not possible:
+  these Waveshare modules don't bring the sensor's FSIN pin out.
+- **Even with aligned cameras the joint solve is unstable while moving**: `joint` and
+  `joint_corr` differed 2× in smoothness on nearly identical input while fitting the
+  images equally well — an ill-conditioned fit, sliding along a depth–tilt valley.
+- **Board geometry** (`check_board.py`): the three wing markers 24, 28, 32 agree least
+  (matches the 2026-09-18 calibration's weak pairs), but dropping them raised jitter
+  0.470 → 0.532 mm. Not the limit. (The first version of this script had a bug —
+  IPPE_SQUARE fed board-frame corners — and reported 130–220 mm; fixed.)
+- **The reason:** the cameras are 75 mm apart at ~500 mm, **8.5°** between the views,
+  so both are weak in the same direction (depth). As depth rulers, the device's own
+  250 mm of markers beats the 75 mm baseline: $\sigma_\text{depth} \approx
+  \sigma_\text{side}\,Z/S \approx 2\sigma_\text{side}$ from the device, against
+  $\sigma_\text{side}\,Z/B \approx 6.7\sigma_\text{side}$ from stereo. Two near-identical
+  views can at best give $1/\sqrt{2}$. The eyes are the same geometry (63 mm, 7.2°) —
+  they manage because their angular precision is ~3× finer.
+- **What would help:** fit only the 3 real unknowns (x, z, yaw on the table plane)
+  to both cameras' corners — removes exactly the directions the cameras can't agree
+  on; or mount the cameras 60–90° apart (≈ 0.6–1 m, needs longer CSI cables).
+
+### 5. Numbers so far (whole table, no mocap)
+
+Jitter while still median 0.44 mm; height error 0.09 mm; noise while moving ≈ 0.66
+mm; cam0-vs-cam1 disagreement median 2.0 mm, worst in one corner.
+
+---
+
 ## 2026-09-20 — A new goal: validate the device against motion capture
 
 **Goal changed.** The July list (data audit → healthy-user test → analysis script) is

@@ -58,8 +58,8 @@ is the number of movements, not people.
 | Trial | What | Design | Count | Answers |
 |---|---|---|---|---|
 | **T1** Static holds | Device still, 3 s per hold | **96 places** (12 across × 8 deep, spread over the whole table) held once each, natural grip; the whole grid done twice | 192 holds | 1, 2, 3 |
-| **T2** Continuous | Circles and figure-eights over the whole workspace, 30 s each | 3 speeds × 2 shapes × 2 repeats | 12 × 30 s | 4, 5 |
-| **T3** Discrete reaches | Still → reach → hold, self-paced (no go cue) | 8 directions × 2 distances × 2 speeds (comfortable, fast) × 3 repeats | 96 reaches | 6, 7 |
+| **T2** Continuous | Follow a pacer dot round a circle or figure-eight over the whole table, 3 s lead-in + 30 s | 3 speeds (**100 / 200 / 300 mm/s**) × 2 shapes × 2 repeats | 12 × 30 s | 4, 5 |
+| **T3** Discrete reaches | Centre → target → centre, self-paced (no go cue) | 8 directions × 2 distances × 2 speeds (comfortable, fast) × 3 repeats | 96 reaches | 6, 7 |
 | **T5** Real game | Random Reach, 3 min | 2 runs | 2 × 3 min | all, under real use |
 
 (T4, rotations about each axis, was dropped: the device is planar. Deliberately
@@ -113,9 +113,18 @@ calibration exists.
 | Trial | What the screen shows |
 |---|---|
 | T1 | 96 dots (12 × 8) over the whole table, walked in serpentine order. The next one is ringed. Place the device, let your hand settle, then **press space**: the ring fills over 3 s and the dot turns green. **Backspace** redoes the last place. Counter: `17 / 96`. |
-| T2 | No targets: the cursor, its trail, and cells that colour in as they are covered, with "covered 78 %". Near-full coverage is enough. |
-| T3 | Centre-out targets, 8 directions × 2 distances, lit one at a time. |
+| T2 | The shape drawn faintly and a **red pacer dot** running along it at the condition's speed; keep the cursor on it. The dot waits 3 s at the start (gold ring + countdown), then moves for 30 s, and the recording **stops itself**. Speeds are on the table, not the screen: the 4-corner calibration gives pixels per metre ($\sqrt{\lvert\det A\rvert}$ of its linear part). The dot moves at constant distance along the path, so the speed is the same everywhere on the figure-eight. |
+| T3 | Alternates centre and target (8 directions × 2 distances); touching the lit one advances. Every reach starts from the same place. |
 | T0 | Cursor only — dry run. |
+
+Speeds were tuned on the board (2026-09-21): 300 mm/s is already the fast end of what
+the hand follows on these shapes. If error grows with speed, the result must be stated
+as "validated up to 300 mm/s".
+
+The dots stay hidden until Record, and **every control hides while recording** (the
+table fills the screen); one line in the top-left corner shows name, progress, rate,
+gate and the keys. **Escape stops** a recording; a second Escape leaves the screen.
+The repeat number resets to `r1` when trial or condition changes.
 
 A hold runs its full 3 s once started, with **no "did it move?" check** (dropped
 2026-09-21): such a check would read the tracker's own output, so marker noise or a
@@ -124,7 +133,7 @@ mocap decides afterwards whether a hold was really still.
 
 Bottom strip: Record/Stop, progress, and two indicators — sample rate (green at
 ≥ 95/s) and the OptiTrack gate (green while Motive records). Nothing drawn on this
-screen enters the data files; the analysis finds holds and reaches from the movement.
+screen enters the data files except the labels in `marks.csv`.
 
 The work is split the way the 100 Hz measurement already runs:
 
@@ -170,7 +179,8 @@ Godot asks.
 | `samples.csv` | sample (100/s) | sample number; cam0 and cam1 capture times and frame sequence numbers; camera(s) used (`fusion`); markers seen per camera; reprojection error per camera; cam0-vs-cam1 pose gap (mm, °); combined board pose in cam0's frame (`tx..tz`, quaternion `qx..qw`); grip point in the game frame (`game_x..z`) |
 | `corners.csv` | marker seen by a camera | sample number, camera, marker ID, 4 corners (8 numbers) |
 | `sync.csv` | pin edge | kernel time, rising / falling |
-| `marks.csv` | labelled moment | `t_s`, `sample` (the row in `samples.csv` at that moment), `label`. T1 writes `hold_start i x y` and `hold_end i x y` per place (`i` = place index, `x y` = where it was drawn), plus `redo i x y`; T3 writes `reached i x y`. **This is what maps data to places** — no segmentation by guesswork. |
+| `marks.csv` | labelled moment | `t_s`, `sample` (the row in `samples.csv` at that moment), `label`. T1 writes `hold_start i x y` and `hold_end i x y` per place (`i` = place index, `x y` = where it was drawn), plus `redo i x y`; T2 writes `pacer <condition> <speed> mm_s lead 3.0 s` once and
+`lap n` each lap; T3 writes `at_centre i x y` / `at_target i x y`. **This is what maps data to places** — no segmentation by guesswork. |
 | `calib/` | — | copies of `camera_calib.toml`, `camera_calib_1.toml`, `stereo_extrinsics.json`, `board_geometry.json`, `origin_lock.json` |
 | `meta.json` | — | date, settings, git commit |
 
@@ -251,5 +261,27 @@ criteria (not yet set).
   Motive.
 - **T5 (game):** now possible in principle (the recorder lives in the game), but not
   built: it needs Record to survive the change of scene into Random Reach.
-- **Recorder:** rebuilt inside Godot 2026-09-20, **not yet run on the board**.
-  First run = a `T0_test` dry run, checking it holds 100 samples/s while recording.
+- **T3** has not been run yet.
+
+## Findings so far (device only, no mocap yet — 2026-09-21)
+
+| | Result |
+|---|---|
+| Sample loss | Full T1 grid (whole table): 0 lost. Six T2 runs: 7 of ~20 000 (0.03 %). |
+| Jitter while still | median 0.44 mm, 90th pct 1.06 mm (whole table) |
+| Height error (physically 0) | median 0.09 mm |
+| Cam0 vs cam1 disagreement | median 2.0 mm; worst at one corner / one edge of the table |
+| Noise while moving (T2 fast) | ≈ 0.66 mm (3rd-difference RMS / $\sqrt{20}$) |
+| Camera time offset | was 1.6–4.6 ms, **different every start-up**; now aligned to ~0.2–0.4 ms at start-up (see journal) |
+| Fusion | today's averaging is the best of five methods while moving; the 6-DOF joint solve wins 35 % standing still but is unstable (ill-conditioned) while moving — off in the tracker |
+
+Why two cameras help so little here: they are 75 mm apart at ~500 mm, 8.5° between
+the views, so both are weak in the same (depth) direction; the device's own 250 mm
+marker spread is a longer depth ruler than the 75 mm baseline. Next test: fit only
+the 3 real unknowns (x, z, yaw on the table plane from `origin_lock.json`) to both
+cameras' corners, offline, before any hardware change.
+
+Analysis scripts (all offline, on the board): `analyse_holds.py` (per-place jitter,
+drift, height, camera disagreement, `--png` map), `compare_fusion.py` (five fusion
+methods; hold mode for T1, smoothness mode for T2), `check_board.py` (per-marker
+consistency of `board_geometry.json`), `phase_test.py` (camera offset over time).

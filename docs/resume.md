@@ -9,26 +9,30 @@ every session, while you still remember. The full story lives in
 
 ---
 
-**Last updated:** 2026-09-20
+**Last updated:** 2026-09-22
 
 **This repo is the Dragon Q6A one.** The Raspberry Pi version is `bkdiwakar34/NOARKGames-pi`.
 
 ## State
 
-**The goal changed on 2026-09-20: validate the device against the lab's OptiTrack
-before trusting any of its data.** The July agenda (data audit → healthy-user test →
-analysis script) waits until that is done.
+**Goal: validate the device against the lab's OptiTrack.** Protocol:
+**[validation_plan.md](validation_plan.md)** — read it first. The July agenda (data
+audit → healthy-user test → analysis) waits until this is done.
 
-The protocol is agreed and written down:
-**[validation_plan.md](validation_plan.md) — read it before doing anything here.**
+**The recorder works** — Godot installer (F10) → **Validation recorder**:
+- **T1**: 96 places over the whole table; **space** = 3 s hold, **backspace** = redo.
+- **T2**: red pacer dot on a circle / figure-eight at 100 / 200 / 300 mm/s, 3 s lead-in,
+  stops itself after 30 s.
+- **T3**: centre → target → centre. **Not tried yet.**
+- **Escape** stops a recording. Files per recording: `samples.csv`, `corners.csv`,
+  `sync.csv`, `marks.csv` (maps samples to places / laps), `calib/`, `meta.json`.
 
-The system itself is healthy: exactly 100 samples/s end to end, screen also at 100 Hz,
-all four calibrations done, camera-to-camera checked against a ruler (75.0 mm, 1.6°).
+**The tracker holds 100 samples/s over the whole table** (0 lost on a full T1 grid,
+0.03 % on six T2 runs). **The two cameras' frames are aligned at start-up** to
+~0.2–0.4 ms (was 1.6–4.6 ms, different each start).
 
-**The recorder is built but has never been run.** Godot installer (F10) →
-**Validation recorder**: name dropdowns, Record / Stop, live status. Godot draws the
-screen (cores 0–3) and the tracker writes the files and watches the sync pin
-(cores 4–7).
+**Sync wiring: eSync 2 signal → header pin 35, ground → pin 34** (pin 15 dropped —
+it idles HIGH).
 
 **Starting the system** (on the board):
 
@@ -37,48 +41,49 @@ sudo modprobe ov9282        # camera driver — needed after every reboot
 taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOARKGames --main-scene res://app/ui/main.tscn
 ```
 
-SSH: `ssh radxa@<ip>` — the IP changes with the phone hotspot (`hostname -I` on the
-board). Calibration scripts must be run in a terminal on the board, not over SSH
-(they open a window).
+"Device or resource busy" = a tracker is still running: `pkill -f pyscripts/main.py`.
+
+## Where we stopped
+
+Investigating why two cameras give so little less jitter (still ~0.44 mm static,
+~0.66 mm moving). **Answer found:** they are 75 mm apart at ~500 mm (8.5° between
+views), so both are weak in the same direction; the device's own 250 mm marker spread
+is already a better depth ruler. Averaging is the best of five fusion methods tried;
+the 6-DOF joint solve is unstable while moving (off in the tracker).
+
+Open offer: a one-page `docs/why_two_cameras.md` with just this, in your numbers.
 
 ## Next action
 
-1. **Dry run of the recorder** (no OptiTrack needed). F10 → Validation recorder →
-   `T0 / test / r1` → Record → move the device ~20 s → Stop.
-   - **The number that matters: does it stay at 100 packets/s while recording?**
-     The standalone version it replaced managed only 80–93.
-   - Then check `~/Documents/NOARK/validation/<date>_T0_test_r1/`: `samples.csv`,
-     `corners.csv`, `sync.csv`, `calib/`, `meta.json`, and run the usual gap check on
-     `samples.csv` column `t_cam0_s` (expect all 10 ms).
-   - Also confirm the game itself still behaves (Trace test `rx: 100 pkt/s`).
-2. **In the lab:** eSync 2 output → pin 35 (signal) and pin 34 (ground). Record →
-   start the Motive take → stop it → Stop. Expect 1 rising + 1 falling edge.
-3. **Then the trials** of [validation_plan.md §2](validation_plan.md) (T1, T2, T3).
+Pick one:
+
+1. **Table-plane fit, offline** — fit only x, z, yaw (plane from `origin_lock.json`) to
+   both cameras' corners, test on the T1 grid and `T2_eight_fast_r1` with
+   `compare_fusion.py`. Free, no hardware. Only if it wins does it go into the tracker.
+2. **Try T3 once**, then **the lab session**: wire pin 35/34, `T0` to check the gate
+   (1 rising + 1 falling edge), then T1 ×2, T2 ×12, T3 with Motive recording at the
+   same name.
 
 ## Small open items
 
-- **After the recorder is proven**, delete the dead code left on purpose: the
-  per-marker solver, the `SETUP:` demo switch (Godot toggles too), single-camera mode,
-  `pyscripts/diagnose_jitter.py` (broken here — it opens the camera via picamera2),
-  and `tools/`'s jitter harness.
-- `uv lock` on the board, then commit it (`gpiod` is installed by hand but not
-  pinned — see [todo.md](todo.md)).
-- Back up the four calibration files off the board (`pyscripts/camera_calib.toml`,
-  `camera_calib_1.toml`, `board_geometry.json`, `stereo_extrinsics.json`) — and
-  `origin_lock.json`.
+- Delete dead code left on purpose (now safe — recorder proven): per-marker solver,
+  `SETUP:` demo switch (+ Godot toggles), single-camera mode, `diagnose_jitter.py`,
+  `tools/` jitter harness.
+- `uv lock` on the board, then commit (`gpiod` installed by hand but not pinned).
+- Back up the calibration files off the board (`camera_calib*.toml`,
+  `board_geometry.json`, `stereo_extrinsics.json`, `origin_lock.json`).
 - Auto-load `ov9282` at boot.
-- One deliberate close-up run to confirm the 10 ms budget holds with the device
-  nearest the cameras.
-- Decide on the in-game **■ Stop** button (patients can reach the researcher graph).
+- Decide on the in-game **■ Stop** button.
 
 ## Still to decide in the validation plan
 
-Acceptance criteria per measure; where the reflective markers go on the device; and
-T5 (recording during a real game), which needs Record to survive the scene change.
+Acceptance criteria per measure; where the reflective markers go on the device; T5
+(recording during a real game).
 
 ## Deliberately not done
 
-- 120 fps — possible (camera ceiling 120.6) but not needed.
-- Faster detection that changes what the detector computes (Aruco3 downscaling,
-  detecting on the raw picture) — rejected until accuracy can be checked.
-- Kiosk boot (package 5) and upload (package 7) — explicitly last.
+- Hardware camera sync — these Waveshare modules don't expose FSIN.
+- Joint two-camera solve in the live tracker — unstable while moving, costs ~1 ms.
+- Faster detection that changes what the detector computes — rejected until the mocap
+  can check accuracy.
+- Kiosk boot and upload — explicitly last.
