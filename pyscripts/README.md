@@ -38,6 +38,7 @@ Run everything from the repo root with the venv active, e.g.
 | `calibrate_camera.py` | `camera_calib.toml`, `camera_calib_1.toml` | Fisheye lens intrinsics from a chessboard. Once per camera. |
 | `calibrate_board.py` | `board_geometry.json` | Where each marker sits on the device. Once per device (redo if a marker is re-glued). |
 | `calibrate_stereo.py` | `stereo_extrinsics.json` | Fixed transform between the two cameras. Redo if a camera moves. |
+| `calibrate_rig.py` | `board_geometry.json` + `stereo_extrinsics.json` | Both fitted TOGETHER from both cameras (bundle adjustment over every corner), so the tag layout and cam1-to-cam0 agree with what both cameras see. Checks itself on held-out frames; asks before writing. |
 | `derive_offsets.py` | (prints) | Back-solves a wrong/unknown `MARKER_OFFSETS` entry from the calibrated board geometry. |
 | `markers.py` | `tag_*.png` | Regenerates the printable marker images, in the current folder. |
 
