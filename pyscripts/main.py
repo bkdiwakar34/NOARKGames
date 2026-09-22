@@ -271,6 +271,8 @@ class MainClass:
         self._stage_times = []
         # Finer split of the pose stage: [(both solvePnPs ms, search boxes ms)]
         self._sub_times = []
+        self._search_ms = []                  # per-camera search times from the camera threads
+        self._pass_capture_ms = 0.0
         # Tracker timing log — opened only when debug is on. Plays nice with
         # `tail -f` from another terminal even when Godot launches main.py.
         self._timing_log = open("/tmp/tracker_timing.log", "a", buffering=1) if self.debug else None
@@ -342,10 +344,25 @@ class MainClass:
         # then costs the slower camera, not the sum. Each camera gets its own
         # detector — ArucoDetector is not documented as safe to share across
         # threads. The computation per camera is unchanged.
-        self._cam_pool = None
+        #
+        # One single-thread executor PER camera (2026-09-22): a camera's jobs
+        # then run strictly one after another, which the overlap below relies
+        # on — its search-box state and its detector are touched by one thread.
+        #
+        # Overlap (overlap_detect_solve): the main thread solves frame N-1
+        # while the camera threads search frame N, so a pass costs about
+        # max(search, solve) instead of their sum — the sum was 10-12 ms of a
+        # 10 ms budget. Same computation per frame; each result reaches Godot
+        # one frame (10 ms) later; a frame's search box comes from the pose of
+        # two frames before (one before, without the overlap).
+        self._cam_pools = None
+        self._overlap = bool(settings.get("overlap_detect_solve", False))
+        self._pending = None                  # frame searched last pass, not yet solved
         if self._dual_camera:
             self.detector_1 = self._init_detector()
-            self._cam_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cam")
+            self._cam_pools = [ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"cam{i}")
+                               for i in (0, 1)]
+            print(f"Overlap search/solve: {'on' if self._overlap else 'off'}")
 
         # Search box (region of interest), per camera: once the device is found,
         # the next frame is undistorted and searched only in a box around the
@@ -384,7 +401,8 @@ class MainClass:
             self._device_pts = np.concatenate(
                 [self.board.corners_in_board(mid) for mid in self.board.marker_poses]
             ).astype(np.float64)
-        self._roi        = [None, None]   # (x0, y0, x1, y1) in undistorted pixels
+        self._roi        = [None, None]   # (x0, y0, x1, y1) in undistorted pixels — camera thread's own
+        self._roi_next   = [None, None]   # box from the latest pose, handed to the next search (main thread)
         self._roi_count  = [0, 0]         # markers found last frame
         self._roi_age    = [0, 0]         # frames since the last full-frame search
         self._full_count = [0, 0]         # full-frame searches since the last timing line
@@ -1313,16 +1331,30 @@ class MainClass:
 
     # ── main loop ─────────────────────────────────────────────────────────────
 
-    def _remap_detect(self, cam, frame, map1, map2, detector):
+    def _detect_job(self, cam, frame, box):
+        """One camera's search, run on that camera's own thread (_cam_pools).
+        box: the search box from the latest pose (main thread), or None to use
+        this camera's own box from its last search. Returns (image, corners,
+        ids, ms spent)."""
+        t = time.perf_counter()
+        if self._raw:
+            out = self._raw_detect(cam, frame, self.detector if cam == 0 else self.detector_1, box)
+        elif cam == 0:
+            out = self._remap_detect(0, frame, self.map1, self.map2, self.detector, box)
+        else:
+            out = self._remap_detect(1, frame, self.map1_1, self.map2_1, self.detector_1, box)
+        return (*out, (time.perf_counter() - t) * 1000.0)
+
+    def _remap_detect(self, cam, frame, map1, map2, detector, box=None):
         """One camera's share of a dual-mode frame: undistort, then detect —
         inside that camera's search box when there is one, else full-frame.
-        Runs on a _cam_pool worker; `cam` selects this camera's box state, which
-        only this camera's worker touches. The main thread is blocked waiting on
-        the result meanwhile, so the state _filter_markers reads cannot change.
+        Runs on this camera's own thread; `cam` selects this camera's box
+        state, which only that thread touches — the main thread hands in a
+        pose-based box as `box` instead of writing the state.
         Returns (undistorted image — the box crop when the box was used,
         corners in full-frame undistorted pixels, ids)."""
         self._roi_age[cam] += 1
-        roi = self._roi[cam]
+        roi = box if box is not None else self._roi[cam]
         if (self._roi_enabled and roi is not None
                 and self._roi_age[cam] < self._roi_full_every):
             x0, y0, x1, y1 = roi
@@ -1348,13 +1380,13 @@ class MainClass:
         self._update_roi(cam, corners, 0 if ids is None else len(ids))
         return frame, corners, ids
 
-    def _raw_detect(self, cam, frame, detector):
+    def _raw_detect(self, cam, frame, detector, box=None):
         """raw_joint pipeline, one camera: find the markers on the RAW frame —
         inside the search box when there is one, else full-frame. Same box
         logic as _remap_detect, minus the straightening. Corners come out in
         raw (distorted) pixels."""
         self._roi_age[cam] += 1
-        roi = self._roi[cam]
+        roi = box if box is not None else self._roi[cam]
         self._roi_used[cam] = None
         if (self._roi_enabled and roi is not None
                 and self._roi_age[cam] < self._roi_full_every):
@@ -1483,13 +1515,16 @@ class MainClass:
         return self.frame_size if self._raw else self.ud_size
 
     def _set_roi(self, cam, pts, margin) -> None:
+        """Pose-based box for this camera's NEXT search (main thread). Handed
+        over through _roi_next — never written into the camera thread's own
+        state, which may be mid-search when the overlap is on."""
         w, h = self._search_size()
         x0 = int(max(0, np.floor(pts[:, 0].min() - margin)))
         y0 = int(max(0, np.floor(pts[:, 1].min() - margin)))
         x1 = int(min(w, np.ceil(pts[:, 0].max() + margin)))
         y1 = int(min(h, np.ceil(pts[:, 1].max() + margin)))
         if x1 > x0 and y1 > y0:
-            self._roi[cam] = (x0, y0, x1, y1)
+            self._roi_next[cam] = (x0, y0, x1, y1)
 
     def _update_roi(self, cam, corners, n) -> None:
         """Next frame's search box: the markers' bounding box, widened on every
@@ -1516,65 +1551,84 @@ class MainClass:
     def process_frame(self) -> Optional[FrameResult]:
         """One pass: capture, detect, solve, fuse, and (with udp) send to
         Godot. Returns what the pass computed, or None when no new frame
-        arrived within FRAME_WAIT_S."""
-        t0 = time.perf_counter() if self.debug else 0.0
-        self._frame_ts     = [None, None]
-        self._frame_seqs   = [None, None]
-        self._last_reproj  = [None, None]
-        self._last_fusion  = None
-        self._last_stereo_gap = None
+        arrived within FRAME_WAIT_S.
 
-        # Capture frame(s)
+        With overlap_detect_solve (dual camera): this pass starts the search of
+        the new frame on the camera threads, then solves the frame searched
+        last pass while they work, and returns THAT frame's result (its own
+        capture times and sequence numbers). The first pass returns None."""
+        job = self._start_frame()
+        if job is None:
+            return None
+        if not (self._overlap and self._dual_camera):
+            return self._finish_frame(job)
+        prev, self._pending = self._pending, job
+        if prev is None:
+            return None
+        return self._finish_frame(prev)
+
+    def _start_frame(self) -> Optional[dict]:
+        """Capture, then (dual camera) hand each frame to its camera thread.
+        Returns the frame's job — frames, search futures, capture times —
+        or None when no new frame arrived."""
+        t0 = time.perf_counter()
+        self._frame_ts   = [None, None]
+        self._frame_seqs = [None, None]
         if self._dual_camera:
             frame0, frame1 = self._capture_dual_frames()
             if frame0 is None and frame1 is None:
                 return None
-            # The raw frames, before undistortion, for diagnostics/record_frames.py.
-            # A reference only: costs nothing and changes nothing below.
-            self.last_raw_frames = (frame0, frame1)
-            t1 = time.perf_counter() if self.debug else 0.0
         else:
-            frame0 = self._capture_single_frame()
-            frame1 = None
+            frame0, frame1 = self._capture_single_frame(), None
             if frame0 is None:
                 return None
-            t1 = time.perf_counter() if self.debug else 0.0
+        job = {"frames": (frame0, frame1), "ts": list(self._frame_ts),
+               "seqs": list(self._frame_seqs), "t_cap": self._frame_t_cap,
+               "futs": (None, None)}
+        self._pass_capture_ms = (time.perf_counter() - t0) * 1000.0
+        if self._dual_camera:
+            # Both cameras searched at once, each on its own thread; the box
+            # from the latest pose is handed over with the frame.
+            boxes, self._roi_next = self._roi_next, [None, None]
+            job["futs"] = tuple(
+                None if f is None else self._cam_pools[c].submit(self._detect_job, c, f, boxes[c])
+                for c, f in enumerate((frame0, frame1)))
+        return job
+
+    def _finish_frame(self, job: dict) -> FrameResult:
+        """Everything after the search, for one frame's job: wait for its
+        search, solve, fuse, origin, send, record."""
+        self._frame_ts, self._frame_seqs = job["ts"], job["seqs"]
+        self._frame_t_cap = job["t_cap"]
+        self._last_reproj  = [None, None]
+        self._last_fusion  = None
+        self._last_stereo_gap = None
+        # The raw frames, before undistortion, for diagnostics/record_frames.py.
+        # A reference only: costs nothing and changes nothing below.
+        self.last_raw_frames = job["frames"]
+        frame0, frame1 = job["frames"]
+        t_wait = time.perf_counter()
 
         # INTER_LINEAR: ~half the cost of INTER_CUBIC; corner sub-pixel accuracy
         # comes from the detector's corner refinement, not the resampling kernel.
         corners0 = ids0 = None
         corners1 = ids1 = None
         if self._dual_camera:
-            # Both cameras' remap + detect at once (see _cam_pool in __init__).
-            fut0 = fut1 = None
-            if self._raw:
-                # raw_joint: search the raw frames, no straightening.
-                if frame0 is not None:
-                    fut0 = self._cam_pool.submit(self._raw_detect, 0, frame0, self.detector)
-                if frame1 is not None:
-                    fut1 = self._cam_pool.submit(self._raw_detect, 1, frame1, self.detector_1)
-            else:
-                if frame0 is not None:
-                    fut0 = self._cam_pool.submit(self._remap_detect, 0, frame0,
-                                                 self.map1, self.map2, self.detector)
-                if frame1 is not None:
-                    fut1 = self._cam_pool.submit(self._remap_detect, 1, frame1,
-                                                 self.map1_1, self.map2_1, self.detector_1)
+            fut0, fut1 = job["futs"]
             if fut0 is not None:
-                frame0, corners0, ids0 = fut0.result()
+                frame0, corners0, ids0, ms0 = fut0.result()
                 self.video_frame = frame0
+                self._search_ms.append(ms0)
             if fut1 is not None:
-                frame1, corners1, ids1 = fut1.result()
-            # The two stages overlap now, so they are timed as one ("remap"
-            # column); detect reads 0 in dual mode.
-            t2 = t3 = time.perf_counter() if self.debug else 0.0
+                frame1, corners1, ids1, ms1 = fut1.result()
+                self._search_ms.append(ms1)
         else:
             frame0 = cv2.remap(frame0, self.map1, self.map2, interpolation=cv2.INTER_LINEAR)
             self.video_frame = frame0
-            t2 = time.perf_counter() if self.debug else 0.0
             corners0, ids0, _ = self.detector.detectMarkers(frame0)
             corners0, ids0 = self._filter_markers(corners0, ids0)
-            t3 = time.perf_counter() if self.debug else 0.0
+        t3 = time.perf_counter()
+        wait_ms = (t3 - t_wait) * 1000.0
 
         # Poll command from Godot
         if self._udp_enabled:
@@ -1669,11 +1723,15 @@ class MainClass:
 
         if self.debug:
             t4 = time.perf_counter()
+            # Main thread's time this pass: waiting for the camera frame, then
+            # waiting for the search result, then solving and sending. With the
+            # overlap the search mostly ran during the previous pass's solve,
+            # so "waited" is what is left of it, not its length.
             self._stage_times.append((
-                (t1 - t0) * 1000.0,   # capture
-                (t2 - t1) * 1000.0,   # remap (undistort)
-                (t3 - t2) * 1000.0,   # detect
-                (t4 - t3) * 1000.0,   # pose + send
+                self._pass_capture_ms,   # capture (this pass)
+                wait_ms,                 # waited for the search
+                0.0,
+                (t4 - t3) * 1000.0,      # pose + send
             ))
 
             now = time.time()
@@ -1687,15 +1745,17 @@ class MainClass:
                     means = arr.mean(axis=0)
                     total = float(means.sum())
                     if self._dual_camera:
-                        stages = (f"remap+detect (both cams, parallel): {means[1]:5.2f} ms  |  "
+                        search = float(np.mean(self._search_ms)) if self._search_ms else 0.0
+                        self._search_ms.clear()
+                        stages = (f"search per camera (own thread): {search:5.2f} ms  |  "
+                                  f"main waited for it: {means[1]:5.2f} ms  |  "
                                   f"full-frame searches: {self._full_count[0]}+{self._full_count[1]}  |  ")
                         if self._joint_solve or self._raw:
                             stages += f"joint rejects: {self._joint_rejected}  |  "
                             self._joint_rejected = 0
                         self._full_count = [0, 0]
                     else:
-                        stages = (f"remap: {means[1]:5.2f} ms  |  "
-                                  f"detect: {means[2]:5.2f} ms  |  ")
+                        stages = f"remap+detect: {means[1]:5.2f} ms  |  "
                     pose_split = ""
                     if self._sub_times:
                         sub = np.array(self._sub_times).mean(axis=0)
@@ -1752,8 +1812,9 @@ class MainClass:
         self._stop_recording()
         if self._sync is not None:
             self._sync.close()
-        if self._cam_pool is not None:
-            self._cam_pool.shutdown(wait=True)
+        if self._cam_pools is not None:
+            for pool in self._cam_pools:
+                pool.shutdown(wait=True)
         if self._camera_backend in ("rcam_single", "rcam_dual"):
             self._stop_capture.set()
             for t in self._cam_threads:
