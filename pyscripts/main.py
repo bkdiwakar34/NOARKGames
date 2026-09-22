@@ -254,6 +254,7 @@ class MainClass:
         )
 
         self.video_frame  = None                    # latest captured image, refreshed every frame
+        self.last_raw_frames = (None, None)         # latest raw (distorted) frame per camera
         self.first_frame  = True                    # True until the world origin has been locked (see _maybe_lock_origin)
         self.received_message: bytes = b""          # most recent UDP command from Godot (sticky — last command is reused each frame)
         self.addr         = None                    # Godot's UDP address, learned from the first incoming packet
@@ -1376,6 +1377,9 @@ class MainClass:
             frame0, frame1 = self._capture_dual_frames()
             if frame0 is None and frame1 is None:
                 return None
+            # The raw frames, before undistortion, for diagnostics/record_frames.py.
+            # A reference only: costs nothing and changes nothing below.
+            self.last_raw_frames = (frame0, frame1)
             t1 = time.perf_counter() if self.debug else 0.0
         else:
             frame0 = self._capture_single_frame()
