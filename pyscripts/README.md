@@ -29,6 +29,7 @@ imports without extra path plumbing.
 |---|---|
 | `recording.py` | Validation recording: the per-recording files and the OptiTrack sync pin (header pin 35, ground pin 34). Driven by `main.py` when Godot's installer screen asks. See [../docs/validation_plan.md](../docs/validation_plan.md). |
 | `analyse_holds.py` | What one T1 validation recording says without the mocap: per-place jitter, drift, height error and cam0-vs-cam1 disagreement, plus an optional map of the table. |
+| `coverage_markers.py` | Why a camera sees fewer markers at some T1 places: each unseen marker sorted into facing away / off the lens / cropped by undistortion / edge-on / missed, from the recorded pose and calibration. |
 | `derive_offsets.py` | Back-solves a wrong/unknown `MARKER_OFFSETS` entry from the calibrated board geometry plus the markers that are trusted. |
 | `pose_averaging.py` | Shared rigid-transform averaging with outlier trimming, used by both `calibrate_board.py` and `calibrate_stereo.py`. |
 | `diagnose_jitter.py` | Multi-pose noise-floor measurement for the tracker itself. (For the old-vs-rigid comparison harness see [../tools/](../tools/).) |
