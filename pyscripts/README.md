@@ -56,7 +56,7 @@ Run everything from the repo root with the venv active, e.g.
 | File | Purpose |
 |---|---|
 | `phase_test.py` | Runs the tracker without Godot and prints the two cameras' timing offset once a second. |
-| `record_frames.py` | Frame bank: guides you live to 10 T1 places and saves 50 raw frames per camera at each, for offline pipeline tests. |
+| `record_frames.py` | Frame bank: saves 50 raw frames per camera wherever you put the device, and shows which of 9 table zones are covered — for offline pipeline tests. |
 
 ## Generated files (never committed — per machine / per device)
 

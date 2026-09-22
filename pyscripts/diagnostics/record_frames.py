@@ -1,21 +1,26 @@
 """
-Frame bank: raw camera frames at chosen table places, for offline pipeline tests.
+Frame bank: raw camera frames at spots all over the table, for offline pipeline tests.
 
 Every later test of the image pipeline (undistortion, detection settings, detect
 on the raw image, ...) runs on these same frames, so versions can be compared
 directly instead of through a new T1 recording each time.
 
-Runs the real tracker without Godot (like phase_test.py) and guides you to each
-place live in the terminal, using where that place was in a full T1 recording:
+Runs the real tracker without Godot (like phase_test.py). The table is split
+into 9 zones (near / middle / far x left / centre / right) using a full T1
+recording: a spot belongs to the zone of the nearest T1 place, with
 
-    place 6 (near edge, middle)   x +42 mm  z -15 mm   (44 mm off) | cam0 5  cam1 4
-    place 6 (near edge, middle)   ON TARGET (3 mm) - hold still, Enter | cam0 5  cam1 4
+    near = grid rows 0-1, middle = rows 2-5, far = rows 6-7
+    left = columns 0-3, centre = columns 4-7, right = columns 8-11
 
-x and z are the table (game) coordinates the tracker sends to Godot: slide the
-device a little and watch which way they change. Keys: Enter = record this
-place (only when ON TARGET), s = skip, r = redo the previous place, q = quit.
+Put the device anywhere; the terminal says which zone it is in:
 
-Per place it saves FRAMES consecutive frames from each camera, untouched (the
+    zone: near-left  (not yet)  - Enter to record | cam0 3  cam1 2    done 2/9: far-left, middle-centre
+
+Enter records wherever the device is (a done zone can take more spots — useful
+along the near edge); q quits. Corner zones: push the device into the corner.
+near-centre: right at the near edge, where the pose jumped.
+
+Per spot it saves FRAMES consecutive frames from each camera, untouched (the
 raw fisheye image, before undistortion), with capture times, sequence numbers
 and what the tracker computed for each.
 
@@ -24,8 +29,8 @@ The game must be closed: both want the cameras.
     python pyscripts/diagnostics/record_frames.py
     python pyscripts/diagnostics/record_frames.py --targets ~/Documents/NOARK/validation/2026-09-22_T1_grid_r1
 
-Output: ~/Documents/NOARK/framebank/<date-time>/place_NN/{cam0.npy, cam1.npy,
-frames.csv}, plus meta.json and calib/ at the top.
+Output: ~/Documents/NOARK/framebank/<date-time>/spot_NN_<zone>/{cam0.npy,
+cam1.npy, frames.csv}, plus meta.json and calib/ at the top.
 """
 
 import argparse
@@ -47,23 +52,14 @@ sys.path.insert(0, _PYSCRIPTS_DIR)                                # main.py
 sys.path.insert(0, os.path.join(_PYSCRIPTS_DIR, "analysis"))      # analyse_holds.py
 
 from analyse_holds import read_marks, read_samples
+from coverage_markers import place_row_col
 from main import MainClass, _load_settings, calib_path
 
 FRAMES = 50
-ON_TARGET_MM = 10.0
 GRID_PLACES = 96
-PLACES = [                        # T1 place index, what it tests
-    (0,  "near left corner, weakest"),
-    (11, "near right corner"),
-    (6,  "near edge, middle: missed markers, jumps"),
-    (10, "near edge: the 59.8 mm drift place"),
-    (3,  "near edge, good (contrast)"),
-    (41, "middle"),
-    (54, "middle"),
-    (84, "far right corner"),
-    (95, "far left corner"),
-    (89, "far edge, middle"),
-]
+ROW_BANDS = [("near", range(0, 2)), ("middle", range(2, 6)), ("far", range(6, 8))]
+COL_BANDS = [("left", range(0, 4)), ("centre", range(4, 8)), ("right", range(8, 12))]
+ZONES = [f"{r}-{c}" for r, _ in ROW_BANDS for c, _ in COL_BANDS]
 CALIB_FILES = [("calibration_file", "camera_calib.toml"),
                ("camera_calib_file_1", "camera_calib_1.toml"),
                ("stereo_extrinsics_file", "stereo_extrinsics.json"),
@@ -81,17 +77,22 @@ def find_full_t1(root: str) -> str:
     sys.exit(f"No complete T1 grid under {root} — pass one with --targets")
 
 
-def place_targets(folder: str) -> dict:
-    """{place: (x mm, z mm)} — the mean table position of each T1 hold."""
+def place_positions(folder: str) -> tuple:
+    """(positions mm (N, 2) as x, z; zone name per place) from the T1 holds."""
     holds, s = read_marks(folder), read_samples(folder)
     if np.all(np.isnan(s["game_x_m"])):
         sys.exit(f"{folder} has no table (game) coordinates — origin was not locked.")
-    out = {}
-    for index, (a, b, _, _) in holds.items():
+    pos, zone = [], []
+    for index, (a, b, _, _) in sorted(holds.items()):
         x, z = s["game_x_m"][a:b], s["game_z_m"][a:b]
-        if np.any(~np.isnan(x)):
-            out[index] = (1000.0 * float(np.nanmean(x)), 1000.0 * float(np.nanmean(z)))
-    return out
+        if not np.any(~np.isnan(x)):
+            continue
+        row, col = place_row_col(index)
+        r = next(name for name, band in ROW_BANDS if row in band)
+        c = next(name for name, band in COL_BANDS if col in band)
+        pos.append((1000.0 * float(np.nanmean(x)), 1000.0 * float(np.nanmean(z))))
+        zone.append(f"{r}-{c}")
+    return np.array(pos), zone
 
 
 def same_origin(ref_folder: str) -> bool:
@@ -125,11 +126,11 @@ def n_markers(ids) -> int:
 
 
 def status_line(text: str) -> None:
-    sys.stdout.write("\r" + text.ljust(110)[:110])
+    sys.stdout.write("\r" + text.ljust(120)[:120])
     sys.stdout.flush()
 
 
-def capture_place(tracker, n: int) -> tuple:
+def capture_spot(tracker, n: int) -> tuple:
     """n consecutive passes with both raw frames: (frames0, frames1, rows)."""
     frames0, frames1, rows = [], [], []
     while len(rows) < n:
@@ -145,9 +146,8 @@ def capture_place(tracker, n: int) -> tuple:
     return np.stack(frames0), np.stack(frames1), rows
 
 
-def save_place(out_dir: str, index: int, frames0, frames1, rows) -> None:
-    d = os.path.join(out_dir, f"place_{index:02d}")
-    os.makedirs(d, exist_ok=True)
+def save_spot(d: str, frames0, frames1, rows) -> None:
+    os.makedirs(d)
     np.save(os.path.join(d, "cam0.npy"), frames0)
     np.save(os.path.join(d, "cam1.npy"), frames1)
     with open(os.path.join(d, "frames.csv"), "w", newline="") as f:
@@ -168,14 +168,12 @@ def main() -> None:
     settings = _load_settings()
     root = os.path.expanduser(settings.get("validation_data_dir", "~/Documents/NOARK/validation"))
     ref = args.targets or find_full_t1(root)
-    targets = place_targets(ref)
-    missing = [p for p, _ in PLACES if p not in targets]
-    if missing:
-        sys.exit(f"{ref} has no position for places {missing}")
-    print(f"Targets from {ref}")
+    positions, place_zone = place_positions(ref)
+    print(f"Zones from {ref}")
     if not same_origin(ref):
         print("[warn] origin_lock.json differs from the one that recording used, so the "
-              "targets may be shifted. Check the first place against where the T1 dot was.")
+              "zones may be shifted a little. Check the first spot against where the "
+              "T1 dots were.")
 
     out_dir = os.path.join(os.path.dirname(root), "framebank",
                            datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
@@ -189,7 +187,9 @@ def main() -> None:
     settings["debug"] = False                       # keep the output readable
     tracker = MainClass(cam_calib_path=calib_path(settings), settings=settings, udp=False)
     meta = {"created": datetime.now().isoformat(timespec="seconds"),
-            "targets_from": ref, "frames_per_place": args.frames,
+            "zones_from": ref, "frames_per_spot": args.frames,
+            "zones": "near = T1 rows 0-1, middle = 2-5, far = 6-7; left = columns "
+                     "0-3, centre = 4-7, right = 8-11 (zone of the nearest T1 place)",
             "frames": "raw fisheye images, uint8, shape (frames, height, width), "
                       "before undistortion",
             "settings": settings,
@@ -198,73 +198,59 @@ def main() -> None:
                             "camera_matrix_cam0": tracker.camera_matrix.tolist(),
                             "camera_matrix_cam1": (None if tracker.camera_matrix_1 is None
                                                    else tracker.camera_matrix_1.tolist())},
-            "places": {}}
+            "spots": []}
     print(f"Saving to {out_dir}\n")
-    print("Enter = record (when ON TARGET)   s = skip   r = redo previous   q = quit\n")
+    print("Enter = record here   q = quit\n")
 
-    done, i = [], 0
+    done = {z: 0 for z in ZONES}
     try:
         with Keys() as keys:
-            while i < len(PLACES):
-                index, label = PLACES[i]
-                tx, tz = targets[index]
-                key = None
-                last_draw = 0.0
-                while True:
-                    r = tracker.process_frame()
-                    key = keys.get() or key
-                    now = time.monotonic()
-                    if r is None:
-                        continue
-                    on_target, text = False, ""
-                    m0, m1 = n_markers(r.ids[0]), n_markers(r.ids[1])
-                    if r.local_coords is None:
-                        text = f"place {index} ({label})   device not tracked"
-                    else:
-                        g = np.asarray(r.local_coords).reshape(3) * 1000.0
-                        dx, dz = tx - g[0], tz - g[2]
-                        off = float(np.hypot(dx, dz))
-                        on_target = off <= ON_TARGET_MM
-                        text = (f"place {index} ({label})   "
-                                + (f"ON TARGET ({off:.0f} mm) - hold still, Enter" if on_target
-                                   else f"x {dx:+5.0f} mm  z {dz:+5.0f} mm  ({off:.0f} mm off)"))
-                    if now - last_draw > 0.1:
-                        status_line(f"{text} | cam0 {m0}  cam1 {m1}")
-                        last_draw = now
-                    if key in ("\n", "\r"):
-                        key = None
-                        if on_target:
-                            break
-                    elif key in ("s", "r", "q"):
-                        break
-                    else:
-                        key = None
+            last_draw, zone, where = 0.0, None, None
+            while True:
+                r = tracker.process_frame()
+                key = keys.get()
                 if key == "q":
                     break
-                if key == "s":
-                    print(f"\nplace {index} skipped")
-                    i += 1
+                if r is None:
                     continue
-                if key == "r":
-                    if done:
-                        i = PLACES.index(next(p for p in PLACES if p[0] == done.pop()))
-                        print(f"\nredo place {PLACES[i][0]}")
+                m0, m1 = n_markers(r.ids[0]), n_markers(r.ids[1])
+                if r.local_coords is None:
+                    zone, where = None, None
+                    text = "device not tracked"
+                else:
+                    g = np.asarray(r.local_coords).reshape(3) * 1000.0
+                    where = (float(g[0]), float(g[2]))
+                    nearest = int(np.argmin(np.hypot(*(positions - where).T)))
+                    zone = place_zone[nearest]
+                    state = "not yet" if done[zone] == 0 else f"done x{done[zone]}"
+                    text = f"zone: {zone:<13} ({state})  - Enter to record"
+                n_done = sum(1 for z in ZONES if done[z])
+                todo = [z for z in ZONES if not done[z]]
+                tail = (f"done {n_done}/9" + (f", still: {', '.join(todo)}" if todo else ", all zones"))
+                now = time.monotonic()
+                if now - last_draw > 0.1:
+                    status_line(f"{text} | cam0 {m0}  cam1 {m1}   {tail}")
+                    last_draw = now
+                if key not in ("\n", "\r") or zone is None:
                     continue
-                frames0, frames1, rows = capture_place(tracker, args.frames)
-                save_place(out_dir, index, frames0, frames1, rows)
+
+                frames0, frames1, rows = capture_spot(tracker, args.frames)
+                spot = len(meta["spots"])
+                save_spot(os.path.join(out_dir, f"spot_{spot:02d}_{zone}"), frames0, frames1, rows)
                 seqs = [row[3] for row in rows if row[3] is not None]
                 gaps = int(seqs[-1] - seqs[0] + 1 - len(seqs)) if len(seqs) > 1 else 0
-                meta["places"][str(index)] = {"label": label, "target_mm": [tx, tz],
-                                              "lost_frames_cam0": gaps}
-                print(f"\nplace {index} saved: {len(rows)} frames per camera, "
+                meta["spots"].append({"spot": spot, "zone": zone,
+                                      "position_mm": list(where), "lost_frames_cam0": gaps})
+                done[zone] += 1
+                print(f"\nspot {spot} saved in {zone}: {len(rows)} frames per camera, "
                       f"{gaps} lost")
-                done.append(index)
-                i += 1
     finally:
         tracker.close()
         with open(os.path.join(out_dir, "meta.json"), "w") as f:
             json.dump(meta, f, indent=2)
-        print(f"\n{len(done)} of {len(PLACES)} places saved in {out_dir}")
+        missing = [z for z in ZONES if not done[z]]
+        print(f"\n{len(meta['spots'])} spots saved in {out_dir}"
+              + (f"; zones not covered: {', '.join(missing)}" if missing else "; all 9 zones covered"))
 
 
 if __name__ == "__main__":
