@@ -118,6 +118,7 @@ sudo install -D -m0644 module/ov9282.ko /lib/modules/$(uname -r)/updates/ov9282.
 sudo depmod -a
 sudo modprobe ov9282
 lsmod | grep ov9282      # loaded, 0 users until the overlay lands
+echo ov9282 | sudo tee /etc/modules-load.d/ov9282.conf   # load it at every boot
 ```
 
 `ov9282` is the mainline driver that covers the OV9281; RadxaOS ships without it
@@ -172,8 +173,10 @@ Each step localises a different failure:
 | `media-ctl not found` | `v4l-utils` missing |
 | `list_cameras()` returns `[]` | pipeline up, sensor silent - check the ribbon orientation |
 
-`sudo modprobe ov9282` is still needed after **every boot**; auto-loading it is
-open work (see [todo.md](todo.md)).
+The `/etc/modules-load.d/ov9282.conf` line above loads the driver at every boot
+(verified 2026-09-22: after a reboot `lsmod | grep ov9282` shows it without any
+command). Without it, `sudo modprobe ov9282` is needed after each boot, and Godot
+started before it finds no cameras.
 
 #### Calibration and settings
 

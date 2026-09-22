@@ -8,7 +8,6 @@ The v1 product build order (logging, game feel, kiosk, installer mode, upload) i
 
 ## Tracker pipeline
 
-- **Auto-load the `ov9282` driver at boot.** Currently `sudo modprobe ov9282` is needed after every reboot (a `/etc/modules-load.d/` entry should do it, untested).
 - **Back up the per-device calibration files off the board** — `camera_calib_1.toml`, `board_geometry.json`, `stereo_extrinsics.json` are git-ignored, and the 2026-09-17 reinstall lost them.
 - **Run `uv lock` on the board** (once, then commit the result). `gpiod` was added to `pyproject.toml` on 2026-09-19 for the validation recorder's sync pin and installed by hand with `uv pip install gpiod`, so this board is fine; `uv.lock` does not list it yet, so a fresh install would come up without it and the recorder would report "sync pin unavailable".
 

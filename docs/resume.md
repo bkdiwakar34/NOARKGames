@@ -35,7 +35,7 @@ every session, while you still remember. The full story lives in
 **Starting the system** (on the board):
 
 ```bash
-sudo modprobe ov9282        # camera driver — needed after every reboot
+# camera driver loads at boot (/etc/modules-load.d/ov9282.conf, 2026-09-22)
 taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOARKGames --main-scene res://app/ui/main.tscn
 ```
 
@@ -61,7 +61,10 @@ Frame-rate check: `tail -n 3 /tmp/tracker_timing.log` (look at `missed`).
   (`board_geometry.json`, `stereo_extrinsics.json`, `camera_calib*.toml`, `origin_lock.json`).
 - Dead code inside `main.py` (per-marker solver, `SETUP:` switch, single-camera mode,
   `raw_joint` pipeline if it stays unused).
-- `uv lock` on the board, then commit (`gpiod` not pinned). Auto-load `ov9282` at boot.
+- `uv lock` on the board, then commit (`gpiod` not pinned).
+- Closing Godot leaves the tracker running a few seconds (Godot kills the bash
+  wrapper, not python) → a quick restart finds the cameras busy. Fix: `exec` in
+  `udp_receiver.gd`'s start command. Meanwhile: `pkill -f pyscripts/main.py`.
 - Decide on the in-game **■ Stop** button.
 
 ## Still to decide in the validation plan
