@@ -62,7 +62,11 @@ one piece — if the two cameras shift relative to each other, run
 
 In the lab:
 1. Let the board get online (its clock syncs; wait until `date` is right).
-2. Set up, start Godot, **re-lock the origin, redo the 4-corner table calibration**.
+2. Recalibrate everything, in this order (game closed):
+   `calibration/calibrate_camera.py --backend rcam --cam-id CAM2`, then
+   `--cam-id CAM3 --output camera_calib_1.toml`; then `calibration/calibrate_rig.py`
+   (tag layout + cam1-to-cam0 together — NOT calibrate_board/calibrate_stereo, which
+   chain the errors); then start Godot, **re-lock the origin, redo the 4 corners**.
 3. Wire eSync → pin 35, GND → pin 34; **T0**: gate low, Motive record → high → low.
    Our cameras have no IR filter: watch whether the OptiTrack's 850 nm strobes make
    the image pulse (tracking steady? `tail -n 3 /tmp/tracker_timing.log`).
