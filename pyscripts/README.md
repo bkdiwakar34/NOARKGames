@@ -50,6 +50,7 @@ Run everything from the repo root with the venv active, e.g.
 | `compare_fusion.py` | Five ways of turning both cameras' corners into one pose, compared on the same recording. |
 | `find_jumps.py` | What happens when the pose jumps: shake vs a smoothed path, and whether jumps coincide with tags changing, the fusion mode switching, the cameras disagreeing or a poor fit — compared with how common each is normally. |
 | `bench_joint.py` | The joint two-camera solve, slow (numerical derivatives) vs standard (derivatives written out), on one recording's corners: time per fit on the board, agreement between the two, acceptance. |
+| `which_calibration.py` | Which calibration makes the cameras disagree: each camera alone vs the joint fit, per tag, by distance from the image centre and by table zone — points at the stereo, device or lens calibration. |
 | `camera_placement.py` | Where should the cameras sit? Scores "what if" placements (moved back / up, re-aimed) at every T1 place from the recorded device poses: usable markers, worst angle, sharpness. |
 | `check_board.py` | Is the device geometry the limit? Per-marker consistency of `board_geometry.json`. |
 
