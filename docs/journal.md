@@ -16,6 +16,129 @@ New entries go at the **top**, under the date.
 
 ---
 
+## 2026-09-22 — Why the two cameras disagreed, and a calibration that makes them agree
+
+**Ended the day with:** the tracker at 100 samples/s with 0 lost (search and solve
+overlapped), ONE joint solve over both cameras' corners instead of averaging two
+poses, and a new tag layout + camera-to-camera calibration fitted together from
+both cameras. Cursor clearly steadier; a very slight shimmer remains. The camera
+setup was moved so the device no longer comes right up to the cameras.
+
+### 1. Do the cameras cover the whole table?
+
+`analysis/coverage_markers.py` (new) sorts every tag a camera did NOT see into:
+facing away / off the lens / cropped by the image straightening / edge-on / in
+view but missed. On a full T1 grid (96 places):
+
+- Both cameras saw the device at **every** place (lowest 86 % of samples).
+- **Nothing was ever off the lens** (`sensor = 0`): the 160° lens covers the table.
+- At the two near corners 3 tags per camera were **cropped by the straightening**:
+  it drew a 1280 x 800 image with the lens's own focal length, which keeps only
+  ~49° to each side of a lens that sees ~66°. A border setting
+  (`undistort_pad_x_px`) fixes that — 489 px brought back ~40 % of those tags —
+  but costs frames, so it is **0** for now.
+- Near the middle of the near edge, tags in plain view were **missed** — the
+  places where the pose jumped. Suspect (not tested): the tags are biggest there
+  and the black/white window is a single 15 px (`adaptive_thresh_win_size`).
+
+### 2. Camera placement, lens, exposure (worked out, nothing changed)
+
+- `analysis/camera_placement.py` (new) re-scores the recorded device poses as if
+  the cameras were moved back / up / re-aimed. The cameras sit at device height
+  (10 mm above the grip plane), looking along the table. Moving back lowers the
+  worst angle (57° -> 41° at 200 mm) but costs sharpness (jitter x1.37); moving up
+  does nothing — the tags are on the device's sides.
+- 160° lens: needed for the near corners (±61° across); the best possible other
+  lens would be only ~8 % sharper.
+- Exposure stays **5 ms** for now. For movements up to ~1 m/s (healthy reaching
+  peaks ~1.1 m/s) 2–3 ms is the target, which needs ~2.5x more light. A
+  colleague's recorder measured **44 % frame-to-frame brightness pulsing at 5 ms
+  under 50 Hz room light** on this board. Plan: a non-dimmable 5 V USB COB LED
+  strip above the cameras. **Not 850 nm infrared** — the OptiTrack works at 850 nm.
+
+### 3. Camera time offset
+
+The colleague's `dual_recorder_rcam.py` corrects ~50 ppm drift between the two
+sensors' crystals. Ours: **0.3 ppm** over 120 s (offset stayed −0.1..−0.2 ms), so
+the start-up alignment is enough. One real gap closed: a frame could be paired
+with the other camera's frame up to 20 ms away — i.e. its *previous* frame, 10 ms
+older (10 mm apart at 1 m/s). `stereo_max_frame_skew_ms` 20 -> **2**.
+
+### 4. 100 samples/s, for real this time
+
+The tracker's own timing line showed each pass needed **10–12 ms** of a 10 ms
+budget: search 7.5–9 ms, then solve 2.5–3.3 ms, one after the other.
+**Overlap** (`overlap_detect_solve`): the camera threads search frame N while the
+main thread solves frame N−1. Result through Godot: **100/s, 0 missed**, main
+thread waiting 0.1 ms for the search, ~7 ms spare per frame. Cost: each position
+reaches Godot 10 ms later. Each camera now has its own worker thread.
+
+- Dead end: `phase_test.py`'s "pairs per second" said 80–93 for old and new code
+  alike — it measured the test harness, not a regression. **Check frame rate
+  through Godot** (recording's missed frames, `/tmp/tracker_timing.log`).
+- Still open: a camera that cannot see the device (a hand, a lens cap) searches
+  its whole image every frame, and frames are lost.
+- Still open: right up against the cameras the search box covers most of the
+  image and the rate drops (~86/s). Worked around by moving the setup.
+
+### 5. The jitter: the two cameras disagreed
+
+`analysis/find_jumps.py` (new) finds every sample that jumps off the smoothed
+path and checks what coincided with it:
+
+- **T1: jumps up to 41 mm**, all alike — cam0 sees tags 24, 28, cam1 only tag 28,
+  the two poses 51–57 mm apart, and the tracker keeps **cam1**. The averaging
+  picked the camera with the lower fit error on disagreement and weighted by
+  1/error²; a single tag's 4 corners always fit well, so the camera seeing FEWER
+  tags — the least certain pose — won.
+- T2 (moving): small jumps, twice as likely when the cameras were > 5 mm apart.
+
+**Joint solve** (`"dual_solve": "joint"`): one pose fitted to all corners of both
+cameras, each camera counting by its corners — no picking, no averaging.
+First version dropped to ~12/s near the cameras. Checked offline
+(`analysis/bench_joint.py`, new): the slow fitter was not the reason — the joint
+fit **rejected 85 % of frames** on the T1 grid: no single pose fitted both
+cameras there. The fast, standard version (`board.estimate_board_pose_dual_gn`,
+derivatives written out) gives identical answers (0.000 mm on 69 583 fits), ~2 ms,
+worst 8.5 ms instead of 44.
+
+**Why no single pose fitted:** the tag layout (`board_geometry.json`) was
+measured with ONE camera, pair by pair, and the camera-to-camera calibration was
+built on top of it; nothing made them agree with both cameras at once.
+`analysis/which_calibration.py` (new) pointed at the layout (tags 20, 24 worse in
+both cameras alone).
+
+**Fix: `calibration/calibrate_rig.py` (new)** — 60 s of moving the device in front
+of both cameras, then one bundle adjustment: every tag's pose on the device
+(tag 12 fixed), cam1 relative to cam0 and the device pose per frame, over every
+corner of both cameras. Checked on frames the fit never saw:
+
+| | median | 90th pct |
+|---|---|---|
+| old calibration | 1.26 px | 2.15 px |
+| new calibration | **0.80 px** | **1.42 px** |
+
+Tags moved 0.65–3.07 mm (28 the most; 20, 32, 24 next); cam1 moved 2.01 mm and
+turned 0.31° (baseline 75.0 -> 76.1 mm). Old files kept as `*.before-<date-time>`.
+
+### 6. Dead ends, kept for the record
+
+- **`"pipeline": "raw_joint"`** (built, off): tags found on the raw fisheye image
+  + one solve through the lens model. Two changes at once, not faster (89/s),
+  jittery — tested before the calibration was fixed. Stays in the code, off.
+  A live search-box view (`debug_preview_box`) exists for it.
+- **Border 489 px**: brings back corner tags, costs frames. Setting kept, at 0.
+- Several recordings were redone because the morning T1 grid was deleted.
+
+### 7. Housekeeping
+
+`pyscripts/` reorganised: the tracker stays at the top (Godot starts it there);
+`calibration/`, `analysis/`, `diagnostics/` hold the rest. `tools/` and
+`diagnose_jitter.py` deleted (in git history). New: frame bank recorder
+(`diagnostics/record_frames.py`, 11 spots of raw frames, unused so far).
+
+---
+
 ## 2026-09-21 — The recorder in use, and why two cameras help so little
 
 **Ended the day with:** a finished recorder screen (T1, T2, T3), a full-table T1

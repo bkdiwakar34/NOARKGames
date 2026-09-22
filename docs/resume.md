@@ -9,30 +9,28 @@ every session, while you still remember. The full story lives in
 
 ---
 
-**Last updated:** 2026-09-22
+**Last updated:** 2026-09-22, 17:10
 
 **This repo is the Dragon Q6A one.** The Raspberry Pi version is `bkdiwakar34/NOARKGames-pi`.
 
 ## State
 
-**Goal: validate the device against the lab's OptiTrack.** Protocol:
-**[validation_plan.md](validation_plan.md)** — read it first. The July agenda (data
-audit → healthy-user test → analysis) waits until this is done.
+**Goal: validate the device against the lab's OptiTrack — session planned for
+2026-09-23.** Protocol: **[validation_plan.md](validation_plan.md)**.
 
-**The recorder works** — Godot installer (F10) → **Validation recorder**:
-- **T1**: 96 places over the whole table; **space** = 3 s hold, **backspace** = redo.
-- **T2**: red pacer dot on a circle / figure-eight at 100 / 200 / 300 mm/s, 3 s lead-in,
-  stops itself after 30 s.
-- **T3**: centre → target → centre. **Not tried yet.**
-- **Escape** stops a recording. Files per recording: `samples.csv`, `corners.csv`,
-  `sync.csv`, `marks.csv` (maps samples to places / laps), `calib/`, `meta.json`.
+**The tracker today** (committed `settings.json`):
+- `"dual_solve": "joint"` — ONE solve over all corners of both cameras (fast,
+  derivatives written out). `"average"` = the old per-camera average, as a fallback.
+- `"overlap_detect_solve": true` — search frame N while solving N−1:
+  **100 samples/s, 0 missed** through Godot. Positions arrive 10 ms later.
+- `"pipeline": "current"` (image straightened), border `0`, 15 px threshold window,
+  5 ms exposure, `stereo_max_frame_skew_ms` 2.
+- **Calibration redone 2026-09-22 with `calibration/calibrate_rig.py`** (tag layout +
+  cam1-to-cam0 fitted together): held-out error 1.26 → 0.80 px. Old files kept as
+  `pyscripts/*.before-<date-time>`.
+- Camera setup moved away from the near edge; origin re-locked, 4 corners redone.
 
-**The tracker holds 100 samples/s over the whole table** (0 lost on a full T1 grid,
-0.03 % on six T2 runs). **The two cameras' frames are aligned at start-up** to
-~0.2–0.4 ms (was 1.6–4.6 ms, different each start).
-
-**Sync wiring: eSync 2 signal → header pin 35, ground → pin 34** (pin 15 dropped —
-it idles HIGH).
+**Result:** big jumps gone, cursor steadier; a **very slight shimmer** remains.
 
 **Starting the system** (on the board):
 
@@ -41,38 +39,29 @@ sudo modprobe ov9282        # camera driver — needed after every reboot
 taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOARKGames --main-scene res://app/ui/main.tscn
 ```
 
-"Device or resource busy" = a tracker is still running: `pkill -f pyscripts/main.py`.
+Frame-rate check: `tail -n 3 /tmp/tracker_timing.log` (look at `missed`).
 
-## Where we stopped
+## Next action (user's plan)
 
-Investigating why two cameras give so little less jitter (still ~0.44 mm static,
-~0.66 mm moving). **Answer found:** they are 75 mm apart at ~500 mm (8.5° between
-views), so both are weak in the same direction; the device's own 250 mm marker spread
-is already a better depth ruler. Averaging is the best of five fusion methods tried;
-the 6-DOF joint solve is unstable while moving (off in the tracker).
-
-Open offer: a one-page `docs/why_two_cameras.md` with just this, in your numbers.
-
-## Next action
-
-Pick one:
-
-1. **Table-plane fit, offline** — fit only x, z, yaw (plane from `origin_lock.json`) to
-   both cameras' corners, test on the T1 grid and `T2_eight_fast_r1` with
-   `compare_fusion.py`. Free, no hardware. Only if it wins does it go into the tracker.
-2. **Try T3 once**, then **the lab session**: wire pin 35/34, `T0` to check the gate
-   (1 rising + 1 falling edge), then T1 ×2, T2 ×12, T3 with Motive recording at the
-   same name.
+1. **Validation screen (F10 → Validation recorder):** make sure it is right for tomorrow.
+2. **Jitter, a little more** — candidates, cheapest first:
+   - room-light flicker (44 % brightness pulsing measured at 5 ms): lights-off test,
+     then a non-dimmable 5 V USB COB LED strip above the cameras (not 850 nm IR);
+   - black/white window 15 → 23 px (`adaptive_thresh_win_size`) for big near tags.
+   Measure with a T1 rows 0–1 recording + `analysis/analyse_holds.py` / `find_jumps.py`.
+3. **2026-09-23: the lab session** — wire pin 35/34, T0 gate check, T1 ×2, T2 ×12, T3,
+   Motive recording at the same name. T3 still untried.
 
 ## Small open items
 
-- Delete dead code left on purpose inside `main.py` (now safe — recorder proven):
-  per-marker solver, `SETUP:` demo switch (+ Godot toggles), single-camera mode.
-  (`diagnose_jitter.py` and `tools/` were deleted 2026-09-22.)
-- `uv lock` on the board, then commit (`gpiod` installed by hand but not pinned).
-- Back up the calibration files off the board (`camera_calib*.toml`,
-  `board_geometry.json`, `stereo_extrinsics.json`, `origin_lock.json`).
-- Auto-load `ov9282` at boot.
+- A camera that cannot see the device searches its whole image every frame → lost
+  frames (hand, lens cap). Fix: place its box from the other camera's pose / throttle.
+- Right up against the cameras the rate drops (~86/s); avoided by the new placement.
+- Back up the calibration files off the board — **including the new ones**
+  (`board_geometry.json`, `stereo_extrinsics.json`, `camera_calib*.toml`, `origin_lock.json`).
+- Dead code inside `main.py` (per-marker solver, `SETUP:` switch, single-camera mode,
+  `raw_joint` pipeline if it stays unused).
+- `uv lock` on the board, then commit (`gpiod` not pinned). Auto-load `ov9282` at boot.
 - Decide on the in-game **■ Stop** button.
 
 ## Still to decide in the validation plan
@@ -83,7 +72,6 @@ Acceptance criteria per measure; where the reflective markers go on the device; 
 ## Deliberately not done
 
 - Hardware camera sync — these Waveshare modules don't expose FSIN.
-- Joint two-camera solve in the live tracker — unstable while moving, costs ~1 ms.
-- Faster detection that changes what the detector computes — rejected until the mocap
-  can check accuracy.
+- Drift correction between the cameras — measured 0.3 ppm, not needed.
+- Faster detection that changes what the detector computes — until the mocap can check it.
 - Kiosk boot and upload — explicitly last.
