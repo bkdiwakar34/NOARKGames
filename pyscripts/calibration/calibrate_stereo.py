@@ -18,7 +18,7 @@ Procedure:
   4. Watch the sample counter; aim for >= 20.
   5. Press S to solve and save, Q/Esc to abort.
 
-Run: python pyscripts/calibrate_stereo.py
+Run: python pyscripts/calibration/calibrate_stereo.py
 
 Imports no other script — only the two shared libraries: board.py (the device
 model and pose solve, which must be the same one main.py tracks with) and
@@ -37,6 +37,11 @@ import numpy as np
 import toml
 from cv2 import aruco
 
+# pyscripts/, one folder up: board.py and pose_averaging.py are imported from
+# there, and the tracker reads its calibration files there.
+_PYSCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PYSCRIPTS_DIR)
+
 from board import BoardGeometry, estimate_board_pose
 from pose_averaging import robust_average_transform
 
@@ -51,9 +56,8 @@ STABLE_FRAMES        = 6     # consecutive stable frames (both cameras) before a
 STABLE_PX_THRESHOLD  = 4.0   # max corner motion (px) to count as still — 2.0 rarely passed in room light
 COOLDOWN_S           = 2.0   # min seconds between accepted samples — forces a genuine move to the next pose
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_SETTINGS_PATH = os.path.join(_SCRIPT_DIR, "..", "settings.json")
-OUTPUT_PATH = os.path.join(_SCRIPT_DIR, "stereo_extrinsics.json")
+_SETTINGS_PATH = os.path.join(_PYSCRIPTS_DIR, "..", "settings.json")
+OUTPUT_PATH = os.path.join(_PYSCRIPTS_DIR, "stereo_extrinsics.json")
 
 
 def _settings() -> dict:
@@ -67,7 +71,7 @@ def load_calibration(settings_key: str = "calibration_file",
                      default_name: str = "camera_calib.toml"):
     """One camera's fisheye intrinsics from its .toml, named in settings.json."""
     calib_name = _settings().get(settings_key, default_name)
-    path = calib_name if os.path.isabs(calib_name) else os.path.join(_SCRIPT_DIR, calib_name)
+    path = calib_name if os.path.isabs(calib_name) else os.path.join(_PYSCRIPTS_DIR, calib_name)
     if not os.path.exists(path):
         sys.exit(f"Calibration file not found: {path}. Run calibrate_camera.py first.")
     data = toml.load(path)
@@ -136,7 +140,7 @@ class StillnessCheck:
 def load_board() -> BoardGeometry:
     settings = _settings()
     name = settings.get("board_geometry_file", "board_geometry.json")
-    path = name if os.path.isabs(name) else os.path.join(_SCRIPT_DIR, name)
+    path = name if os.path.isabs(name) else os.path.join(_PYSCRIPTS_DIR, name)
     if not os.path.exists(path):
         sys.exit(f"board_geometry.json not found at {path}. Run calibrate_board.py first.")
     return BoardGeometry.load(path)

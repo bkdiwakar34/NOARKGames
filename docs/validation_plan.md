@@ -281,7 +281,9 @@ marker spread is a longer depth ruler than the 75 mm baseline. Next test: fit on
 the 3 real unknowns (x, z, yaw on the table plane from `origin_lock.json`) to both
 cameras' corners, offline, before any hardware change.
 
-Analysis scripts (all offline, on the board): `analyse_holds.py` (per-place jitter,
-drift, height, camera disagreement, `--png` map), `compare_fusion.py` (five fusion
-methods; hold mode for T1, smoothness mode for T2), `check_board.py` (per-marker
-consistency of `board_geometry.json`), `phase_test.py` (camera offset over time).
+Analysis scripts (all offline, on the board, in `pyscripts/analysis/`):
+`analyse_holds.py` (per-place jitter, drift, height, camera disagreement, `--png`
+map), `coverage_markers.py` (why a camera misses markers at a place),
+`compare_fusion.py` (five fusion methods; hold mode for T1, smoothness mode for
+T2), `check_board.py` (per-marker consistency of `board_geometry.json`). Camera
+offset over time: `pyscripts/diagnostics/phase_test.py`.

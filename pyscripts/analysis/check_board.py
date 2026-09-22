@@ -20,16 +20,20 @@ Run on a T1 recording, which holds the device still at many places:
 Uses the calibration stored with the recording, so old recordings stay
 interpretable.
 
-    python pyscripts/check_board.py [folder] [--worst 3]
+    python pyscripts/analysis/check_board.py [folder] [--worst 3]
 """
 
 import argparse
 import collections
 import csv
 import os
+import sys
 
 import cv2
 import numpy as np
+
+# pyscripts/, one folder up, for board.py (the other imports are in this folder).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from analyse_holds import newest_recording, read_marks
 from board import BoardGeometry, estimate_board_pose, marker_object_points

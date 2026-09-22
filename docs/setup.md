@@ -72,7 +72,7 @@ Dependencies declared in `pyproject.toml`; `uv.lock` pins exact versions.
 Print or display a 9×6 chessboard (square side **24.35 mm**, measured). Then:
 
 ```bash
-python pyscripts/calibrate_camera.py
+python pyscripts/calibration/calibrate_camera.py --backend rcam --cam-id CAM2
 ```
 
 The script auto-captures frames when the board is held steady, runs `cv2.fisheye.calibrate`, and writes `pyscripts/camera_calib.toml`. Multi-pose verification at the end reports accuracy (mm), precision (mm), and reprojection fit (px) per pose. A typical good calibration has reprojection error < 1 px.
@@ -86,7 +86,7 @@ joint rigid-body solvePnP over all visible markers (much less depth jitter
 than per-marker averaging).
 
 ```bash
-python pyscripts/calibrate_board.py
+python pyscripts/calibration/calibrate_board.py --backend rcam --cam-id CAM2
 ```
 
 Slowly rotate the device in front of the camera so every adjacent marker pair
@@ -177,12 +177,12 @@ open work (see [todo.md](todo.md)).
 
 #### Calibration and settings
 
-1. `calibrate_camera.py` once per camera - default `camera_calib.toml` for cam0
-   (`CAM2`), then again with `"calibration_file"` overridden (or renamed after)
-   to produce `camera_calib_1.toml` for cam1 (`CAM3`).
-2. `calibrate_board.py` (one board, either camera) if `board_geometry.json`
-   does not exist yet.
-3. `python pyscripts/calibrate_stereo.py` - the fixed rigid transform between the
+1. `pyscripts/calibration/calibrate_camera.py` once per camera - default
+   `camera_calib.toml` for cam0 (`CAM2`), then
+   `--cam-id CAM3 --output camera_calib_1.toml` for cam1.
+2. `pyscripts/calibration/calibrate_board.py` (one board, either camera) if
+   `board_geometry.json` does not exist yet.
+3. `python pyscripts/calibration/calibrate_stereo.py` - the fixed rigid transform between the
    two cameras, from both tracking the same board simultaneously (no separate
    checkerboard). Move the device until the sample counter passes 60, press **S**
    to save `pyscripts/stereo_extrinsics.json`.

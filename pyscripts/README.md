@@ -1,43 +1,64 @@
-# pyscripts/ — the tracker and its calibration tools
+# pyscripts/ — the tracker and its tools
 
-ArUco marker tracking → UDP → Godot. Run `main.py` before the game (the Godot
-`UDPReceiver` autoload normally launches it for you). See
+ArUco marker tracking → UDP → Godot. The Godot `UDPReceiver` autoload launches
+`main.py` for you (`cd pyscripts && python main.py`). See
 [../docs/setup.md](../docs/setup.md) for the hardware and full run instructions.
 
-Files are deliberately flat — they import each other as siblings
-(`from board import ...`), so moving them into subfolders would break those
-imports without extra path plumbing.
+```
+pyscripts/
+  main.py, board.py, recording.py, pose_averaging.py   the tracker
+  camera_calib*.toml, board_geometry.json, ...          this board's calibration (not in git)
+  calibration/     run once per camera / device
+  analysis/        read a validation recording, change nothing
+  diagnostics/     checks on the live system
+```
+
+The tracker and the calibration files stay at the top: Godot starts `main.py`
+from here and `main.py` reads the calibration files next to itself. Scripts in
+the subfolders put `pyscripts/` on Python's path at their top, so they import
+`board.py` etc. as before, and the calibration scripts write their files here,
+not into `calibration/`.
+
+Run everything from the repo root with the venv active, e.g.
+`python pyscripts/analysis/analyse_holds.py`.
 
 ## The tracker
 
 | File | Purpose |
 |---|---|
-| `main.py` | The tracker. Camera capture, marker detection, pose solve (joint rigid-body or per-marker), origin lock, UDP streaming to Godot. No smoothing. |
+| `main.py` | The tracker. Camera capture, undistortion, marker detection, pose solve, fusion of the two cameras, origin lock, UDP streaming to Godot. No smoothing. |
 | `board.py` | Shared device model: `MARKER_LENGTH`, `MARKER_OFFSETS` (grip offset per marker), and the `BoardGeometry` class that reads/writes `board_geometry.json`. |
+| `recording.py` | Validation recording: the per-recording files and the OptiTrack sync pin (header pin 35, ground pin 34). Driven by `main.py` when Godot's installer screen asks. See [../docs/validation_plan.md](../docs/validation_plan.md). |
+| `pose_averaging.py` | Rigid-transform averaging with outlier trimming, shared by the tracker and the calibration scripts. |
 
-## Calibration (run once each — see setup.md for when)
+## calibration/ — run once each (see setup.md for when)
 
 | File | Produces | Purpose |
 |---|---|---|
-| `calibrate_camera.py` | `camera_calib.toml` | Fisheye lens intrinsics from a chessboard. Once per camera. |
-| `calibrate_board.py` | `board_geometry.json` | Where each marker sits on the device, by chaining pairwise transforms to a reference marker. Once per device (redo if a marker is re-glued). |
-| `calibrate_stereo.py` | `stereo_extrinsics.json` | Fixed transform between the two cameras (Dragon Q6A dual-camera setup only). |
+| `calibrate_camera.py` | `camera_calib.toml`, `camera_calib_1.toml` | Fisheye lens intrinsics from a chessboard. Once per camera. |
+| `calibrate_board.py` | `board_geometry.json` | Where each marker sits on the device. Once per device (redo if a marker is re-glued). |
+| `calibrate_stereo.py` | `stereo_extrinsics.json` | Fixed transform between the two cameras. Redo if a camera moves. |
+| `derive_offsets.py` | (prints) | Back-solves a wrong/unknown `MARKER_OFFSETS` entry from the calibrated board geometry. |
+| `markers.py` | `tag_*.png` | Regenerates the printable marker images, in the current folder. |
 
-## Utilities
+## analysis/ — offline, from one recording
 
 | File | Purpose |
 |---|---|
-| `recording.py` | Validation recording: the per-recording files and the OptiTrack sync pin (header pin 35, ground pin 34). Driven by `main.py` when Godot's installer screen asks. See [../docs/validation_plan.md](../docs/validation_plan.md). |
-| `analyse_holds.py` | What one T1 validation recording says without the mocap: per-place jitter, drift, height error and cam0-vs-cam1 disagreement, plus an optional map of the table. |
-| `coverage_markers.py` | Why a camera sees fewer markers at some T1 places: each unseen marker sorted into facing away / off the lens / cropped by undistortion / edge-on / missed, from the recorded pose and calibration. |
-| `derive_offsets.py` | Back-solves a wrong/unknown `MARKER_OFFSETS` entry from the calibrated board geometry plus the markers that are trusted. |
-| `pose_averaging.py` | Shared rigid-transform averaging with outlier trimming, used by both `calibrate_board.py` and `calibrate_stereo.py`. |
-| `diagnose_jitter.py` | Multi-pose noise-floor measurement for the tracker itself. (For the old-vs-rigid comparison harness see [../tools/](../tools/).) |
-| `markers.py` | Regenerates the printable ArUco marker PNGs. |
+| `analyse_holds.py` | What one T1 recording says without the mocap: per-place jitter, drift, height error, cam0-vs-cam1 disagreement, coverage, plus an optional map of the table (`--png`, `--key`). |
+| `coverage_markers.py` | Why a camera sees fewer markers at some T1 places: each unseen marker sorted into facing away / off the lens / cropped by undistortion / edge-on / missed; suggests the undistortion border. |
+| `compare_fusion.py` | Five ways of turning both cameras' corners into one pose, compared on the same recording. |
+| `check_board.py` | Is the device geometry the limit? Per-marker consistency of `board_geometry.json`. |
+
+## diagnostics/ — on the live system (close the game first)
+
+| File | Purpose |
+|---|---|
+| `phase_test.py` | Runs the tracker without Godot and prints the two cameras' timing offset once a second. |
 
 ## Generated files (never committed — per machine / per device)
 
 `camera_calib*.toml`, `board_geometry.json`, `stereo_extrinsics.json`,
-`origin_lock.json`. These describe *this* camera and *this* device; syncing one
-machine's copy onto another silently corrupts tracking, so `.gitignore` keeps
-them local. Back them up outside git.
+`origin_lock.json`, in this folder. These describe *this* camera and *this*
+device; syncing one machine's copy onto another silently corrupts tracking, so
+`.gitignore` keeps them local. Back them up outside git.

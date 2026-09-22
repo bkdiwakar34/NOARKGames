@@ -13,8 +13,7 @@ Procedure:
   3. Watch the pair counters in the preview; aim for >= 30 per pair.
   4. Press S to solve and save, Q/Esc to abort.
 
-Run on the Pi:   python pyscripts/calibrate_board.py
-Run on the Q6A:  python pyscripts/calibrate_board.py --backend rcam --cam-id CAM2
+Run on the Q6A:  python pyscripts/calibration/calibrate_board.py --backend rcam --cam-id CAM2
                  (board geometry only needs one camera — either works, no
                  need to repeat this per camera)
 """
@@ -31,6 +30,11 @@ import numpy as np
 import toml
 from cv2 import aruco
 
+# pyscripts/, one folder up: board.py and pose_averaging.py are imported from
+# there, and the tracker reads its calibration files there.
+_PYSCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PYSCRIPTS_DIR)
+
 from board import (
     BoardGeometry,
     MARKER_LENGTH,
@@ -46,15 +50,14 @@ ROT_TOL_RAD      = np.deg2rad(3.0)   # outlier trim: rotation residual
 TRANS_TOL_M      = 0.005             # outlier trim: translation residual (5 mm)
 REFERENCE_ID     = 12
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_PATH = os.path.join(_SCRIPT_DIR, "board_geometry.json")
+OUTPUT_PATH = os.path.join(_PYSCRIPTS_DIR, "board_geometry.json")
 
 
 def _rcam_controls() -> dict:
     """Exposure, gain and frame rate from settings.json — the same keys main.py
     reads, so every program runs the cameras the same way instead of inheriting
     whatever the last program left set on the sensor."""
-    path = os.path.join(_SCRIPT_DIR, "..", "settings.json")
+    path = os.path.join(_PYSCRIPTS_DIR, "..", "settings.json")
     s = {}
     if os.path.exists(path):
         with open(path) as f:
@@ -66,18 +69,18 @@ def _rcam_controls() -> dict:
     }
 
 
-# ── setup (mirrors diagnose_jitter.py) ───────────────────────────────────────
+# ── setup ────────────────────────────────────────────────────────────────────
 
 def load_calibration(settings_key: str = "calibration_file", default_name: str = "camera_calib.toml"):
     """settings_key/default_name let calibrate_stereo.py call this a second
     time for cam1's own intrinsics (settings_key="camera_calib_file_1"),
     without duplicating the path-resolution/loading logic."""
-    settings_path = os.path.join(_SCRIPT_DIR, "..", "settings.json")
+    settings_path = os.path.join(_PYSCRIPTS_DIR, "..", "settings.json")
     calib_name = default_name
     if os.path.exists(settings_path):
         with open(settings_path) as f:
             calib_name = json.load(f).get(settings_key, calib_name)
-    path = calib_name if os.path.isabs(calib_name) else os.path.join(_SCRIPT_DIR, calib_name)
+    path = calib_name if os.path.isabs(calib_name) else os.path.join(_PYSCRIPTS_DIR, calib_name)
     if not os.path.exists(path):
         sys.exit(f"Calibration file not found: {path}. Run calibrate_camera.py first.")
     data = toml.load(path)

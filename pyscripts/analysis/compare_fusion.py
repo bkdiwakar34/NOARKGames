@@ -19,8 +19,8 @@ Everything comes from the recording's own calib/ copies, so an old recording is
 still analysed with the calibration it was made under.
 
 Run (on the board, venv active):
-    python pyscripts/compare_fusion.py                    # newest recording
-    python pyscripts/compare_fusion.py <folder> --stride 3
+    python pyscripts/analysis/compare_fusion.py                    # newest recording
+    python pyscripts/analysis/compare_fusion.py <folder> --stride 3
 """
 
 import argparse
@@ -34,6 +34,9 @@ import cv2
 import numpy as np
 import toml
 from scipy.optimize import least_squares
+
+# pyscripts/, one folder up, for board.py (analyse_holds.py is in this folder).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from analyse_holds import newest_recording, read_marks
 from board import BoardGeometry, estimate_board_pose

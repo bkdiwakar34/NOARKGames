@@ -10,9 +10,8 @@ After saving, a verify step reports three quality numbers:
   - precision (mm)  — std of position across still frames
   - fit       (px)  — reprojection error on the verify frames
 
-Run on the Pi:        python pyscripts/calibrate_camera.py
-Run on the Q6A:       python pyscripts/calibrate_camera.py --backend rcam --cam-id CAM2
-                      python pyscripts/calibrate_camera.py --backend rcam --cam-id CAM3 --output camera_calib_1.toml
+Run on the Q6A:       python pyscripts/calibration/calibrate_camera.py --backend rcam --cam-id CAM2
+                      python pyscripts/calibration/calibrate_camera.py --backend rcam --cam-id CAM3 --output camera_calib_1.toml
 """
 
 import argparse
@@ -36,14 +35,15 @@ COOLDOWN_S          = 2.0        # min seconds between auto-snaps
 STABLE_FRAMES       = 15         # how many frames the board must barely move
 STABLE_PX_THRESHOLD = 2.0        # max mean corner motion (px) to count as still
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# pyscripts/, one folder up: the tracker reads its calibration files there.
+_PYSCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _rcam_controls() -> dict:
     """Exposure, gain and frame rate from settings.json — the same keys main.py
     reads, so every program runs the cameras the same way instead of inheriting
     whatever the last program left set on the sensor."""
-    path = os.path.join(_SCRIPT_DIR, "..", "settings.json")
+    path = os.path.join(_PYSCRIPTS_DIR, "..", "settings.json")
     s = {}
     if os.path.exists(path):
         with open(path) as f:
@@ -367,10 +367,11 @@ def main():
     parser.add_argument("--cam-id", default="CAM2",
                         help="rcam camera label, e.g. CAM2 or CAM3 (only used with --backend rcam)")
     parser.add_argument("--output", default="camera_calib.toml",
-                        help="output .toml filename, written next to this script "
-                             "(use camera_calib_1.toml for the second Q6A camera)")
+                        help="output .toml filename, written to pyscripts/ where the "
+                             "tracker reads it (use camera_calib_1.toml for the "
+                             "second Q6A camera)")
     args = parser.parse_args()
-    output_path = os.path.join(_SCRIPT_DIR, args.output)
+    output_path = os.path.join(_PYSCRIPTS_DIR, args.output)
 
     cam = init_camera(backend=args.backend, cam_id=args.cam_id)
     imgpoints = []

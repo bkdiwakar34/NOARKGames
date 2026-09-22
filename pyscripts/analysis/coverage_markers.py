@@ -28,9 +28,9 @@ of one camera add up to the device's marker count. The last block says how
 big a border would have held every `crop` marker of this recording.
 
 Run:
-    python pyscripts/coverage_markers.py                     # newest recording
-    python pyscripts/coverage_markers.py <folder>
-    python pyscripts/coverage_markers.py <folder> --rows 0 1  # only these grid rows
+    python pyscripts/analysis/coverage_markers.py                     # newest recording
+    python pyscripts/analysis/coverage_markers.py <folder>
+    python pyscripts/analysis/coverage_markers.py <folder> --rows 0 1  # only these grid rows
 """
 
 import argparse
@@ -43,6 +43,9 @@ import cv2
 import numpy as np
 import toml
 from scipy.spatial.transform import Rotation
+
+# pyscripts/, one folder up, for board.py (analyse_holds.py is in this folder).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from analyse_holds import _settings, newest_recording, read_marks, read_samples
 from board import BoardGeometry

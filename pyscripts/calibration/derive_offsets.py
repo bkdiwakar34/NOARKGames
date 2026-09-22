@@ -10,10 +10,10 @@ marker's own frame gives the offset that marker should have had:
 
     o = R_m^T @ (g_board - t_m)
 
-Run on the Pi (needs an up-to-date board_geometry.json with the suspect
+Run on the board (needs an up-to-date board_geometry.json with the suspect
 markers included):
 
-    python pyscripts/derive_offsets.py --suspect 28 32
+    python pyscripts/calibration/derive_offsets.py --suspect 28 32
 
 Paste the printed lines into MARKER_OFFSETS in board.py, then re-run
 calibrate_board.py to verify (all markers should land within ~5 mm) and to
@@ -22,18 +22,21 @@ regenerate the stored grip point the tracker uses at runtime.
 
 import argparse
 import os
+import sys
 
 import numpy as np
 
-from board import BoardGeometry, MARKER_OFFSETS
+# pyscripts/, one folder up: board.py and board_geometry.json live there.
+_PYSCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PYSCRIPTS_DIR)
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+from board import BoardGeometry, MARKER_OFFSETS
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--geometry",
-                        default=os.path.join(_SCRIPT_DIR, "board_geometry.json"))
+                        default=os.path.join(_PYSCRIPTS_DIR, "board_geometry.json"))
     parser.add_argument("--suspect", type=int, nargs="+", required=True,
                         help="marker ids whose offsets should be re-derived")
     args = parser.parse_args()

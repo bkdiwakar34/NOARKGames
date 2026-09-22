@@ -207,15 +207,11 @@ app/
     installer.tscn / .gd          — checklist, origin ritual, test drive (F10)
     workspace_calibration_overlay.gd  — 4-corner sensor-to-screen calibration
   assets/               — fonts (Nunito), audio drop-in folder
-pyscripts/
-  main.py             — production tracker (Pi + dev)
-  calibrate_camera.py — fisheye intrinsics calibration
-  calibrate_board.py  — per-device marker layout (board_geometry.json)
-  diagnose_jitter.py  — multi-pose noise-floor measurement
-tools/
-  jitter_test.gd/.tscn  — standalone old-vs-rigid jitter comparison harness
-  analyze_jitter.py     — its analysis + figures
-  jitter_data/          — collected CSVs and generated plots
+pyscripts/             — see pyscripts/README.md
+  main.py, board.py, recording.py, pose_averaging.py  — the tracker (Godot launches main.py)
+  calibration/          — camera, device and stereo calibration (run once each)
+  analysis/             — read a validation recording, change nothing
+  diagnostics/          — checks on the live system (camera phase)
 ```
 
 ---

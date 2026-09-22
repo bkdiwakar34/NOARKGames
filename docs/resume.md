@@ -66,9 +66,9 @@ Pick one:
 
 ## Small open items
 
-- Delete dead code left on purpose (now safe — recorder proven): per-marker solver,
-  `SETUP:` demo switch (+ Godot toggles), single-camera mode, `diagnose_jitter.py`,
-  `tools/` jitter harness.
+- Delete dead code left on purpose inside `main.py` (now safe — recorder proven):
+  per-marker solver, `SETUP:` demo switch (+ Godot toggles), single-camera mode.
+  (`diagnose_jitter.py` and `tools/` were deleted 2026-09-22.)
 - `uv lock` on the board, then commit (`gpiod` installed by hand but not pinned).
 - Back up the calibration files off the board (`camera_calib*.toml`,
   `board_geometry.json`, `stereo_extrinsics.json`, `origin_lock.json`).

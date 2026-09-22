@@ -15,9 +15,9 @@ hold_start and hold_end marks:
 A place redone with backspace appears once: the last hold wins.
 
 Run:
-    python pyscripts/analyse_holds.py                      # newest recording
-    python pyscripts/analyse_holds.py <folder>
-    python pyscripts/analyse_holds.py <folder> --png map.png
+    python pyscripts/analysis/analyse_holds.py                      # newest recording
+    python pyscripts/analysis/analyse_holds.py <folder>
+    python pyscripts/analysis/analyse_holds.py <folder> --png map.png
 """
 
 import argparse
@@ -28,11 +28,12 @@ import sys
 
 import numpy as np
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# pyscripts/, one folder up; settings.json is one further up, at the repo root.
+_PYSCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _settings() -> dict:
-    path = os.path.join(_SCRIPT_DIR, "..", "settings.json")
+    path = os.path.join(_PYSCRIPTS_DIR, "..", "settings.json")
     if os.path.exists(path):
         with open(path) as f:
             return json.load(f)

@@ -6,16 +6,21 @@ it for a while, and prints the offset between the two cameras' capture times
 once a second — folded into one frame period, so +6 and -4 ms at 100 fps read
 as the same timing.
 
-    python pyscripts/phase_test.py            # 20 s
-    python pyscripts/phase_test.py --seconds 60
+    python pyscripts/diagnostics/phase_test.py            # 20 s
+    python pyscripts/diagnostics/phase_test.py --seconds 60
 
 The game must be closed: both want the cameras.
 """
 
 import argparse
+import os
+import sys
 import time
 
 import numpy as np
+
+# pyscripts/, one folder up, for main.py (the tracker itself).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from main import MainClass, _load_settings, calib_path
 
