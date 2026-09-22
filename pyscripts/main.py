@@ -319,6 +319,12 @@ class MainClass:
         # carried to cam0's capture time first.
         self._joint_solve    = bool(settings.get("joint_solve", False))
         self._joint_rejected = 0              # fits thrown out since the last timing line
+        # How the two cameras make one pose (2026-09-22): "average" = each
+        # camera solved alone, then averaged (_fuse_board_poses); "joint" = one
+        # solve over all corners of both cameras (_solve_joint).
+        self._dual_solve = str(settings.get("dual_solve", "average")).lower()
+        self._joint_prev = None               # last accepted joint pose, start of the next fit
+        print(f"Two-camera solve: {self._dual_solve}")
         # Pipeline (2026-09-22). "current": each camera's frame is straightened,
         # markers found, each camera solved alone, the two poses averaged.
         # "raw_joint": markers found on the RAW image (no straightening), then
@@ -1005,6 +1011,71 @@ class MainClass:
         t1p = self._stereo_Rx @ tvec1 + self._stereo_tx
         return R1p, t1p, reproj1
 
+    def _record_stereo_gap(self, pose0, pose1) -> None:
+        """cam0-vs-cam1 pose disagreement (m, rad) for the recording, when both
+        cameras solved — diagnostics only in the joint mode."""
+        if pose0 is None or pose1 is None:
+            return
+        R1p, t1p, _ = self._transform_pose_to_cam0(pose1)
+        R0 = cv2.Rodrigues(pose0[0])[0]
+        self._last_stereo_gap = (float(np.linalg.norm(pose0[1] - t1p)),
+                                 float(rotation_angle(R0 @ R1p.T)))
+
+    def _solve_joint(self, corners0, ids0, corners1, ids1, pose0, pose1):
+        """dual_solve = "joint": ONE board pose (cam0 frame) fitted to all
+        corners of both cameras (board.estimate_board_pose_dual, straightened
+        pixels). No camera is picked and no two poses are averaged: every
+        corner counts the same, so a camera seeing one tag has 4 corners' say
+        against 16 from a camera seeing four. (The average weighted cameras by
+        1/fit-error^2, which favours the camera with FEWER tags — one tag fits
+        its 4 corners almost perfectly while its pose is the least certain —
+        and on disagreement kept that camera: the 40-50 mm jumps of the
+        2026-09-22 recordings, find_jumps.py.)
+
+        Start: the previous frame's joint pose; if there is none or that fit
+        is rejected, the per-camera pose of the camera seeing more tags.
+        Rejected (> DUAL_MAX_REPROJ_PX, or > DUAL_MAX_JUMP_M from its start)
+        from both starts -> None for this frame.
+        Returns (rvec, tvec, mean reprojection px) or None."""
+        n0 = 0 if ids0 is None else len(ids0)
+        n1 = 0 if ids1 is None else len(ids1)
+        if n0 == 0 and n1 == 0:
+            self._joint_prev = None
+            return None
+        starts = []
+        if self._joint_prev is not None:
+            starts.append(self._joint_prev)
+        for n, pose, cam in sorted(((n0, pose0, 0), (n1, pose1, 1)), key=lambda p: -p[0]):
+            if pose is None:
+                continue
+            if cam == 0:
+                starts.append((pose[0], pose[1]))
+            else:
+                R1p, t1p, _ = self._transform_pose_to_cam0(pose)
+                starts.append((cv2.Rodrigues(R1p)[0].flatten(), t1p))
+            break
+        for guess in starts:
+            joint = estimate_board_pose_dual(
+                self.board, corners0, ids0, corners1, ids1,
+                self.camera_matrix, self.camera_matrix_1,
+                self._stereo_Rx, self._stereo_tx, guess)
+            if joint is not None and joint[3]:
+                rvec, tvec, err, _ = joint
+                self._joint_prev = (rvec, tvec)
+                self._last_fusion = "joint" if n0 and n1 else ("cam0" if n0 else "cam1")
+                return rvec, tvec, err
+        self._joint_prev = None
+        self._joint_rejected += 1
+        return None
+
+    def _roi_from_joint_pose(self, fused) -> None:
+        """Both cameras' next search boxes from the one joint pose."""
+        rvec, tvec, err = fused
+        self._roi_from_pose(0, fused, self.camera_matrix)
+        R1 = self._stereo_Rx.T @ cv2.Rodrigues(np.asarray(rvec, np.float64).reshape(3, 1))[0]
+        t1 = self._stereo_Rx.T @ (np.asarray(tvec, np.float64).flatten() - self._stereo_tx)
+        self._roi_from_pose(1, (cv2.Rodrigues(R1)[0].flatten(), t1, err), self.camera_matrix_1)
+
     def _fuse_board_poses(self, pose0, pose1):
         """Combines cam0's and cam1's independent board-pose solves into one
         pose in cam0's frame.
@@ -1677,17 +1748,34 @@ class MainClass:
             pose0 = self._solve_camera_pose(0, corners0, ids0) if ids0 is not None else None
             pose1 = self._solve_camera_pose(1, corners1, ids1) if ids1 is not None else None
             ta = time.perf_counter() if self.debug else 0.0
-            if self._roi_enabled:
-                self._roi_from_pose(0, pose0, self.camera_matrix)
-                self._roi_from_pose(1, pose1, self.camera_matrix_1)
-            tb = time.perf_counter() if self.debug else 0.0
-            fused = self._fuse_board_poses(pose0, pose1)
-            if self.debug:
-                # Where the "pose+send" time actually goes — the two solves,
-                # the search-box projection, then the rest (fuse, origin, UDP).
-                self._sub_times.append(((ta - t3) * 1000.0, (tb - ta) * 1000.0))
-            if fused is not None and self._joint_solve and pose0 is not None \
-                    and pose1 is not None:
+            if self._dual_solve == "joint":
+                # One solve over all corners of both cameras (see _solve_joint);
+                # the per-camera poses above are only its fallback start and
+                # the cam0-vs-cam1 gap written to recordings.
+                self._record_stereo_gap(pose0, pose1)
+                fused = self._solve_joint(corners0, ids0, corners1, ids1, pose0, pose1)
+                tb = time.perf_counter() if self.debug else 0.0
+                if self._roi_enabled:
+                    if fused is not None:
+                        self._roi_from_joint_pose(fused)
+                    else:
+                        self._roi_from_pose(0, pose0, self.camera_matrix)
+                        self._roi_from_pose(1, pose1, self.camera_matrix_1)
+                if self.debug:
+                    self._sub_times.append(((tb - t3) * 1000.0,
+                                            (time.perf_counter() - tb) * 1000.0))
+            else:
+                if self._roi_enabled:
+                    self._roi_from_pose(0, pose0, self.camera_matrix)
+                    self._roi_from_pose(1, pose1, self.camera_matrix_1)
+                tb = time.perf_counter() if self.debug else 0.0
+                fused = self._fuse_board_poses(pose0, pose1)
+                if self.debug:
+                    # Where the "pose+send" time actually goes — the two solves,
+                    # the search-box projection, then the rest (fuse, origin, UDP).
+                    self._sub_times.append(((ta - t3) * 1000.0, (tb - ta) * 1000.0))
+            if self._dual_solve != "joint" and fused is not None and self._joint_solve \
+                    and pose0 is not None and pose1 is not None:
                 # One pose from both cameras' corners, started from the averaged
                 # pose and falling back to it when the fit is rejected.
                 joint = estimate_board_pose_dual(
@@ -1750,7 +1838,7 @@ class MainClass:
                         stages = (f"search per camera (own thread): {search:5.2f} ms  |  "
                                   f"main waited for it: {means[1]:5.2f} ms  |  "
                                   f"full-frame searches: {self._full_count[0]}+{self._full_count[1]}  |  ")
-                        if self._joint_solve or self._raw:
+                        if self._joint_solve or self._raw or self._dual_solve == "joint":
                             stages += f"joint rejects: {self._joint_rejected}  |  "
                             self._joint_rejected = 0
                         self._full_count = [0, 0]
