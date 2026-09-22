@@ -1633,6 +1633,34 @@ class MainClass:
             int(min(h, np.ceil(pts[:, 1].max() + margin))),
         )
 
+    def _poll_command(self) -> None:
+        """Read and act on one command from Godot (one per pass; Godot's
+        heartbeat is every 100 ms). Also what keeps the "Godot still there?"
+        check fed (_recv_command stamps _last_msg_time)."""
+        if not self._udp_enabled:
+            return
+        cmd = self._recv_command()
+        if cmd.startswith(b"SETUP:"):
+            self._apply_setup(cmd)   # demo mode switch, not a dispatch command
+        elif cmd == b"RELOCK":
+            self._relock_origin()    # installer origin ritual, not a dispatch command
+        elif cmd.startswith(b"REC_START:"):
+            # Godot repeats this until its status shows the recording is
+            # running, so a lost packet cannot leave the two disagreeing.
+            self._start_recording(cmd.decode(errors="replace").split(":", 1)[1])
+        elif cmd == b"REC_STOP":
+            self._stop_recording()
+        elif cmd.startswith(b"MARK:"):
+            # A labelled moment from the recorder screen (hold start/end,
+            # target reached) — see Recording.write_mark.
+            with self._rec_lock:
+                if self._recording is not None:
+                    self._recording.write_mark(
+                        time.monotonic(),
+                        cmd.decode(errors="replace").split(":", 1)[1])
+        elif cmd:
+            self.received_message = cmd
+
     def process_frame(self) -> Optional[FrameResult]:
         """One pass: capture, detect, solve, fuse, and (with udp) send to
         Godot. Returns what the pass computed, or None when no new frame
@@ -1644,11 +1672,17 @@ class MainClass:
         capture times and sequence numbers). The first pass returns None."""
         job = self._start_frame()
         if job is None:
+            # No new frame: still read Godot, so a pause in frames never looks
+            # like Godot having gone (the 3 s check in run()).
+            self._poll_command()
             return None
         if not (self._overlap and self._dual_camera):
             return self._finish_frame(job)
         prev, self._pending = self._pending, job
         if prev is None:
+            # First pass with the overlap: nothing solved yet — but read Godot,
+            # or a start-up longer than 3 s tripped the check (2026-09-22).
+            self._poll_command()
             return None
         return self._finish_frame(prev)
 
@@ -1715,29 +1749,7 @@ class MainClass:
         t3 = time.perf_counter()
         wait_ms = (t3 - t_wait) * 1000.0
 
-        # Poll command from Godot
-        if self._udp_enabled:
-            cmd = self._recv_command()
-            if cmd.startswith(b"SETUP:"):
-                self._apply_setup(cmd)   # demo mode switch, not a dispatch command
-            elif cmd == b"RELOCK":
-                self._relock_origin()    # installer origin ritual, not a dispatch command
-            elif cmd.startswith(b"REC_START:"):
-                # Godot repeats this until its status shows the recording is
-                # running, so a lost packet cannot leave the two disagreeing.
-                self._start_recording(cmd.decode(errors="replace").split(":", 1)[1])
-            elif cmd == b"REC_STOP":
-                self._stop_recording()
-            elif cmd.startswith(b"MARK:"):
-                # A labelled moment from the recorder screen (hold start/end,
-                # target reached) — see Recording.write_mark.
-                with self._rec_lock:
-                    if self._recording is not None:
-                        self._recording.write_mark(
-                            time.monotonic(),
-                            cmd.decode(errors="replace").split(":", 1)[1])
-            elif cmd:
-                self.received_message = cmd
+        self._poll_command()
 
         local_coords = None
         fused = None
@@ -1933,6 +1945,9 @@ class MainClass:
             cv2.destroyAllWindows()
 
     def run(self) -> None:
+        # Start the "Godot still there?" clock when the loop starts, not when
+        # set-up began: camera set-up + phase alignment can take over 3 s.
+        self._last_msg_time = time.monotonic()
         try:
             while True:
                 try:
