@@ -68,7 +68,12 @@ func _start_tracker(settings) -> void:
 	# one machine's home directory/username — the Pi and Q6A have different
 	# users (sujith vs. radxa) but both keep .venv/ at the project root.
 	var python_bin: String = ProjectSettings.globalize_path("res://.venv/bin/python3")
-	var cmd: String = "cd '" + pyscripts_dir + "' && '" + python_bin + "' main.py"
+	# `exec` at every step (bash -> taskset -> bash -> python) makes each one
+	# replace itself instead of starting a child, so _tracker_pid IS the
+	# tracker. Without it OS.kill() on quit killed only the outer bash; the
+	# orphaned tracker kept both cameras for a few more seconds and a quick
+	# restart of the game found them busy (2026-09-22).
+	var cmd: String = "cd '" + pyscripts_dir + "' && exec '" + python_bin + "' main.py"
 	# Optional CPU-affinity pinning (e.g. "4-7") for boards with asymmetric
 	# big.LITTLE cores (like the Q6A's 4xA78/4xA55) where the vision-heavy
 	# tracker and Godot's own thread can otherwise get scheduled onto the
@@ -76,7 +81,7 @@ func _start_tracker(settings) -> void:
 	# (identical cores, no need) -- set locally per-deployment, not shared.
 	var affinity: String = settings.get("tracker_cpu_affinity", "") if settings else ""
 	if affinity != "":
-		cmd = "taskset -c " + affinity + " bash -c \"" + cmd.replace("\"", "\\\"") + "\""
+		cmd = "exec taskset -c " + affinity + " bash -c \"" + cmd.replace("\"", "\\\"") + "\""
 	_tracker_pid = OS.create_process("bash", ["-c", cmd])
 
 func _network_loop() -> void:
