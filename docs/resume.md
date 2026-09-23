@@ -60,6 +60,14 @@ Before leaving: back up the calibration files (below). Carry the camera mount as
 one piece — if the two cameras shift relative to each other, run
 `calibration/calibrate_rig.py` (5 min) before recording.
 
+**New tag stickers (2026-09-23):** printed at ~50.0 mm one way, ~49.5 mm the other
+(printer scales differently along/across the paper feed). Kept `MARKER_LENGTH` at
+50.0 mm; expect ~0.5 % scale (2–3 mm at 0.45–0.60 m). The game absorbs it in the
+4-corner fit; the mocap analysis fits a scale factor and reports it
+(validation_plan §4.3b) — set `MARKER_LENGTH` from that afterwards. Re-gluing the
+tags means `calibrate_board.py` (recomputes the grip point) **then**
+`calibrate_rig.py`.
+
 In the lab:
 1. Let the board get online (its clock syncs; wait until `date` is right).
 2. Recalibrate everything, in this order (game closed):

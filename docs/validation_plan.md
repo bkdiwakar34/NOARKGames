@@ -224,7 +224,19 @@ Why the raw corners and both capture times:
    everything else**, so the fit cannot absorb the device's own error. The height
    component of $X$ and $Y$ is not separable with planar motion; it is only a
    constant $z$ offset and does not affect $x, y$ or yaw.
-4. **Measures** of §1, per trial.
+3b. **Fit a scale factor too, and report it** (added 2026-09-23). The tracker's
+   scale comes from the printed tag size, assumed exactly 50.0 mm
+   (`MARKER_LENGTH`). The stickers reprinted on 2026-09-23 measure about
+   50.0 mm one way and 49.5 mm the other (the printer scales differently along
+   and across the paper feed), so the device's distances are expected to read
+   ~0.5 % large — about 2–3 mm at 0.45–0.60 m, growing with distance. Fitting
+   $s$ in $\text{Pose}_\text{moc} = X\cdot s\,\text{Pose}_\text{dev}\cdot Y$
+   separates that from the accuracy numbers, and $s$ measures the true tag size
+   far better than calipers: set `MARKER_LENGTH` from it afterwards (then redo
+   `calibrate_board.py` / `calibrate_rig.py`). The leftover ~0.5 % of
+   "not quite square" cannot be absorbed by any scale — it shows as a slightly
+   higher reprojection error, and is the reason to print the next set carefully.
+4. **Measures** of §1, per trial, **with and without** the fitted scale.
 
 ---
 
