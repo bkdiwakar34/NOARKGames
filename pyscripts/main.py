@@ -17,8 +17,7 @@ from scipy.spatial.transform import Rotation as ScipyRotation
 
 import board as board_model
 from board import (BoardGeometry, estimate_board_pose, estimate_board_pose_dual,
-                   estimate_board_pose_dual_gn, estimate_board_pose_plane,
-                   estimate_board_pose_raw)
+                   estimate_board_pose_dual_gn, estimate_board_pose_raw)
 from pose_averaging import rotation_angle
 from recording import Recording, SyncWatcher, sanitize_name
 
@@ -329,14 +328,7 @@ class MainClass:
         # solve over all corners of both cameras (_solve_joint).
         self._dual_solve = str(settings.get("dual_solve", "average")).lower()
         self._joint_prev = None               # last accepted joint pose, start of the next fit
-        # solve_dof "3_plane": fit only the three freedoms a device sliding on
-        # a table has (across, along, turning about the table's normal), with
-        # height, roll and pitch fixed from the origin lock. Fitting those lets
-        # the fit trade tilt against depth, which is where most depth noise
-        # comes from. "6" = the free fit. Joint solve + locked origin only.
-        self._plane_solve = str(settings.get("solve_dof", "6")).lower() == "3_plane"
-        print(f"Two-camera solve: {self._dual_solve}"
-              + ("  (3 freedoms: table plane)" if self._plane_solve else ""))
+        print(f"Two-camera solve: {self._dual_solve}")
         # Pipeline (2026-09-22). "current": each camera's frame is straightened,
         # markers found, each camera solved alone, the two poses averaged.
         # "raw_joint": markers found on the RAW image (no straightening), then
@@ -1073,25 +1065,14 @@ class MainClass:
                 R1p, t1p, _ = self._transform_pose_to_cam0(pose)
                 starts.append((cv2.Rodrigues(R1p)[0].flatten(), t1p))
             break
-        # The table-plane fit needs the origin lock for the plane; until the
-        # origin is locked (and for the lock itself) the free fit is used.
-        on_plane = self._plane_solve and self._origin_R is not None \
-            and self._origin_grip is not None
         for guess in starts:
             # The standard multi-camera fit, derivatives written out: same
             # answers as estimate_board_pose_dual (bench_joint.py, 2026-09-22:
             # 0.000 mm apart on 69 583 fits), worst case 8.5 ms instead of 44.
-            if on_plane:
-                joint = estimate_board_pose_plane(
-                    self.board, corners0, ids0, corners1, ids1,
-                    self.camera_matrix, self.camera_matrix_1,
-                    self._stereo_Rx, self._stereo_tx,
-                    self._origin_R, self._origin_grip, guess)
-            else:
-                joint = estimate_board_pose_dual_gn(
-                    self.board, corners0, ids0, corners1, ids1,
-                    self.camera_matrix, self.camera_matrix_1,
-                    self._stereo_Rx, self._stereo_tx, guess)
+            joint = estimate_board_pose_dual_gn(
+                self.board, corners0, ids0, corners1, ids1,
+                self.camera_matrix, self.camera_matrix_1,
+                self._stereo_Rx, self._stereo_tx, guess)
             if joint is not None and joint[3]:
                 rvec, tvec, err, _ = joint
                 self._joint_prev = (rvec, tvec)
