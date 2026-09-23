@@ -26,8 +26,11 @@ import numpy as np
 import toml
 
 
-BOARD_INNER_CORNERS = (9, 6)     # (cols, rows) of inner corners — change if your board differs
-SQUARE_SIZE_M       = 0.02435    # measured with vernier on the printed OpenCV pattern
+# Defaults for the board in use (2026-09-23: 13 x 9 squares, 30 mm). Inner
+# corners are the crossings where four squares meet, so a 13 x 9-square board
+# has 12 x 8 of them. Override per run with --corners / --square-mm.
+BOARD_INNER_CORNERS = (12, 8)    # (cols, rows) of inner corners
+SQUARE_SIZE_M       = 0.030      # square side, metres
 FRAME_SIZE          = (1280, 800)
 NUM_CAPTURES        = 20
 NUM_VERIFY_POSES    = 6          # how many distinct poses to test the calibration at
@@ -360,6 +363,7 @@ def countdown(cam, seconds, message):
 
 
 def main():
+    global BOARD_INNER_CORNERS, SQUARE_SIZE_M
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=["auto", "rcam"], default="auto",
                         help="'auto' = picamera2 on Linux / cv2 webcam elsewhere (default). "
@@ -370,7 +374,20 @@ def main():
                         help="output .toml filename, written to pyscripts/ where the "
                              "tracker reads it (use camera_calib_1.toml for the "
                              "second Q6A camera)")
+    parser.add_argument("--corners", default=None, metavar="COLSxROWS",
+                        help=f"inner corners of the board, e.g. 12x8 "
+                             f"(default {BOARD_INNER_CORNERS[0]}x{BOARD_INNER_CORNERS[1]}); "
+                             f"a board of N x M squares has (N-1) x (M-1) inner corners")
+    parser.add_argument("--square-mm", type=float, default=None,
+                        help=f"square side in mm (default {SQUARE_SIZE_M * 1000:.1f}); "
+                             f"measure across 10 squares and divide by 10")
     args = parser.parse_args()
+    if args.corners:
+        BOARD_INNER_CORNERS = tuple(int(v) for v in args.corners.lower().split("x"))
+    if args.square_mm:
+        SQUARE_SIZE_M = args.square_mm / 1000.0
+    print(f"Board: {BOARD_INNER_CORNERS[0]}x{BOARD_INNER_CORNERS[1]} inner corners, "
+          f"{SQUARE_SIZE_M * 1000:.2f} mm squares")
     output_path = os.path.join(_PYSCRIPTS_DIR, args.output)
 
     cam = init_camera(backend=args.backend, cam_id=args.cam_id)
