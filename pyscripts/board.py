@@ -276,6 +276,142 @@ def estimate_board_pose_raw(board: BoardGeometry, corners0, ids0, corners1, ids1
     return x[:3], x[3:], e0, e1
 
 
+def _dual_cams(board: BoardGeometry, corners0, ids0, corners1, ids1, K0, K1, Rx, tx):
+    """Per camera that saw a known tag: (board points, pixels, K, A, c), where
+    a board point at p0 in cam0's frame sits at p = A (p0 - c) in that camera
+    (cam0: identity; cam1: A = Rx^T, c = tx). None if neither saw one."""
+    obj0, img0 = _board_points(board, corners0, ids0)
+    obj1, img1 = _board_points(board, corners1, ids1)
+    if obj0 is None and obj1 is None:
+        return None
+    Rx = np.asarray(Rx, dtype=np.float64)
+    tx = np.asarray(tx, dtype=np.float64).flatten()
+    cams = []
+    if obj0 is not None:
+        cams.append((obj0, img0, np.asarray(K0, np.float64), np.eye(3), np.zeros(3)))
+    if obj1 is not None:
+        cams.append((obj1, img1, np.asarray(K1, np.float64), Rx.T, tx))
+    return cams
+
+
+def _res_jac(cams, R, t, want_j):
+    """Residuals (seen - predicted, per corner) and, with want_j, the 2x6
+    derivative of each predicted pixel with respect to a small pose change
+    delta = (w, s): p0 -> p0 + w x p0 + s. (None, None) if the pose puts a
+    point behind a camera."""
+    rs, js = [], []
+    for obj, img, K, A, c in cams:
+        p0 = obj @ R.T + t
+        p = (p0 - c) @ A.T
+        X, Y, Z = p[:, 0], p[:, 1], p[:, 2]
+        if np.any(Z <= 1e-6):
+            return None, None
+        fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+        rs.append(img - np.stack([fx * X / Z + cx, fy * Y / Z + cy], axis=1))
+        if want_j:
+            n = len(p0)
+            dudp = np.zeros((n, 2, 3))
+            dudp[:, 0, 0] = fx / Z
+            dudp[:, 0, 2] = -fx * X / Z ** 2
+            dudp[:, 1, 1] = fy / Z
+            dudp[:, 1, 2] = -fy * Y / Z ** 2
+            D = np.zeros((n, 3, 6))             # [ -[p0]x | I ]
+            D[:, 0, 1], D[:, 0, 2] = p0[:, 2], -p0[:, 1]
+            D[:, 1, 0], D[:, 1, 2] = -p0[:, 2], p0[:, 0]
+            D[:, 2, 0], D[:, 2, 1] = p0[:, 1], -p0[:, 0]
+            D[:, :, 3:] = np.eye(3)
+            js.append(np.einsum("nij,jk,nkl->nil", dudp, A, D).reshape(-1, 6))
+    return np.concatenate(rs), (np.concatenate(js) if want_j else None)
+
+
+def snap_to_plane(board: BoardGeometry, R, t, origin_R, origin_grip):
+    """The nearest pose that obeys the table: the grip at the locked height,
+    and the only rotation a sliding device has — about the table's normal.
+
+    origin_R, origin_grip are the origin lock (cam0 frame): the columns of
+    origin_R are the game's axes, so column 1 is the table normal and the
+    device's orientation at the lock is origin_R itself."""
+    R = np.asarray(R, np.float64).reshape(3, 3)
+    t = np.asarray(t, np.float64).flatten()
+    normal, e1, e2 = origin_R[:, 1], origin_R[:, 0], origin_R[:, 2]
+    # Yaw = the part of the rotation-from-lock that turns about the normal.
+    yaw = float(cv2.Rodrigues(origin_R.T @ R)[0].flatten()[1])
+    R_flat = origin_R @ cv2.Rodrigues(np.array([[0.0], [yaw], [0.0]]))[0]
+    grip = R @ board.grip_point + t
+    offset = grip - origin_grip
+    grip_flat = origin_grip + (offset @ e1) * e1 + (offset @ e2) * e2
+    return R_flat, grip_flat - R_flat @ board.grip_point
+
+
+def estimate_board_pose_plane(board: BoardGeometry, corners0, ids0, corners1, ids1,
+                              K0, K1, Rx, tx, origin_R, origin_grip, guess,
+                              max_iter=10):
+    """The joint two-camera fit with only the THREE freedoms a device sliding
+    on a table has: across, along, and turning about the table's normal.
+
+    Height, roll and pitch are physically constant, so fitting them only lets
+    the fit trade them against depth — a small tilt looks much like a small
+    shift in depth to a camera, which is where most depth noise comes from.
+    Fixing them from the origin lock removes that trade.
+
+    Same residuals as estimate_board_pose_dual_gn; each step is taken in the
+    three allowed directions only: turning about the normal through the grip
+    point (w = normal, s = -normal x grip) and sliding along the two in-plane
+    axes. Every step is snapped back onto the plane, so rounding cannot drift
+    off it. Needs the origin lock; the caller falls back to the free fit until
+    the origin is locked.
+
+    Returns (rvec, tvec, mean reprojection px, accepted) or None.
+    """
+    cams = _dual_cams(board, corners0, ids0, corners1, ids1, K0, K1, Rx, tx)
+    if cams is None:
+        return None
+    origin_R = np.asarray(origin_R, np.float64).reshape(3, 3)
+    origin_grip = np.asarray(origin_grip, np.float64).flatten()
+    normal, e1, e2 = origin_R[:, 1], origin_R[:, 0], origin_R[:, 2]
+
+    R, t = snap_to_plane(board, cv2.Rodrigues(np.asarray(guess[0], np.float64).reshape(3, 1))[0],
+                         np.asarray(guess[1], np.float64).flatten(), origin_R, origin_grip)
+    t_start = t.copy()
+    r, J = _res_jac(cams, R, t, True)
+    if r is None:
+        return None
+    cost = float((r ** 2).sum())
+    lam = 1e-3
+    for _ in range(max_iter):
+        grip = R @ board.grip_point + t
+        basis = np.zeros((6, 3))                  # the three allowed directions
+        basis[:3, 0], basis[3:, 0] = normal, -np.cross(normal, grip)
+        basis[3:, 1], basis[3:, 2] = e1, e2
+        Jc = J @ basis
+        H = Jc.T @ Jc
+        g = Jc.T @ r.ravel()
+        try:
+            step = np.linalg.solve(H + lam * np.diag(np.diag(H)), g)
+        except np.linalg.LinAlgError:
+            break
+        delta = basis @ step
+        dR = cv2.Rodrigues(delta[:3].reshape(3, 1))[0]
+        R_new, t_new = snap_to_plane(board, dR @ R, dR @ t + delta[3:], origin_R, origin_grip)
+        r_new, J_new = _res_jac(cams, R_new, t_new, True)
+        if r_new is not None and float((r_new ** 2).sum()) < cost:
+            R, t, r, J = R_new, t_new, r_new, J_new
+            cost = float((r ** 2).sum())
+            lam = max(lam / 10.0, 1e-7)
+            if np.linalg.norm(step) < 1e-9:
+                break
+        else:
+            lam *= 10.0
+            if lam > 1e6:
+                break
+
+    err = float(np.linalg.norm(r, axis=1).mean())
+    jump = float(np.linalg.norm(t - t_start))
+    accepted = bool(np.all(np.isfinite(t)) and err <= DUAL_MAX_REPROJ_PX
+                    and jump <= DUAL_MAX_JUMP_M)
+    return cv2.Rodrigues(R)[0].flatten(), t, err, accepted
+
+
 def estimate_board_pose_dual_gn(board: BoardGeometry, corners0, ids0, corners1, ids1,
                                 K0, K1, Rx, tx, guess, max_iter=10, return_iters=False):
     """The same fit as estimate_board_pose_dual — one board pose in cam0's frame
@@ -296,43 +432,12 @@ def estimate_board_pose_dual_gn(board: BoardGeometry, corners0, ids0, corners1, 
     DUAL_MAX_JUMP_M). Returns (rvec, tvec, mean reprojection px, accepted)
     [+ iterations with return_iters], or None when no camera has a marker.
     """
-    obj0, img0 = _board_points(board, corners0, ids0)
-    obj1, img1 = _board_points(board, corners1, ids1)
-    if obj0 is None and obj1 is None:
+    cams = _dual_cams(board, corners0, ids0, corners1, ids1, K0, K1, Rx, tx)
+    if cams is None:
         return None
-    Rx = np.asarray(Rx, dtype=np.float64)
-    tx = np.asarray(tx, dtype=np.float64).flatten()
-    cams = []                                   # (board pts, pixels, K, A, c): p = A (p0 - c)
-    if obj0 is not None:
-        cams.append((obj0, img0, np.asarray(K0, np.float64), np.eye(3), np.zeros(3)))
-    if obj1 is not None:
-        cams.append((obj1, img1, np.asarray(K1, np.float64), Rx.T, tx))
 
     def residuals_and_jacobian(R, t, want_j):
-        rs, js = [], []
-        for obj, img, K, A, c in cams:
-            p0 = obj @ R.T + t
-            p = (p0 - c) @ A.T
-            X, Y, Z = p[:, 0], p[:, 1], p[:, 2]
-            if np.any(Z <= 1e-6):
-                return None, None
-            fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
-            rs.append(img - np.stack([fx * X / Z + cx, fy * Y / Z + cy], axis=1))
-            if want_j:
-                n = len(p0)
-                dudp = np.zeros((n, 2, 3))
-                dudp[:, 0, 0] = fx / Z
-                dudp[:, 0, 2] = -fx * X / Z ** 2
-                dudp[:, 1, 1] = fy / Z
-                dudp[:, 1, 2] = -fy * Y / Z ** 2
-                D = np.zeros((n, 3, 6))             # [ -[p0]x | I ]
-                D[:, 0, 1], D[:, 0, 2] = p0[:, 2], -p0[:, 1]
-                D[:, 1, 0], D[:, 1, 2] = -p0[:, 2], p0[:, 0]
-                D[:, 2, 0], D[:, 2, 1] = p0[:, 1], -p0[:, 0]
-                D[:, :, 3:] = np.eye(3)
-                js.append(np.einsum("nij,jk,nkl->nil", dudp, A, D).reshape(-1, 6))
-        r = np.concatenate(rs)
-        return r, (np.concatenate(js) if want_j else None)
+        return _res_jac(cams, R, t, want_j)
 
     R = cv2.Rodrigues(np.asarray(guess[0], np.float64).reshape(3, 1))[0]
     t = np.asarray(guess[1], np.float64).flatten().copy()
