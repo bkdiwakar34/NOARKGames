@@ -13,6 +13,7 @@
 	"pipeline": "current",
 	"overlap_detect_solve": true,
 	"dual_solve": "joint",
+	"robust_loss_px": 1.0,
 	"board_geometry_file": "board_geometry.json",
 	"demo_subset_ids": [12, 24, 20],
 	"persist_origin": true,

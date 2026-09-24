@@ -328,7 +328,14 @@ class MainClass:
         # solve over all corners of both cameras (_solve_joint).
         self._dual_solve = str(settings.get("dual_solve", "average")).lower()
         self._joint_prev = None               # last accepted joint pose, start of the next fit
-        print(f"Two-camera solve: {self._dual_solve}")
+        # Huber loss in the joint fit (board.estimate_board_pose_dual_gn): a
+        # corner further off than this many px pulls with weight delta/e
+        # instead of counting e^2, so one noisy or half-hidden tag cannot drag
+        # the pose; frames are then judged on the median corner error.
+        # 0 = plain least squares (before 2026-09-24).
+        self._robust_px = float(settings.get("robust_loss_px", 0.0))
+        print(f"Two-camera solve: {self._dual_solve}"
+              + (f"  (robust loss {self._robust_px:g} px)" if self._robust_px > 0 else ""))
         # Pipeline (2026-09-22). "current": each camera's frame is straightened,
         # markers found, each camera solved alone, the two poses averaged.
         # "raw_joint": markers found on the RAW image (no straightening), then
@@ -1072,7 +1079,7 @@ class MainClass:
             joint = estimate_board_pose_dual_gn(
                 self.board, corners0, ids0, corners1, ids1,
                 self.camera_matrix, self.camera_matrix_1,
-                self._stereo_Rx, self._stereo_tx, guess)
+                self._stereo_Rx, self._stereo_tx, guess, robust_px=self._robust_px)
             if joint is not None and joint[3]:
                 rvec, tvec, err, _ = joint
                 self._joint_prev = (rvec, tvec)

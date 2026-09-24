@@ -276,8 +276,30 @@ def estimate_board_pose_raw(board: BoardGeometry, corners0, ids0, corners1, ids1
     return x[:3], x[3:], e0, e1
 
 
+def _huber(r: np.ndarray, delta: float) -> tuple:
+    """(cost, per-corner weight) of residuals r (n, 2) under a Huber loss on
+    each corner's pixel distance e. delta <= 0: plain least squares.
+
+        cost(e) = e^2 / 2              e <= delta
+                  delta (e - delta/2)  e >  delta
+        weight  = 1                    e <= delta
+                  delta / e            e >  delta
+
+    A corner far off then pulls with a weight that falls as 1/e instead of
+    counting e^2: one tag 10 px out no longer outweighs a hundred good corners."""
+    e = np.linalg.norm(r, axis=1)
+    if delta <= 0:
+        return float(0.5 * (e ** 2).sum()), np.ones(len(e))
+    far = e > delta
+    cost = np.where(far, delta * (e - 0.5 * delta), 0.5 * e ** 2)
+    w = np.ones(len(e))
+    w[far] = delta / e[far]
+    return float(cost.sum()), w
+
+
 def estimate_board_pose_dual_gn(board: BoardGeometry, corners0, ids0, corners1, ids1,
-                                K0, K1, Rx, tx, guess, max_iter=10, return_iters=False):
+                                K0, K1, Rx, tx, guess, max_iter=10, return_iters=False,
+                                robust_px: float = 0.0):
     """The same fit as estimate_board_pose_dual — one board pose in cam0's frame
     from all corners of both cameras, straightened pixels — done the standard
     way for a multi-camera rig: Levenberg-Marquardt with the derivatives
@@ -292,9 +314,17 @@ def estimate_board_pose_dual_gn(board: BoardGeometry, corners0, ids0, corners1, 
         J = du/dp . dp/d delta   (2 x 6 per corner)
 
     and each step solves (J^T J + lambda diag(J^T J)) delta = J^T r, r = seen - predicted.
-    Accepted exactly as estimate_board_pose_dual (DUAL_MAX_REPROJ_PX,
-    DUAL_MAX_JUMP_M). Returns (rvec, tvec, mean reprojection px, accepted)
-    [+ iterations with return_iters], or None when no camera has a marker.
+
+    robust_px > 0: Huber loss with that threshold (see _huber) — every step is
+    weighted by each corner's current weight, (J^T W J + ...) delta = J^T W r, so
+    a noisy or half-hidden tag cannot drag the pose. The frame is then judged
+    by the MEDIAN corner error (the mean stays high by design when one tag is
+    off, and would reject a pose the loss handled well). robust_px = 0: plain
+    least squares, judged by the mean, exactly as before.
+
+    Accepted on DUAL_MAX_REPROJ_PX and DUAL_MAX_JUMP_M. Returns (rvec, tvec,
+    reprojection px (mean, or median when robust), accepted) [+ iterations
+    with return_iters], or None when no camera has a marker.
     """
     obj0, img0 = _board_points(board, corners0, ids0)
     obj1, img1 = _board_points(board, corners1, ids1)
@@ -340,12 +370,13 @@ def estimate_board_pose_dual_gn(board: BoardGeometry, corners0, ids0, corners1, 
     r, J = residuals_and_jacobian(R, t, True)
     if r is None:                               # start pose puts a point behind a camera
         return None
-    cost = float((r ** 2).sum())
+    cost, w = _huber(r, robust_px)
     lam = 1e-3
     iters = 0
     for iters in range(1, max_iter + 1):
-        H = J.T @ J
-        g = J.T @ r.ravel()
+        wr = np.repeat(w, 2)                    # rows of J and r come as (u, v) per corner
+        H = J.T @ (J * wr[:, None])
+        g = J.T @ (wr * r.ravel())
         try:
             delta = np.linalg.solve(H + lam * np.diag(np.diag(H)), g)
         except np.linalg.LinAlgError:
@@ -353,9 +384,10 @@ def estimate_board_pose_dual_gn(board: BoardGeometry, corners0, ids0, corners1, 
         dR = cv2.Rodrigues(delta[:3].reshape(3, 1))[0]
         R_new, t_new = dR @ R, dR @ t + delta[3:]
         r_new, J_new = residuals_and_jacobian(R_new, t_new, True)
-        if r_new is not None and float((r_new ** 2).sum()) < cost:
-            R, t, r, J = R_new, t_new, r_new, J_new
-            cost = float((r ** 2).sum())
+        if r_new is not None:
+            cost_new, w_new = _huber(r_new, robust_px)
+        if r_new is not None and cost_new < cost:
+            R, t, r, J, cost, w = R_new, t_new, r_new, J_new, cost_new, w_new
             lam = max(lam / 10.0, 1e-7)
             if np.linalg.norm(delta) < 1e-8:
                 break
@@ -365,7 +397,8 @@ def estimate_board_pose_dual_gn(board: BoardGeometry, corners0, ids0, corners1, 
                 break
 
     rvec = cv2.Rodrigues(R)[0].flatten()
-    err = float(np.linalg.norm(r, axis=1).mean())
+    e = np.linalg.norm(r, axis=1)
+    err = float(np.median(e) if robust_px > 0 else e.mean())
     jump = float(np.linalg.norm(t - t_start))
     accepted = bool(np.all(np.isfinite(t)) and err <= DUAL_MAX_REPROJ_PX
                     and jump <= DUAL_MAX_JUMP_M)
