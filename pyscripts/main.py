@@ -430,6 +430,8 @@ class MainClass:
         self._full_count = [0, 0]         # full-frame searches since the last timing line
         self._prev_tags  = [None, None]   # tag ids found in the previous frame, per camera
         self._tag_flips  = [0, 0]         # frames whose tag set differed from the frame before
+        self._flip_ids   = [collections.Counter(), collections.Counter()]  # which tags came or went
+        self._seen_ids   = [collections.Counter(), collections.Counter()]  # frames each tag was found in
 
         # Sequence numbers of the last frame processed per camera, so no frame
         # is processed twice; and camera frames skipped since the last timing
@@ -1774,6 +1776,8 @@ class MainClass:
             now = frozenset() if ids is None else frozenset(int(i) for i in np.asarray(ids).flatten())
             if self._prev_tags[cam] is not None and now != self._prev_tags[cam]:
                 self._tag_flips[cam] += 1
+                self._flip_ids[cam].update(now ^ self._prev_tags[cam])
+            self._seen_ids[cam].update(now)
             self._prev_tags[cam] = now
 
         self._poll_command()
@@ -1893,6 +1897,15 @@ class MainClass:
                                   f"full-frame searches: {self._full_count[0]}+{self._full_count[1]}  |  "
                                   f"tag flickers: {self._tag_flips[0]}+{self._tag_flips[1]}  |  ")
                         self._tag_flips = [0, 0]
+                        # Which tags blink, per camera: "28x41/60" = tag 28 came or
+                        # went 41 times and was found in 60 of the frames.
+                        for cam in (0, 1):
+                            which = "  ".join(
+                                f"{tag}x{n}/{self._seen_ids[cam][tag]}"
+                                for tag, n in self._flip_ids[cam].most_common(4))
+                            stages += f"cam{cam} flicker: {which or '-'}  |  "
+                            self._flip_ids[cam].clear()
+                            self._seen_ids[cam].clear()
                         if self._joint_solve or self._raw or self._dual_solve == "joint":
                             stages += f"joint rejects: {self._joint_rejected}  |  "
                             self._joint_rejected = 0
