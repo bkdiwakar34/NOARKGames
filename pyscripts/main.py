@@ -249,7 +249,7 @@ class MainClass:
 
         # Demo comparison mode, switched at runtime by a "SETUP:<markers>,<algo>"
         # UDP command from Godot's settings menu (old vs new setup for demos).
-        self._demo_subset = set(int(i) for i in settings.get("demo_subset_ids", [12, 20]))
+        self._demo_subset = set(int(i) for i in settings.get("demo_subset_ids", [12, 24, 20]))
         self._allowed_ids = None          # None = use all detected markers
         self._use_rigid   = True          # joint solve when board geometry is loaded
         self._equal_weight = False        # per-marker path: equal vs pixel-area weighting
@@ -314,7 +314,7 @@ class MainClass:
         self._stereo_max_reproj_px      = float(settings.get("stereo_max_reproj_px", 4.0))
         self._stereo_disagree_rot_rad   = np.deg2rad(float(settings.get("stereo_disagree_rot_deg", 6.0)))
         self._stereo_disagree_trans_m   = float(settings.get("stereo_disagree_trans_mm", 20.0)) / 1000.0
-        self._stereo_max_frame_skew_s   = float(settings.get("stereo_max_frame_skew_ms", 20.0)) / 1000.0
+        self._stereo_max_frame_skew_s   = float(settings.get("stereo_max_frame_skew_ms", 2.0)) / 1000.0
         self._origin_stable_m           = float(settings.get("origin_stable_m", 0.002))
         self._origin_stable_rad         = float(settings.get("origin_stable_rad", 0.0175))
         # Joint two-camera solve (board.estimate_board_pose_dual): one pose
@@ -331,14 +331,14 @@ class MainClass:
         # How the two cameras make one pose (2026-09-22): "average" = each
         # camera solved alone, then averaged (_fuse_board_poses); "joint" = one
         # solve over all corners of both cameras (_solve_joint).
-        self._dual_solve = str(settings.get("dual_solve", "average")).lower()
+        self._dual_solve = str(settings.get("dual_solve", "joint")).lower()
         self._joint_prev = None               # last accepted joint pose, start of the next fit
         # Huber loss in the joint fit (board.estimate_board_pose_dual_gn): a
         # corner further off than this many px pulls with weight delta/e
         # instead of counting e^2, so one noisy or half-hidden tag cannot drag
         # the pose; frames are then judged on the median corner error.
         # 0 = plain least squares (before 2026-09-24).
-        self._robust_px = float(settings.get("robust_loss_px", 0.0))
+        self._robust_px = float(settings.get("robust_loss_px", 1.0))
         print(f"Two-camera solve: {self._dual_solve}"
               + (f"  (robust loss {self._robust_px:g} px)" if self._robust_px > 0 else ""))
         # Pipeline (2026-09-22). "current": each camera's frame is straightened,
@@ -356,7 +356,7 @@ class MainClass:
         self._prev_fused_pose = None          # pose-space stability gate for dual-camera origin lock
 
         # Camera
-        self._camera_backend = str(settings.get("camera_backend", "auto")).lower()
+        self._camera_backend = str(settings.get("camera_backend", "rcam_dual")).lower()
         self._dual_camera = self._camera_backend == "rcam_dual"
         self._init_camera_backend(settings)
 
@@ -378,7 +378,7 @@ class MainClass:
         # one frame (10 ms) later; a frame's search box comes from the pose of
         # two frames before (one before, without the overlap).
         self._cam_pools = None
-        self._overlap = bool(settings.get("overlap_detect_solve", False))
+        self._overlap = bool(settings.get("overlap_detect_solve", True))
         self._pending = None                  # frame searched last pass, not yet solved
         if self._dual_camera:
             self.detector_1 = self._init_detector()
@@ -399,7 +399,7 @@ class MainClass:
         # the preview shows what the tracker really does (_both_preview).
         self._roi_enabled    = bool(settings.get("roi_enabled", True))
         self._roi_used       = [None, None]   # box searched this frame per camera, None = whole frame
-        self._roi_margin     = float(settings.get("roi_margin_markers", 2.0))
+        self._roi_margin     = float(settings.get("roi_margin_markers", 1.0))
         # The margin is measured in marker widths, so it balloons exactly when
         # the device is near a camera (a marker can be 300 px across) and the
         # box then approaches the full frame — the pass overruns 10 ms and a
