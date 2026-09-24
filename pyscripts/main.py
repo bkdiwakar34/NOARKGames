@@ -395,14 +395,9 @@ class MainClass:
         # and the detector sees the same neighbourhoods, so corners come out the
         # same. A box that yields no markers at all is re-searched full-frame in
         # the same pass, and every roi_full_every-th frame is full-frame
-        # regardless. Off while the debug preview is on, since the preview needs
-        # the whole picture.
-        # debug_preview_box (raw_joint only): keep the box on while previewing
-        # and show both raw frames with the box searched this frame.
-        self._preview_box    = (bool(settings.get("debug_preview_box", False))
-                                and self._debug_preview and self._raw)
-        self._roi_enabled    = (bool(settings.get("roi_enabled", True))
-                                and (not self._debug_preview or self._preview_box))
+        # regardless. Stays on with the debug preview, which draws the box, so
+        # the preview shows what the tracker really does (_both_preview).
+        self._roi_enabled    = bool(settings.get("roi_enabled", True))
         self._roi_used       = [None, None]   # box searched this frame per camera, None = whole frame
         self._roi_margin     = float(settings.get("roi_margin_markers", 2.0))
         # The margin is measured in marker widths, so it balloons exactly when
@@ -1389,7 +1384,7 @@ class MainClass:
 
         R = cv2.Rodrigues(rvec)[0]
         grip = R @ self.board.grip_point + tvec
-        if self._debug_preview and not self._raw:   # overlay is for the straightened image
+        if self._debug_preview and not self._dual_camera:   # single-camera preview only
             self._draw_board_overlay(rvec, tvec, grip)
         return self._origin_R.T @ (self._origin_grip - grip)
 
@@ -1461,9 +1456,11 @@ class MainClass:
         corners in full-frame undistorted pixels, ids)."""
         self._roi_age[cam] += 1
         roi = box if box is not None else self._roi[cam]
+        self._roi_used[cam] = None
         if (self._roi_enabled and roi is not None
                 and self._roi_age[cam] < self._roi_full_every):
             x0, y0, x1, y1 = roi
+            self._roi_used[cam] = roi
             # Slicing the maps undistorts just this rectangle of the output:
             # same map entries as the full remap, so the same pixels.
             crop = cv2.remap(frame, map1[y0:y1, x0:x1], map2[y0:y1, x0:x1],
@@ -1478,6 +1475,7 @@ class MainClass:
                 return crop, corners, ids
             # Box found nothing: fall through to a full-frame search, same pass.
 
+        self._roi_used[cam] = None
         self._roi_age[cam] = 0
         self._full_count[cam] += 1
         frame = cv2.remap(frame, map1, map2, interpolation=cv2.INTER_LINEAR)
@@ -1517,15 +1515,20 @@ class MainClass:
         self._update_roi(cam, corners, 0 if ids is None else len(ids))
         return frame, corners, ids
 
-    def _box_preview(self, frames, corners, ids) -> np.ndarray:
-        """Both raw frames side by side, on copies: the tags found, and the
-        search box of this frame — green rectangle, or a red border and FULL
-        when the whole frame was searched."""
+    def _both_preview(self, raw_frames, corners, ids) -> np.ndarray:
+        """debug_preview: both cameras side by side, as the tracker searches
+        them (straightened, or raw in the raw_joint pipeline), on copies: every
+        tag found outlined with its ID, and this frame's search box — green
+        rectangle, or a red border and FULL when the whole image was searched.
+        Straightening the whole frame for display costs a few ms; preview only."""
         tiles = []
+        maps = ((self.map1, self.map2), (getattr(self, "map1_1", None), getattr(self, "map2_1", None)))
         for cam in (0, 1):
-            frame = frames[cam]
+            frame = raw_frames[cam]
             if frame is None:
                 continue
+            if not self._raw and maps[cam][0] is not None:
+                frame = cv2.remap(frame, maps[cam][0], maps[cam][1], interpolation=cv2.INTER_LINEAR)
             img = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
             if ids[cam] is not None:
                 aruco.drawDetectedMarkers(img, corners[cam], ids[cam])
@@ -1788,7 +1791,7 @@ class MainClass:
             # raw_joint: one solve over both cameras' raw corners (see
             # _solve_raw_joint); it also places the next search boxes. (No
             # drawing here: the raw frames are the camera's read-only buffers —
-            # the preview draws on copies, see _box_preview.)
+            # the preview draws on copies, see _both_preview.)
             ta = time.perf_counter() if self.debug else 0.0
             fused = self._solve_raw_joint(corners0, ids0, corners1, ids1)
             if self.debug:
@@ -1935,9 +1938,9 @@ class MainClass:
             # — several ms per frame, and it lands *outside* t0..t4, so it never
             # appears in the printed stage times while still capping the frame
             # rate. debug_preview=False keeps the numbers without that cost.
-            if self._preview_box:
-                cv2.imshow("frame", self._box_preview((frame0, frame1),
-                                                      (corners0, corners1), (ids0, ids1)))
+            if self._debug_preview and self._dual_camera:
+                cv2.imshow("frame", self._both_preview(job["frames"],
+                                                       (corners0, corners1), (ids0, ids1)))
             elif self._debug_preview:
                 self.video_frame = cv2.resize(self.video_frame, (350, 200))
                 cv2.imshow("frame", self.video_frame)
