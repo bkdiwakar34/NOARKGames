@@ -7,6 +7,8 @@
 	"corner_refine": "contour",
 	"opencv_threads": 2,
 	"adaptive_thresh_win_size": 15,
+	"aruco3_detection": true,
+	"perspective_pixels_per_cell": 4,
 	"pnp_method": "square",
 	"use_board_pnp": true,
 	"joint_solve": false,

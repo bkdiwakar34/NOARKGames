@@ -205,6 +205,11 @@ class MainClass:
 
         self._corner_refine_name = str(settings.get("corner_refine", "contour")).lower()
         self._thresh_win = int(settings.get("adaptive_thresh_win_size", 15))
+        # Tag-reading settings (2026-09-24), exposed to steady small and oblique
+        # tags that blink in and out of detection — each blink shifts the pose
+        # a little. Defaults = what the tracker always used.
+        self._aruco3 = bool(settings.get("aruco3_detection", True))
+        self._pixels_per_cell = int(settings.get("perspective_pixels_per_cell", 4))
         self.detector = self._init_detector()
 
         pnp_map = {
@@ -423,6 +428,8 @@ class MainClass:
         self._roi_count  = [0, 0]         # markers found last frame
         self._roi_age    = [0, 0]         # frames since the last full-frame search
         self._full_count = [0, 0]         # full-frame searches since the last timing line
+        self._prev_tags  = [None, None]   # tag ids found in the previous frame, per camera
+        self._tag_flips  = [0, 0]         # frames whose tag set differed from the frame before
 
         # Sequence numbers of the last frame processed per camera, so no frame
         # is processed twice; and camera frames skipped since the last timing
@@ -480,8 +487,13 @@ class MainClass:
         }
         refine_flag = refine_map.get(self._corner_refine_name, aruco.CORNER_REFINE_CONTOUR)
         params = aruco.DetectorParameters()
-        params.useAruco3Detection     = True
+        params.useAruco3Detection     = self._aruco3
         params.cornerRefinementMethod = refine_flag
+        # How finely each cell is sampled when the tag's code is read: at the
+        # far edge a cell is ~6 px, and 4 samples per cell leaves little margin.
+        params.perspectiveRemovePixelPerCell = self._pixels_per_cell
+        print(f"Tag reading: aruco3 {'on' if self._aruco3 else 'off'}, "
+              f"{self._pixels_per_cell} px per cell")
         # Single adaptive-threshold pass instead of the default three (window
         # sizes 3/13/23): our marker sizes are a known range, so one mid-size
         # window finds them at ~1/3 the detection cost. 0 = OpenCV default.
@@ -1755,6 +1767,14 @@ class MainClass:
             corners0, ids0 = self._filter_markers(corners0, ids0)
         t3 = time.perf_counter()
         wait_ms = (t3 - t_wait) * 1000.0
+        # Tag flicker: a frame whose set of found tags differs from the frame
+        # before. Each change moves the pose slightly (the tags' layout is
+        # calibrated to ~0.7 px, not 0), so flicker is seen as vibration.
+        for cam, ids in ((0, ids0), (1, ids1)):
+            now = frozenset() if ids is None else frozenset(int(i) for i in np.asarray(ids).flatten())
+            if self._prev_tags[cam] is not None and now != self._prev_tags[cam]:
+                self._tag_flips[cam] += 1
+            self._prev_tags[cam] = now
 
         self._poll_command()
 
@@ -1870,7 +1890,9 @@ class MainClass:
                         self._search_ms.clear()
                         stages = (f"search per camera (own thread): {search:5.2f} ms  |  "
                                   f"main waited for it: {means[1]:5.2f} ms  |  "
-                                  f"full-frame searches: {self._full_count[0]}+{self._full_count[1]}  |  ")
+                                  f"full-frame searches: {self._full_count[0]}+{self._full_count[1]}  |  "
+                                  f"tag flickers: {self._tag_flips[0]}+{self._tag_flips[1]}  |  ")
+                        self._tag_flips = [0, 0]
                         if self._joint_solve or self._raw or self._dual_solve == "joint":
                             stages += f"joint rejects: {self._joint_rejected}  |  "
                             self._joint_rejected = 0
