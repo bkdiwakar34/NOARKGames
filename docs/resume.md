@@ -17,8 +17,13 @@ every session, while you still remember. The full story lives in
 
 **Goal: validate the device against the lab's OptiTrack.** Protocol:
 [validation_plan.md](validation_plan.md) (includes fitting a scale factor, §4.3b).
-Whether the OptiTrack session has happened is not recorded in the repo yet —
-**check and note it here.** Device-only recording on file: `2026-09-24_T1_grid_r1`.
+**The OptiTrack session has NOT happened yet** — it waits for the new camera
+arrangement. Device-only recording on file: `2026-09-24_T1_grid_r1`.
+
+**Decision 2026-09-25:** the error model (`compare_rigs.py`) showed a wider rig is
+better — cameras 300 mm apart, turned 20° inward, ≈ 2–3× less depth error than
+today's 76 mm parallel pair. **Longer CSI cables ordered.** Validate the new
+arrangement, not the old one.
 
 **Tracker** (defaults in code; `settings.json` now has only 17 keys):
 - joint two-camera fit, Huber robust loss 1 px, frames judged on median corner error;
@@ -45,19 +50,23 @@ Frame rate / flicker: `tail -n 3 /tmp/tracker_timing.log`.
 
 ## Next actions
 
-1. **Commit the analysis scripts** in `pyscripts/analysis/` (`measure_sigma.py`,
-   `theoretical_error.py`, `compare_jitter.py`, `compare_rigs.py`,
-   `visibility_explorer.py` + template) — not the outputs (`jitter_by_hold.csv`,
-   `meta.json`, `visibility_explorer.html`, `theoretical_error_out/`); decide where
-   outputs live.
-2. **Validation session** (if not done): T0 gate, T1 ×2, T2 ×12, T3 ×6.
-3. **Jitter levers, measured one at a time:** light; `corner_refine` (apriltag /
-   subpix); cam1 lens recalibration (0.79 → ~0.2 px); check the chessboard is
-   square (fy/fx differ 0.6–0.7 % on both cameras).
-4. **Camera arrangement:** model says 300 mm apart, 20° inward ≈ 2–3× less depth
-   error — needs longer CSI cables and a new mount; recalibrate after.
-5. **Bug:** the search box makes cam1 lose tags 24 and 28 together at some spots
-   (full-image search: flicker 45 % → 0–4 %).
+1. **While the cables are on their way:**
+   - design the mount for the new arrangement (≈ 300 mm apart, each camera turned
+     10° inward; check the exact gap/angle with `compare_rigs.py --rigs` for the
+     real table);
+   - cam1 lens recalibration (0.79 → ~0.2 px) and check the chessboard is square
+     (fy/fx differ 0.6–0.7 % on both cameras — measure 10 squares each way);
+   - fix the search-box bug: cam1 loses tags 24 and 28 together at some spots
+     (full-image search: flicker 45 % → 0–4 %).
+2. **When the cables arrive:** mount the cameras, then recalibrate in order —
+   lenses only if touched (a moved camera does not change its lens), then
+   `calibrate_rig.py` (camera-to-camera changes completely: its starting guess is
+   the old 76 mm pair, so it may need `calibrate_stereo.py` first for a start),
+   origin lock, 4 corners. Measure: `measure_sigma.py` + `compare_jitter.py` on a
+   T1 grid — the prediction for the new rig should hold.
+3. **Then the OptiTrack session:** T0 gate, T1 ×2, T2 ×12, T3 ×6.
+4. **Jitter levers after that, one at a time:** light; `corner_refine`
+   (apriltag / subpix).
 
 ## Small open items
 

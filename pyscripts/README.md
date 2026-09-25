@@ -52,6 +52,11 @@ Run everything from the repo root with the venv active, e.g.
 | `find_jumps.py` | What happens when the pose jumps: shake vs a smoothed path, and whether jumps coincide with tags changing, the fusion mode switching, the cameras disagreeing or a poor fit — compared with how common each is normally. |
 | `bench_joint.py` | The joint two-camera solve, slow (numerical derivatives) vs standard (derivatives written out), on one recording's corners: time per fit on the board, agreement between the two, acceptance. |
 | `which_calibration.py` | Which calibration makes the cameras disagree: each camera alone vs the joint fit, per tag, by distance from the image centre and by table zone — points at the stereo, device or lens calibration. |
+| `measure_sigma.py` | Corner pixel noise σ, measured from the still holds of recordings (per camera), with a cross-check from the fit residuals. |
+| `theoretical_error.py` | Predicted pose error from σ and the geometry, with the tracker's own maths (Cov = σ²(JᵀJ)⁻¹); varies σ, camera gap, angle between cameras, table position and device heading. Plots in `theoretical_error_out/`. |
+| `compare_jitter.py` | Measured vs predicted jitter for every still hold of a recording → `jitter_by_hold.csv`. Ratio ≈ 1 means corner noise explains the jitter. |
+| `compare_rigs.py` | Predicted error maps of several camera arrangements (gap:angle) on one colour scale, optionally with the measured holds on top. |
+| `visibility_explorer.py` | Builds `visibility_explorer.html`: which tags each camera should see vs which it read, per hold. |
 | `camera_placement.py` | Where should the cameras sit? Scores "what if" placements (moved back / up, re-aimed) at every T1 place from the recorded device poses: usable markers, worst angle, sharpness. |
 | `check_board.py` | Is the device geometry the limit? Per-marker consistency of `board_geometry.json`. |
 

@@ -175,3 +175,8 @@ AssetStoreTools/
 .venv
 addons/gdble/~*
 android/build/
+# Outputs of the analysis scripts (regenerated from recordings; not source)
+pyscripts/analysis/theoretical_error_out/
+pyscripts/analysis/jitter_by_hold.csv
+pyscripts/analysis/meta.json
+pyscripts/analysis/visibility_explorer.html
