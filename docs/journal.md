@@ -16,6 +16,74 @@ New entries go at the **top**, under the date.
 
 ---
 
+## 2026-09-23 to 09-25 — New tags, full recalibration, and the jitter explained
+
+**Ended with:** everything recalibrated with new tag stickers and a new chessboard;
+the joint fit made robust to one bad tag; `settings.json` cut from 49 keys to 17;
+and a model that predicts the still jitter from the corner noise — it matches the
+measurement (ratio 0.93). The remaining shimmer is corner noise, and the camera
+arrangement is the biggest lever left.
+
+### 1. New stickers and chessboard, recalibrated in order
+
+- **Tags reprinted** (worn). Printed from `docs/markers.docx` at 100 % (Word:
+  "No Scaling"); they measure about **50.0 × 49.5 mm** — the printer scales ~1 %
+  differently along and across the paper feed. `MARKER_LENGTH` kept at 50.0 mm:
+  expect ~0.5 % scale in distances (2–3 mm at 0.45–0.60 m). The mocap comparison
+  fits and reports a scale factor for that (validation_plan §4.3b).
+- **New chessboard: 13 × 9 squares of 30 mm** → 12 × 8 inner corners.
+  `calibrate_camera.py` defaults changed; `--corners` / `--square-mm` added.
+- Order: lenses → `calibrate_board.py` (only for the start layout and the grip
+  point; its pair residuals of 5–9° / 5–9 mm and grip warnings up to 13.8 mm are
+  the weak pairwise method, not the final result) → `calibrate_rig.py`: held-out
+  error **2.61 → 0.70 px** (90th pct 4.40 → 1.10); tags moved 0–8.6 mm; cam1 moved
+  1.30 mm, turned 0.42°.
+- Lens results: cam0 fx 593.3, fy 597.7, cx 654.0, cy 418.8, fit **0.19 px**;
+  cam1 fx 589.6, fy 592.9, cx 647.7, cy 383.8, fit **0.79 px** — 4× worse than
+  cam0, worth redoing. Focal length ≈ 1.78 mm (3 µm pixels); Waveshare's "3.15 mm"
+  contradicts its own 126° field of view. **fy is 0.6–0.7 % larger than fx on both
+  cameras** — the size of the printer's error; check the chessboard with calipers
+  both ways (10 squares = 300 mm).
+
+### 2. Tracker changes
+
+- **Robust joint fit** (`board.estimate_board_pose_dual_gn`, Huber loss at 1 px):
+  a corner far off now pulls with weight 1/e instead of counting e²; frames are
+  judged on the median corner error. Built-in default now.
+- **Tag flicker counter** in `/tmp/tracker_timing.log` (`tag flickers: a+b`, and
+  which tags: `cam1 flicker: 24x46/44 28x46/44`). Found: at one spot cam1 lost
+  tags 24 and 28 **together** in ~45 % of frames; with the whole image searched it
+  dropped to 0–4 — the **search box** loses them. Not fixed yet.
+- **Debug preview**: both cameras, every tag with its ID, the search box drawn,
+  box left on. (`debug_preview_box` removed.)
+- **Tried and reverted**: fitting only x, z and yaw on the table plane (plane from
+  the origin lock). The cursor froze in places — a real tilt or an inexact plane
+  made the flat pose fail the fit check.
+- **`settings.json` 49 → 17 keys**; decided values are now code defaults
+  (joint solve, robust loss, both cameras, overlap, box margin 1.0, pairing 2 ms).
+  The dead code behind removed options is still there, for after the validation.
+- `rapidtag` (colleague's Rust AprilTag detector, PyPI) looked at: faster, but
+  has **no sub-pixel corner refinement** yet, so not usable for us.
+
+### 3. The jitter, measured and predicted (analysis scripts, not yet committed)
+
+- `measure_sigma.py`: corner noise from still holds, **σ ≈ 0.30 px (cam0),
+  0.34 px (cam1)**.
+- `theoretical_error.py`: predicted pose error from σ with the tracker's own
+  maths, Cov = σ² (JᵀJ)⁻¹ (sandwich form when the cameras differ).
+- `compare_jitter.py` on `2026-09-24_T1_grid_r1` (98 still holds): measured
+  **0.30 mm**, predicted **0.35 mm**, **ratio 0.93** (10th–90th pct 0.71–1.39) —
+  **corner noise explains the jitter**; nothing else is shaking the pose.
+- `compare_rigs.py`: same model for other arrangements. **Cameras 300 mm apart,
+  turned 20° inward, cut the depth error roughly 2–3× over the workspace** against
+  today's 76 mm parallel rig.
+- `visibility_explorer.py/.html`: which tags each camera should see vs read.
+
+So the levers left, in order: corner noise (light, refinement method, tag design)
+and the camera arrangement. No filtering (user's decision).
+
+---
+
 ## 2026-09-22 — Why the two cameras disagreed, and a calibration that makes them agree
 
 **Ended the day with:** the tracker at 100 samples/s with 0 lost (search and solve

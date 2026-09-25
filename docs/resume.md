@@ -9,104 +9,67 @@ every session, while you still remember. The full story lives in
 
 ---
 
-**Last updated:** 2026-09-22, 20:10
+**Last updated:** 2026-09-25
 
 **This repo is the Dragon Q6A one.** The Raspberry Pi version is `bkdiwakar34/NOARKGames-pi`.
 
 ## State
 
-**Goal: validate the device against the lab's OptiTrack — session planned for
-2026-09-23.** Protocol: **[validation_plan.md](validation_plan.md)**.
+**Goal: validate the device against the lab's OptiTrack.** Protocol:
+[validation_plan.md](validation_plan.md) (includes fitting a scale factor, §4.3b).
+Whether the OptiTrack session has happened is not recorded in the repo yet —
+**check and note it here.** Device-only recording on file: `2026-09-24_T1_grid_r1`.
 
-**The tracker today** (committed `settings.json`):
-- `"dual_solve": "joint"` — ONE solve over all corners of both cameras (fast,
-  derivatives written out). `"average"` = the old per-camera average, as a fallback.
-- `"overlap_detect_solve": true` — search frame N while solving N−1:
-  **100 samples/s, 0 missed** through Godot. Positions arrive 10 ms later.
-- `"pipeline": "current"` (image straightened), border `0`, 15 px threshold window,
-  5 ms exposure, `stereo_max_frame_skew_ms` 2.
-- **Calibration redone 2026-09-22 with `calibration/calibrate_rig.py`** (tag layout +
-  cam1-to-cam0 fitted together): held-out error 1.26 → 0.80 px. Old files kept as
-  `pyscripts/*.before-<date-time>`.
-- Camera setup moved away from the near edge; origin re-locked, 4 corners redone.
+**Tracker** (defaults in code; `settings.json` now has only 17 keys):
+- joint two-camera fit, Huber robust loss 1 px, frames judged on median corner error;
+- search and solve overlapped: 100 samples/s, 0 missed (setup kept in the table centre);
+- starts reliably: driver at boot, monotonic clock, `exec` start, first pass reads Godot;
+- debug preview: both cameras, tag IDs, search box; timing log counts tag flicker.
 
-**Result:** big jumps gone, cursor steadier; a **very slight shimmer** remains.
+**Calibration (2026-09-23/24):** new tag stickers (~50.0 × 49.5 mm, `MARKER_LENGTH`
+kept 50.0), new chessboard (12 × 8 inner corners, 30 mm), lenses redone
+(cam0 0.19 px, **cam1 0.79 px**), `calibrate_board.py` then `calibrate_rig.py`
+(held-out 0.70 px). Backup of the previous files: `~/calib_backup_2026-09-23/`.
 
-**Evening 2026-09-22 — start-up made reliable** (tested, starts first time):
-- camera driver loads at boot (`/etc/modules-load.d/ov9282.conf`);
-- tracker watchdog + capture times on the monotonic clock — the board has no
-  battery clock and jumps (+2 h 19 min) when it syncs online, which killed the
-  tracker ("no UDP packets from Godot for 3 s");
-- Godot's start command uses `exec`, so quitting the game stops the tracker;
-- the overlap's first pass reads Godot too (start-up longer than 3 s no longer exits).
+**Jitter, understood:** measured 0.30 mm still vs 0.35 mm predicted from corner
+noise σ ≈ 0.3 px (ratio 0.93, 98 holds). What remains is corner noise; no filter.
 
-**Recorder checked:** T1 dots cover the table, T2 pacer right (fast = lap 6),
-T3 runs (16 reaches, 32 labels). T0 gate check left for the lab (real eSync).
-
-**Starting the system** (on the board):
+**Starting the system:** power on, wait for the clock to sync if recording for the
+mocap, then
 
 ```bash
-# camera driver loads at boot (/etc/modules-load.d/ov9282.conf, 2026-09-22)
 taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOARKGames --main-scene res://app/ui/main.tscn
 ```
 
-Frame-rate check: `tail -n 3 /tmp/tracker_timing.log` (look at `missed`).
+Frame rate / flicker: `tail -n 3 /tmp/tracker_timing.log`.
 
-## Next action: 2026-09-23, the lab session (tracker frozen as is)
+## Next actions
 
-Decided: no tracker changes before the validation — it measures today's setup.
-
-Before leaving: back up the calibration files (below). Carry the camera mount as
-one piece — if the two cameras shift relative to each other, run
-`calibration/calibrate_rig.py` (5 min) before recording.
-
-**New tag stickers (2026-09-23):** printed at ~50.0 mm one way, ~49.5 mm the other
-(printer scales differently along/across the paper feed). Kept `MARKER_LENGTH` at
-50.0 mm; expect ~0.5 % scale (2–3 mm at 0.45–0.60 m). The game absorbs it in the
-4-corner fit; the mocap analysis fits a scale factor and reports it
-(validation_plan §4.3b) — set `MARKER_LENGTH` from that afterwards. Re-gluing the
-tags means `calibrate_board.py` (recomputes the grip point) **then**
-`calibrate_rig.py`.
-
-In the lab:
-1. Let the board get online (its clock syncs; wait until `date` is right).
-2. Recalibrate everything, in this order (game closed):
-   `calibration/calibrate_camera.py --backend rcam --cam-id CAM2`, then
-   `--cam-id CAM3 --output camera_calib_1.toml`; then `calibration/calibrate_rig.py`
-   (tag layout + cam1-to-cam0 together — NOT calibrate_board/calibrate_stereo, which
-   chain the errors); then start Godot, **re-lock the origin, redo the 4 corners**.
-3. Wire eSync → pin 35, GND → pin 34; **T0**: gate low, Motive record → high → low.
-   Our cameras have no IR filter: watch whether the OptiTrack's 850 nm strobes make
-   the image pulse (tracking steady? `tail -n 3 /tmp/tracker_timing.log`).
-4. T1 ×2, T2 ×12, T3 (comfortable ×3, fast ×3), Motive take named like each recording.
-
-After the lab — jitter, one change at a time, each measured:
-light (LED strip) → corner method (contour / subpix / apriltag, on still AND moving
-raw frames) → One Euro filter for the game display only (data stays raw). Offline,
-every recording can be re-solved as cam0 / cam1 / average / joint
-(`analysis/compare_fusion.py`) and compared with the mocap.
+1. **Commit the analysis scripts** in `pyscripts/analysis/` (`measure_sigma.py`,
+   `theoretical_error.py`, `compare_jitter.py`, `compare_rigs.py`,
+   `visibility_explorer.py` + template) — not the outputs (`jitter_by_hold.csv`,
+   `meta.json`, `visibility_explorer.html`, `theoretical_error_out/`); decide where
+   outputs live.
+2. **Validation session** (if not done): T0 gate, T1 ×2, T2 ×12, T3 ×6.
+3. **Jitter levers, measured one at a time:** light; `corner_refine` (apriltag /
+   subpix); cam1 lens recalibration (0.79 → ~0.2 px); check the chessboard is
+   square (fy/fx differ 0.6–0.7 % on both cameras).
+4. **Camera arrangement:** model says 300 mm apart, 20° inward ≈ 2–3× less depth
+   error — needs longer CSI cables and a new mount; recalibrate after.
+5. **Bug:** the search box makes cam1 lose tags 24 and 28 together at some spots
+   (full-image search: flicker 45 % → 0–4 %).
 
 ## Small open items
 
-- A camera that cannot see the device searches its whole image every frame → lost
-  frames (hand, lens cap). Fix: place its box from the other camera's pose / throttle.
-- Right up against the cameras the rate drops (~86/s); avoided by the new placement.
-- Back up the calibration files off the board — **including the new ones**
-  (`board_geometry.json`, `stereo_extrinsics.json`, `camera_calib*.toml`, `origin_lock.json`).
-- Dead code inside `main.py` (per-marker solver, `SETUP:` switch, single-camera mode,
-  `raw_joint` pipeline if it stays unused).
-- `uv lock` on the board, then commit (`gpiod` not pinned).
-- `compare_fusion.py`'s joint method still uses the slow fit (same answers, slower).
-- Decide on the in-game **■ Stop** button.
-
-## Still to decide in the validation plan
-
-Acceptance criteria per measure; where the reflective markers go on the device; T5
-(recording during a real game).
+- Delete the dead code behind the removed settings (averaging, raw pipeline,
+  single-camera, per-marker, demo switch) — after the validation.
+- A camera that cannot see the device searches its whole image every frame.
+- `uv lock` on the board; decide on the in-game ■ Stop button.
+- Next sticker print: pre-compensate the printer's ~1 % along one axis.
 
 ## Deliberately not done
 
-- Hardware camera sync — these Waveshare modules don't expose FSIN.
-- Drift correction between the cameras — measured 0.3 ppm, not needed.
-- Faster detection that changes what the detector computes — until the mocap can check it.
+- Display filtering (One Euro etc.) — user's decision: fix the source.
+- Table-plane (x, z, yaw) fit — tried 2026-09-23, froze the cursor, reverted.
+- Hardware camera sync — the modules don't expose FSIN. Drift correction — 0.3 ppm.
 - Kiosk boot and upload — explicitly last.
