@@ -48,7 +48,14 @@ taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOAR
 
 Frame rate / flicker: `tail -n 3 /tmp/tracker_timing.log`.
 
-## Next actions
+## Next session: the game side
+
+While the cables are on their way, work moves to the **game**: interface, the
+Fitts'-law difficulty design and new games. Start from [design.md](design.md)
+(architecture + current Fitts'-Law adaptive design) and [v1_plan.md](v1_plan.md)
+(product plan and build order). The tracker items below wait for the cables.
+
+## Next actions (tracker)
 
 1. **While the cables are on their way:**
    - design the mount for the new arrangement (≈ 300 mm apart, each camera turned
