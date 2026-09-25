@@ -16,6 +16,68 @@ New entries go at the **top**, under the date.
 
 ---
 
+## 2026-09-25 (afternoon) — Designing the clinic study interface
+
+**Ended with:** a page-by-page spec for the interface of the 3-day healthy-participant
+study ([clinic_study_interface.md](clinic_study_interface.md)) and an approved mockup
+(design canvas, 9 screens). Design only — no code changed. It will be a **separate flow**;
+the existing chooser → Apple Harvest flow works and is left alone.
+
+### What the study needs
+
+The v1 plan assumed a patient alone at home with two arcade buttons. The first study is
+different: healthy participants, in the clinic, with the researcher at the mouse. So a
+**Clinic / Home toggle**: clinic mode walks through Home → calibration → play; home mode
+goes straight to the game.
+
+### The difficulty decisions, and why
+
+- **A level is a fixed percentile $p$**, one per visit, the same three for everyone; only
+  the order is randomised (by the app, balanced blocks of the 6 orders).
+- **The model is frozen after calibration.** Updating only on catches drifts the lifetime
+  down (caught movements are the fast ones: their mean is $\mu - 0.5\sigma$ at $p = 0.7$,
+  enough to turn a 70 % day into ~50 %). Counting misses instead would let a participant
+  who coasts make the game easier. Frozen avoids both.
+- **Calibration every visit**, because frozen means calibration carries everything, and
+  people get faster between days (a Day-1 model on Day 3 could turn 70 % into ~90 %).
+- **Only 3 target pairs, many trials each**, the same pairs in calibration and play. That
+  allows the lifetime to be the pair's own sorted movement times read at $p$ — no Fitts
+  line, no normal assumption (movement times are right-skewed).
+- **Pairs fixed in mm for everyone** (healthy study). For patients later: fix the IDs and
+  scale $A$ and $W$ to each person's reach.
+
+### Making calibration a game
+
+Calibration must get full effort without cutting movements off. Settled on **speed
+points with a generous cap** (apple ripens gold → red, 3 → 2 → 1 points, waits up to 8 s):
+people race the points, and almost every movement is recorded whole. 1-minute rounds with
+15 s rests, a 1-minute warm-up that is not counted, and a results panel only behind a
+hidden researcher toggle.
+
+The workspace scan stays (arm lengths differ) but is sped up: a light glides out along
+8 spokes past reach and back (~48 s); the edge is where the cursor stops keeping up.
+
+### Screens
+
+Home (two-line participant rows), Registration, Settings with a **Lock protocol** switch
+(version stamped into every data file), Reach scan, Calibration, Play, TypingClub-style
+rest cards (stars + % for play, stars + points for calibration), Session complete.
+Level and order never appear on screen. Interrupted sessions resume on the same date.
+
+### Look
+
+The current flat look was rejected as makeshift. Operator screens: a clean dashboard.
+Participant screens: a polished 2D orchard with real physics — caught apples fly into a
+basket and bounce, missed ones fall and roll. Rejected: full 3D (too heavy for the board,
+and perspective makes the target width ambiguous).
+
+### Open
+
+Percentile values, final pairs, speed-point thresholds, fixed dose vs open-ended; the
+remaining screens (Settings sub-pages, researcher overlay, pause, resume prompt).
+
+---
+
 ## 2026-09-23 to 09-25 — New tags, full recalibration, and the jitter explained
 
 **Ended with:** everything recalibrated with new tag stickers and a new chessboard;

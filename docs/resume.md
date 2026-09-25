@@ -48,12 +48,21 @@ taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOAR
 
 Frame rate / flicker: `tail -n 3 /tmp/tracker_timing.log`.
 
-## Next session: the game side
+## Next session: the clinic study interface
 
-While the cables are on their way, work moves to the **game**: interface, the
-Fitts'-law difficulty design and new games. Start from [design.md](design.md)
-(architecture + current Fitts'-Law adaptive design) and [v1_plan.md](v1_plan.md)
-(product plan and build order). The tracker items below wait for the cables.
+While the cables are on their way, work is on the **game side**. On 2026-09-25 the
+interface for the 3-day healthy-participant study was designed page by page and a
+mockup approved: spec in [clinic_study_interface.md](clinic_study_interface.md),
+mockup [Reach Study Interface](https://claude.ai/artifact/NGWbDRwzpNHSiedrXAdayx).
+It is a **separate flow** — the current `app/ui` chooser → game flow stays untouched.
+
+Next:
+1. Draw the remaining screens in the mockup (Settings Mode / Device / Data,
+   researcher overlay, tracker-lost pause, Resume prompt).
+2. Decide the open items (percentiles, final pairs, speed-point thresholds).
+3. Then plan the Godot implementation (own entry scene and folder).
+
+The tracker items below wait for the cables.
 
 ## Next actions (tracker)
 
