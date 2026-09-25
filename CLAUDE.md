@@ -16,27 +16,34 @@ Read [docs/todo.md](docs/todo.md) for open work.
 
 ---
 
-## Running
+## Running (on the Dragon Q6A)
 
 ```bash
-godot project.godot                        # open in editor
-godot --path . --main-scene res://app/ui/main.tscn   # run from CLI
+taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOARKGames --main-scene res://app/ui/main.tscn
 ```
 
 Main scene: `res://app/ui/main.tscn`
-Display: fullscreen, canvas_items stretch, OpenGL compatibility (Raspberry Pi).
+Display: fullscreen, canvas_items stretch, OpenGL compatibility.
+The camera driver loads at boot (`/etc/modules-load.d/ov9282.conf`); see
+[docs/setup.md](docs/setup.md) for a fresh board. Code is never run on the Windows
+machine — changes are pushed and tested on the board.
 
 ---
 
 ## Python Tracker
 
-ArUco marker tracking → UDP → Godot. Run before launching game on Pi.
+AprilTag tracking with two OV9281 cameras (`rcam`) → one joint pose → UDP → Godot.
+**Godot starts it** (`app/platform/udp_receiver.gd`, pinned to cores 4-7); it
+streams to 127.0.0.1:12345 and exits when Godot stops talking to it.
 
 ```bash
-python -m venv .venv && .venv\Scripts\activate   # Windows
-pip install -e .
-python pyscripts/main.py                          # streams to 127.0.0.1:12345
+source .venv/bin/activate                       # venv made with uv, see setup.md
+tail -n 3 /tmp/tracker_timing.log               # per second: ms per stage, missed frames, tag flicker
 ```
+
+`settings.json` holds only what may change per board; decided values are defaults
+in `pyscripts/main.py`. Tools: `pyscripts/README.md` (calibration/, analysis/,
+diagnostics/).
 
 ---
 

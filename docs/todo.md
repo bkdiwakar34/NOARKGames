@@ -8,27 +8,60 @@ The v1 product build order (logging, game feel, kiosk, installer mode, upload) i
 
 ## Tracker pipeline
 
-- **Back up the per-device calibration files off the board** — `camera_calib_1.toml`, `board_geometry.json`, `stereo_extrinsics.json` are git-ignored, and the 2026-09-17 reinstall lost them.
-- **Run `uv lock` on the board** (once, then commit the result). `gpiod` was added to `pyproject.toml` on 2026-09-19 for the validation recorder's sync pin and installed by hand with `uv pip install gpiod`, so this board is fine; `uv.lock` does not list it yet, so a fresh install would come up without it and the recorder would report "sync pin unavailable".
+What happens next, in order, is in [resume.md](resume.md). This is the full open list.
 
-- **Dragon Q6A dual-camera tracking** is implemented (`camera_backend: "rcam_dual"` in settings.json, see [setup.md §3c](setup.md)). Needs on-device verification: run `calibrate_stereo.py`, confirm origin-lock timing and grip-point smoothness are comparable to single-camera, and confirm the single-camera fallback (occlude one camera) behaves cleanly. **If either camera is physically moved or re-mounted, re-run `calibrate_stereo.py`** — the extrinsic transform is only valid for the rig's exact mounted geometry (same caveat as the existing single-camera origin-lock note below).
-- **Re-run the 4-corner sensor-to-screen calibration.** The removal of `cv2.flip(frame, 1)` and the switch to a properly-fit `camera_calib.toml` changed the raw values the tracker reports. The old screen-mapping coefficients are invalid; redo via `workspace_calibration_overlay.gd`.
-- **Resolution alignment audit.** `Config.FRAME_SIZE` is now `(1280, 800)` (OV9281 native). Confirm everything downstream in Godot is happy at this resolution.
-- **Switch to OpenCV `aruco.Board` for skateboard pose.** Replace `_get_centroid` + `_get_local_coordinates` in `main.py` with a single `estimatePoseBoard` call. Requires each marker's full 6-DOF placement on the device, not just translation. Workflow: place labelled construction coord systems in Fusion 360 (`marker_4`, `marker_8`, …) on each marker face, write a Fusion 360 Python add-in that exports them to `skateboard_geometry.csv` with `id, x, y, z, qx, qy, qz, qw`; load that at startup.
-- **Try ChArUco diamonds on each face.** Drop-in replacement for individual markers — gives 8 corners per face instead of 4, ~50 % reduction in hold-jitter, no CAD measurement needed. Each diamond is ~3× the size of a single marker so the device faces need room.
+### Camera arrangement and validation
 
-### Maybe / lower priority
+- **Wider camera rig** (decided 2026-09-25: ~300 mm apart, ~20° inward; longer CSI
+  cables ordered). Mount, then recalibrate: `calibrate_rig.py` (may need
+  `calibrate_stereo.py` first for a starting guess — the pair's geometry changes
+  completely), origin lock, 4 corners. Confirm with `measure_sigma.py` +
+  `compare_jitter.py` on a T1 grid.
+- **OptiTrack validation** of the new rig — [validation_plan.md](validation_plan.md).
 
-- **Hold-detector + corner averaging on top of One Euro.** When speed has been below a threshold for N frames, average the last N corner positions instead of running One Euro. Noise drops by `√N` during the hold rather than approaching a fixed floor.
-- **Retroreflective / IR-lit markers.** Stick retroreflective tape on the existing markers and add an LED ring around the camera. Decouples tracking from room lighting; lets exposure stay at 1–2 ms with maximum frame rate. OV9281 is IR-sensitive — IR LEDs + IR-pass filter would be invisible to the patient and give the cleanest result.
-- **STag** (Stable Tag) for ~20 % lower corner-detection noise. Needs `pystag` (built from C++) and reprinted markers. Smaller win than diamonds for similar physical-rework cost — only worth it if `diagnose_jitter.py` shows corner σ is the bottleneck.
+### Accuracy and jitter (the jitter is corner noise — model and measurement agree)
+
+- **Redo cam1's lens calibration** (0.79 px vs cam0's 0.19 px).
+- **Check the chessboard is square** — fy is 0.6–0.7 % larger than fx on both
+  cameras, the size of the printer's error on the tag stickers.
+- **Search box loses tags 24 and 28 together in cam1** at some spots (flicker
+  ~45 % of frames; 0–4 % with the whole image searched).
+- **Corner refinement method**: compare `contour` (now) with `apriltag` and `subpix`.
+- **Light**: flicker-free white light (not 850 nm IR — the OptiTrack); lower gain.
+- **Tag size**: set `MARKER_LENGTH` from the mocap's fitted scale; reprint the next
+  set pre-compensated for the printer (~1 % along one axis).
+- **A camera that cannot see the device** searches its whole image every frame,
+  and frames are lost. Place its box from the other camera's pose instead.
+
+### Code
+
+- **Delete the dead code behind the removed settings** (averaging, raw pipeline,
+  single-camera and per-marker modes, demo `SETUP:` switch) — after the validation.
+- **Run `uv lock` on the board** and commit it: `gpiod` (sync pin) is installed by
+  hand but not in `uv.lock`, so a fresh install would lack it.
+- **Back up the calibration files off the board** after every recalibration
+  (`camera_calib*.toml`, `board_geometry.json`, `stereo_extrinsics.json`,
+  `origin_lock.json` — git-ignored).
+
+### Maybe / later
+
+- **ChArUco diamonds** instead of single tags: chessboard corners are located far
+  more precisely than tag corners (~50 % less jitter expected), but a diamond needs
+  ~3× the area of a tag to stay readable at 600 mm.
+- **STag** (circular border): ~20 % lower corner noise; needs `pystag` and reprinting.
+- **rapidtag** (colleague's Rust detector): faster, but no sub-pixel refinement yet.
+- **Retroreflective tags + IR light**: only if it can be made to coexist with the
+  OptiTrack's 850 nm.
+
+Ruled out: display filtering (One Euro etc.) — decided 2026-09-24; fitting only
+x, z, yaw on the table plane — tried 2026-09-23, froze the cursor.
 
 ---
 
 ## Godot / system integration
 
-- **Auto-start Godot on Pi boot.** Tracker is already auto-launched by the Godot autoload. A systemd unit (or similar) should start Godot itself at boot so the system is usable without SSH.
-- **Data sync to researcher server.** Pi pushes CSV files to a researcher's server when the patient connects to a mobile hotspot. Daily upload cadence.
+- **Auto-start Godot at boot.** Tracker is already auto-launched by the Godot autoload. A systemd unit (or similar) should start Godot itself at boot so the system is usable without SSH.
+- **Data sync to researcher server.** The board pushes CSV files to a researcher's server when the patient connects to a mobile hotspot. Daily upload cadence.
 - **Researcher dashboard.** Web-based view of patient progress. Technology not decided.
 
 ---

@@ -164,7 +164,7 @@ Replaced 2026-06-10. Preserved as `v2/Core/adaptive_manager_pid.gd` at git tag `
 
 Calibration was a 1-up 1-down adaptive staircase converging to the 50% threshold (replaced an earlier midpoint-of-extremes estimator).
 
-The full historical maths walkthrough is in [presentation_notes.md](presentation_notes.md) and [presentation.tex](presentation.tex). Removed primarily because lifetime alone is not a good difficulty axis — Fitts' Law treats distance and width jointly.
+The full historical maths walkthrough is in [presentation_notes.md](archive/presentation_notes.md) and [presentation.tex](archive/presentation.tex). Removed primarily because lifetime alone is not a good difficulty axis — Fitts' Law treats distance and width jointly.
 
 ---
 
