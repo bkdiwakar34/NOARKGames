@@ -56,10 +56,17 @@ mockup approved: spec in [clinic_study_interface.md](clinic_study_interface.md),
 mockup [Reach Study Interface](https://claude.ai/artifact/NGWbDRwzpNHSiedrXAdayx).
 It is a **separate flow** — the current `app/ui` chooser → game flow stays untouched.
 
-**2026-09-26: packages 1–4 built and working on the board** (`app/clinic/`, see spec §7):
+**2026-09-26: packages 1–5 built and working on the board** (`app/clinic/`, see spec §7):
 reach scan → warm-up → calibration → check → play, lifetimes from the day's calibration,
 participants with balanced level orders, study days by visit, resume, Settings with
-protocol lock. Operator screens styled like the mockup; participant screens still plain.
+protocol lock, device tools, export. Game look: **night fireflies** (graded catches
+Perfect/Great/Good, hitstop, glass jar, sounds; laser-pointer cursor with tail).
+Operator screens match the mockup.
+
+**Tracker bug found and fixed the same day:** cam1 was dropped from nearly every pass
+whenever the start-up camera phase came out negative (random per start) — the tracker
+was often cam0-only. Fixed in `main.py` (pairing waits up to 4 ms); paired 100 %,
+0 missed frames. See journal 2026-09-26 (afternoon).
 
 Run it:
 
@@ -71,17 +78,21 @@ Data in `~/Documents/NOARK/clinic/`; check a visit with
 `python3 pyscripts/analysis/clinic_catch_rate.py` (newest visit by default).
 
 Next:
-1. **Package 5, visuals:** the orchard, apples, physics and rest cards from the mockup.
-   **Open:** the catch/miss feedback feels weak, and the user saw "some problems" in
-   play still to be listed — ask for them first.
-2. Pilot on the built app, then decide the open items from real movement times
-   (percentiles, final pairs, speed-point thresholds) and lock the protocol.
+1. **New pair distances** (Settings → Protocol): 450 mm is too long for the table area
+   — keep `A + W/2` within the reach area and get a high ID from a smaller W
+   (e.g. A 220 / W 15 mm ≈ 4.0 bits).
+2. **Pilot** a few full visits, then set percentiles, pairs and point limits from real
+   movement times (`clinic_catch_rate.py`) and **lock the protocol**.
 
 The tracker items below wait for the cables.
 
 ## Next actions (tracker)
 
 1. **While the cables are on their way:**
+   - **re-measure jitter** (`measure_sigma.py` + `compare_jitter.py` on a new T1
+     grid) now that both cameras are really in every pass, and check the per-sample
+     fusion field of older recordings (e.g. `2026-09-24_T1_grid_r1`) — they may be
+     partly or wholly cam0-only;
    - design the mount for the new arrangement (≈ 300 mm apart, each camera turned
      10° inward; check the exact gap/angle with `compare_rigs.py --rigs` for the
      real table);

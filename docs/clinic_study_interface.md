@@ -283,8 +283,11 @@ Each package is pushed and tested on the board before the next.
 4. ✅ **Study DB + operator screens** — Home, Registration, Resume, Settings (Mode,
    Device, Protocol with lock + version, Data), styled like the mockup
    (`clinic_ui.gd`). Participant screens still plain.
-5. **Visuals** — orchard, apple, physics, particles, cards (as in the mockup). Also: the
-   participant's feedback on catch / miss is weak (noted 2026-09-26).
+5. ✅ **Visuals** — first built as the orchard of the mockup, then replaced the same day by
+   **night fireflies** (mockup row "Game style directions", style A): one object per
+   target (the rim is W), pips 3 → 2 → 1, hold fills the target, play rim drains; graded
+   catches with hitstop, words, bells, a glass jar; soft miss; no streak. Laser-pointer
+   cursor with a tail.
 6. **Pilot** → set percentiles, pairs, point thresholds → lock the protocol.
 
 Done 2026-09-26 (all tested on the board). Layout note: the app draws on a

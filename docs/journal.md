@@ -16,6 +16,72 @@ New entries go at the **top**, under the date.
 
 ---
 
+## 2026-09-26 (afternoon) — Fireflies, feedback, operator screens, and a tracker bug
+
+**Ended with:** the clinic game in a new look (night fireflies), feedback redesigned,
+operator screens matching the mockup, and a real tracker bug fixed: cam1 had been left
+out of nearly every pass on many starts.
+
+### 1. The look: orchard rejected, night fireflies chosen
+
+The first visual pass (orchard, apples, basket) was judged low-resolution, with too many
+circles and no feedback for the calibration points. Two directions were mocked up side
+by side (night fireflies vs clean arcade); **fireflies** was chosen. Everything round is
+now drawn from smooth gradient textures (edges stay clean at any size) and MSAA is on
+for this app only.
+
+- **One object per target:** the firefly's thin rim *is* the catch circle (W exactly);
+  halo, see-through body, bright core — a light, not a ball (the first version read as a
+  tennis ball and was redone).
+- **Points visible while waiting:** three pips above the target drop at 1 s and 2 s
+  (3 → 2 → 1). Holding fills the target with light; in play its own rim drains.
+- **Catch feedback** (from osu!, Aim Lab, game-feel practice and rehab-game studies):
+  hitstop (the firefly holds still, longer for a better grade), a burst, the grade word
+  (Perfect / Great / Good, +3 / +2 / +1), a bell per grade, and the firefly flies into a
+  glass jar that glows as it fills. Miss: dims, sinks, soft low note. **Sound** was
+  missing entirely before — the biggest single gap.
+- **Removed:** a catch streak (sky flare + sparkle) — distracting.
+- **Cursor:** the laser-pointer dot with a fading tail from the patient game, made
+  bigger; the system mouse arrow is hidden during a visit.
+
+### 2. Operator screens matched to the mockup
+
+A side-by-side check listed 22 differences; all fixed: Manrope font (added, OFL), search
+on Home, the sliders Settings button, row actions, "Today, 14:05", the mockup's Resume
+card, two-column registration card, green switches, selectable mode cards, a Device page
+with live tracker stats, per-camera tiles, origin re-lock, the installer's 4-corner and
+validation-recorder overlays reused, a test drive, and Data with "Change…" and USB
+export. The app still lays out on 1152 × 648 (the 4-corner mapping is tied to it), so
+sizes are the mockup's × 0.9. Shared code touched, additively: `UDPReceiver.send_command()`
+and tracker commands `PREVIEW_ON/OFF` (open the debug preview from the Device page).
+
+### 3. Tracker: cam1 was being dropped
+
+The new camera tiles showed cam1 flickering to 0 tags while the debug preview looked
+fine. The status packet (twice a second) now reports each camera's mean tags per pass
+and the **share of passes that had its frame**: cam1 was paired in **0–2 %** of passes.
+
+Cause: each pass takes cam0's frame the moment it arrives and pairs it with the *nearest
+queued* cam1 frame, without waiting. The start-up phase alignment had worked
+(−4 ms → **−0.15 ms**) — but negative means cam1 captures just after cam0, so its
+matching frame was not queued yet; the nearest was the previous one, 9.85 ms away, over
+the 2 ms limit → that pass was solved from cam0 alone. The phase's sign is random per
+start, so earlier sessions were a mix of joint and cam0-only.
+
+Fix (`main.py`): pairing waits up to 4 ms for the matching frame. On the board: paired
+**100 %**, **0 missed frames**, frame time fine.
+
+**Consequences:** the jitter result (0.30 mm, ratio 0.93) and older recordings may rest on
+cam0-only passes — check each recording's fusion field, and measure jitter again with
+real joint pairing.
+
+### 4. Pair distances
+
+A recurring uncounted "reposition" target showed that 450 mm (pair 3) barely fits the
+table area. The user will shorten the pairs and get the high ID from a smaller W instead.
+
+---
+
 ## 2026-09-26 — Clinic study app built: packages 1–4
 
 **Ended with:** a working clinic-study app in `app/clinic/`, separate from the patient
