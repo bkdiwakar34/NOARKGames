@@ -20,8 +20,15 @@ extends Node2D
 #     (missed). So in play it is caught exactly when MT <= lifetime (§3.3), and
 #     an apple on screen can always still be caught.
 #
-# Keys: 1-3 pick the test level and Space starts (start screen); Enter / C / S
-# on the calibration check; Esc (clinic_main.gd) quits.
+# clinic_main.gd sets `config` before adding it (participant, day, level,
+# quick, show_check, and — when resuming a stopped day — the saved calibration)
+# and keeps the study DB up to date from its signals. Keys: Enter / C / S on the
+# calibration check, Enter on the last screen; Esc (clinic_main.gd) stops.
+
+signal calibration_accepted(state: Dictionary)   # frozen calibration, for resuming
+signal round_done(rounds_done: int)              # after each play round
+signal finished                                  # the last play round ended
+signal leave                                     # Enter on the last screen
 
 const Protocol := preload("res://app/clinic/protocol.gd")
 const TableSpace := preload("res://app/clinic/table_space.gd")
@@ -29,7 +36,6 @@ const VisitLogger := preload("res://app/clinic/visit_logger.gd")
 const ReachScan := preload("res://app/clinic/reach_scan.gd")
 const Difficulty := preload("res://app/clinic/difficulty.gd")
 
-const PARTICIPANT_ID := "TEST"    # real IDs come with the study-DB package
 const TIMEOUT_GRACE_S := 0.15     # samples reach Godot ~20 ms after capture; wait for them
 const EDGE_MARGIN_PX := 12.0
 const POP_S := 0.8                # how long a "+3" floats
@@ -42,7 +48,12 @@ const INK := Color(1.0, 1.0, 1.0, 0.92)
 const GOLD := Color("FFC23D")
 const AMBER := Color(1.0, 0.75, 0.4)
 
-enum Stage { READY, SCAN, ROUND, REST, CHECK, DONE }
+enum Stage { SCAN, ROUND, REST, CHECK, DONE }
+
+# {participant, day, level_index, order_id, quick, show_check, resume}.
+# resume: {} for a fresh start, else the day record from study_db.gd
+# (lifetimes, boundary, unfit, rounds_done, rounds_total).
+var config: Dictionary = {}
 
 var _ts: TableSpace
 var _log: VisitLogger
@@ -50,11 +61,10 @@ var _scan: ReachScan
 var _boundary := PackedVector2Array()   # reach outline, table mm; empty until the scan ends
 var _rounds: Array = []          # [{phase, number}] in play order
 var _round_idx: int = 0
-var _stage: Stage = Stage.READY
+var _stage: Stage = Stage.SCAN
 var _stage_left: float = 0.0     # seconds left in the current round or rest
 var _paused: bool = false        # tracker lost
-var _level: int = 1              # index into Protocol.TEST_LEVELS
-var _quick: bool = false         # quick test: fewer rounds, short rests (Q)
+var _quick: bool = false         # quick test: fewer rounds, short rests
 var _attempt: int = 1            # calibration attempt; C / S on the check screen add one
 
 var _hand: Vector2 = Vector2.ZERO   # latest hand position, table mm
@@ -82,29 +92,42 @@ func _ready() -> void:
 	_reset_calibration()
 	_hand = _ts.screen_to_mm(vp * 0.5)
 	_scan = ReachScan.new(_ts, vp)
+	_quick = bool(config.get("quick", false))
+	var resume: Dictionary = config.get("resume", {})
+	if resume.is_empty():
+		var calib: int = Protocol.QUICK_CALIB_ROUNDS if _quick else Protocol.CALIB_ROUNDS
+		var play: int = Protocol.QUICK_PLAY_ROUNDS if _quick else Protocol.PLAY_ROUNDS
+		for i in Protocol.WARMUP_ROUNDS:
+			_rounds.append({"phase": "warmup", "number": i + 1})
+		for i in calib:
+			_rounds.append({"phase": "calibration", "number": i + 1})
+		for i in play:
+			_rounds.append({"phase": "play", "number": i + 1})
+		_stage = Stage.SCAN
+	else:
+		_restore(resume)
 	_log = VisitLogger.new()
-	# Samples drive the cursor from the start; they are only written once the
-	# visit's files are open (_begin_visit).
+	_log.open(String(config["participant"]), _header_lines())
 	UDPReceiver.log_enabled = true
+
+
+# A stopped day resumes play with its frozen calibration (§4.8): the remaining
+# play rounds, after a rest to get ready.
+func _restore(r: Dictionary) -> void:
+	_lifetimes = r["lifetimes"]
+	for pt in r["boundary"]:
+		_boundary.append(Vector2(pt[0], pt[1]))
+	for k in r["unfit"]:
+		_unfit[int(k)] = true
+	for i in range(int(r["rounds_done"]), int(r["rounds_total"])):
+		_rounds.append({"phase": "play", "number": i + 1})
+	_stage = Stage.REST
+	_stage_left = _rest_s()
 
 
 func _exit_tree() -> void:
 	UDPReceiver.log_enabled = false
 	_log.close()
-
-
-# On Space, once the level and quick-test choice are known (both go in the header).
-func _begin_visit() -> void:
-	var calib: int = Protocol.QUICK_CALIB_ROUNDS if _quick else Protocol.CALIB_ROUNDS
-	var play: int = Protocol.QUICK_PLAY_ROUNDS if _quick else Protocol.PLAY_ROUNDS
-	for i in Protocol.WARMUP_ROUNDS:
-		_rounds.append({"phase": "warmup", "number": i + 1})
-	for i in calib:
-		_rounds.append({"phase": "calibration", "number": i + 1})
-	for i in play:
-		_rounds.append({"phase": "play", "number": i + 1})
-	_log.open(PARTICIPANT_ID, _header_lines())
-	_stage = Stage.SCAN
 
 
 func _rest_s() -> float:
@@ -128,10 +151,15 @@ func _header_lines() -> Array:
 	for p in Protocol.PAIRS:
 		pairs.append("%d/%d" % [int(p["a_mm"]), int(p["w_mm"])])
 	var ppm := _ts.px_per_mm()
+	var resume: Dictionary = config.get("resume", {})
 	return [
-		"participant,%s" % PARTICIPANT_ID,
-		"protocol_version,%s" % Protocol.VERSION,
+		"participant,%s" % config["participant"],
+		"study_day,%d" % int(config["day"]),
+		"order_id,%d" % int(config["order_id"]),
+		"level_index,%d" % (int(config["level_index"]) + 1),
 		"level_p,%.2f" % _level_p(),
+		"resumed_after_round,%s" % (str(int(resume["rounds_done"])) if not resume.is_empty() else ""),
+		"protocol_version,%s%s" % [Protocol.VERSION, " locked" if Protocol.LOCKED else " draft"],
 		"quick_test,%s" % _quick,
 		"pairs_a_w_mm,%s" % " ".join(pairs),
 		"hold_s,%s" % Protocol.HOLD_S,
@@ -143,20 +171,16 @@ func _header_lines() -> Array:
 
 
 func _level_p() -> float:
-	return Protocol.TEST_LEVELS[_level]
+	return Protocol.LEVELS[int(config["level_index"])]
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var key: int = event.keycode
-	if _stage == Stage.READY:
-		if key >= KEY_1 and key < KEY_1 + Protocol.TEST_LEVELS.size():
-			_level = key - KEY_1
-		elif key == KEY_Q:
-			_quick = not _quick
-		elif key == KEY_SPACE:
-			_begin_visit()
+	if _stage == Stage.DONE:
+		if key == KEY_ENTER or key == KEY_KP_ENTER:
+			leave.emit()
 	elif _stage == Stage.CHECK:
 		if key == KEY_ENTER or key == KEY_KP_ENTER:
 			_accept_calibration()
@@ -274,13 +298,16 @@ func _start_round() -> void:
 func _end_round() -> void:
 	if not _apple.is_empty():
 		_finish_apple("aborted", _now())
-	var finished: String = _rounds[_round_idx]["phase"]
+	var ended: Dictionary = _rounds[_round_idx]
 	_round_idx += 1
+	if ended["phase"] == "play":
+		round_done.emit(int(ended["number"]))
 	if _round_idx >= _rounds.size():
 		_stage = Stage.DONE
 		UDPReceiver.log_enabled = false
 		_log.close()
-	elif finished == "calibration" and _rounds[_round_idx]["phase"] == "play":
+		finished.emit()
+	elif ended["phase"] == "calibration" and _rounds[_round_idx]["phase"] == "play":
 		_enter_check()
 	else:
 		_stage = Stage.REST
@@ -297,19 +324,23 @@ func _phase_name() -> String:
 			return "reach_scan"
 		Stage.CHECK:
 			return "check"
-		Stage.READY:
-			return "ready"
 	return "done"
 
 
-# The round being played; during a rest, the round just finished.
+# The round being played; during a rest, the round just finished (0 before the
+# first round of a resumed day).
 func _round_number() -> int:
 	match _stage:
 		Stage.ROUND:
 			return _rounds[_round_idx]["number"]
 		Stage.REST:
-			return _rounds[_round_idx - 1]["number"]
+			return _prev_round().get("number", 0)
 	return 0
+
+
+# The round before the current one; {} at the start of a resumed day.
+func _prev_round() -> Dictionary:
+	return _rounds[_round_idx - 1] if _round_idx > 0 else {}
 
 
 # ── Calibration -> play ───────────────────────────────────────────────────────
@@ -326,7 +357,7 @@ func _enter_check() -> void:
 	for k in Protocol.PAIRS.size():
 		var c: Dictionary = _calib[k]
 		_lifetimes.append(Difficulty.lifetime(c["mts"], c["timeouts"], _level_p()))
-	if Protocol.SHOW_CALIB_CHECK:
+	if bool(config.get("show_check", true)):
 		_stage = Stage.CHECK
 	else:
 		_accept_calibration()
@@ -344,6 +375,13 @@ func _accept_calibration() -> void:
 			_median_text(c["mts"], false), "%.2f" % _level_p(),
 			("%.4f" % lt) if lt >= 0.0 else ""])
 	_log.log_calibration(rows)
+	var boundary: Array = []
+	for pt in _boundary:
+		boundary.append([pt.x, pt.y])
+	calibration_accepted.emit({
+		"lifetimes": _lifetimes.duplicate(), "boundary": boundary, "unfit": _unfit.keys(),
+		"rounds_total": _rounds_of("play"),
+	})
 	_no_fit = false
 	_stage = Stage.REST
 	_stage_left = _rest_s()
@@ -578,16 +616,6 @@ func _draw() -> void:
 	draw_circle(cur, 8.0, Color.WHITE)
 	_draw_hud(font, vp)
 	match _stage:
-		Stage.READY:
-			var levels := PackedStringArray()
-			for i in Protocol.TEST_LEVELS.size():
-				var mark: String = "[%d]" % (i + 1) if i == _level else " %d " % (i + 1)
-				levels.append("%s p = %.2f" % [mark, Protocol.TEST_LEVELS[i]])
-			var quick: String = "Quick test: ON — %d calibration + %d play rounds, %d s rests" % [
-				Protocol.QUICK_CALIB_ROUNDS, Protocol.QUICK_PLAY_ROUNDS, int(Protocol.QUICK_REST_S)] \
-				if _quick else "Quick test: off (full visit, about 27 min)"
-			_draw_card(font, vp, ["Visit test", "Test level:  " + "    ".join(levels), quick,
-				"1, 2, 3: level    Q: quick test    Space: start"])
 		Stage.REST:
 			_draw_card(font, vp, _rest_lines())
 		Stage.CHECK:
@@ -632,9 +660,9 @@ func _arc(centre: Vector2, r_mm: float, frac: float, col: Color, width: float) -
 
 func _draw_hud(font: Font, vp: Vector2) -> void:
 	if _stage != Stage.ROUND and _stage != Stage.REST:
-		return   # ready, scan, check, done: no round HUD
+		return   # scan, check, done: no round HUD
 	var play: bool = _phase_name() == "play" or (_stage == Stage.REST \
-		and _rounds[_round_idx - 1]["phase"] == "play")
+		and _prev_round().get("phase", "play") == "play")
 	var label := "Rest"
 	if _stage == Stage.ROUND:
 		var r: Dictionary = _rounds[_round_idx]
@@ -648,7 +676,10 @@ func _draw_hud(font: Font, vp: Vector2) -> void:
 
 
 func _rest_lines() -> Array:
-	var prev: Dictionary = _rounds[_round_idx - 1]
+	var prev := _prev_round()
+	if prev.is_empty():
+		return ["Welcome back", "Day %d continues" % int(config["day"]),
+			"First round in %d" % ceili(_stage_left)]
 	var title: String = "Warm-up done" if prev["phase"] == "warmup" \
 		else "Round %d done" % prev["number"]
 	var next := "Next round in %d" % ceili(_stage_left)
@@ -679,23 +710,19 @@ func _draw_check(font: Font, vp: Vector2) -> void:
 	_draw_card(font, vp, lines, 26)
 
 
-# Test summary (a later package turns the end of a visit into the participant's
-# closing card). Here: each pair's lifetime and real catch rate against p.
+# End of the visit, plain (the visuals package makes it the mockup's closing
+# card). The participant can see it, so no level and no lifetimes: the per-pair
+# check against p is pyscripts/analysis/clinic_catch_rate.py.
 func _draw_summary(font: Font, vp: Vector2) -> void:
-	var p := _level_p()
-	var lines: Array = ["Visit done — target p = %.2f" % p]
+	var c := 0
+	var n := 0
 	for k in Protocol.PAIRS.size():
-		var head := "Pair %d · %d / %d mm — " % [k + 1, int(_pair_a(k)), int(_pair_w(k))]
-		if _unfit.has(k) or _lifetimes.is_empty() or float(_lifetimes[k]) < 0.0:
-			lines.append(head + "not played")
-			continue
-		var c: int = _play[k]["caught"]
-		var n: int = c + int(_play[k]["missed"])
-		lines.append(head + "lifetime %.2f s, caught %d of %d = %d %%" % [
-			_lifetimes[k], c, n, roundi(100.0 * float(c) / float(maxi(n, 1)))])
-	lines.append("Saved in " + _log.folder)
-	lines.append("Esc to quit")
-	_draw_card(font, vp, lines, 26)
+		c += int(_play[k]["caught"])
+		n += int(_play[k]["caught"]) + int(_play[k]["missed"])
+	_draw_card(font, vp, ["Session complete — thank you",
+		"%d of %d apples caught · %d %%" % [c, n, roundi(100.0 * float(c) / float(maxi(n, 1)))],
+		"Saved · day %d of 3" % int(config["day"]),
+		"Enter: back to participants"])
 
 
 func _draw_card(font: Font, vp: Vector2, lines: Array, body_size: int = 30) -> void:
