@@ -126,8 +126,14 @@ would otherwise shift the real success rate: a Day-1 model on a faster Day 3 tur
 - **Speed points, no visible deadline**: each apple waits up to a generous cap (8 s); a
   faster catch earns more — the apple ripens gold → red, 3 → 2 → 1 points (thresholds TBD).
   Nearly every movement is recorded whole (no censoring).
-- Researcher check behind a hidden toggle: MT vs ID per pair, counts, timeouts; Accept /
-  redo. Off by default.
+- **Calibration check** — shown after the last calibration round **only when the researcher
+  overlay is on** (§4.9); with the overlay off, play starts by itself after the rest card.
+  Contents:
+  - per pair: ID, $A$, $W$, caught / spawned, timeouts, and the movement-time spread
+    (10th–90th percentile bar with the median marked);
+  - the reach boundary from the 8 spokes, drawn in the screen outline;
+  - buttons: **Redo from reach scan** · **Redo calibration rounds** · **Accept · start play**.
+  - Never shows lifetimes or the level (the participant can see the screen).
 
 ### 4.5 Play rounds (participant)
 
@@ -149,11 +155,16 @@ Whole-session stars, overall %, rounds played, "Saved · Day N of 3", **Done** �
 
 ### 4.8 Interruptions
 
-- Same date: Home shows "Day N: 6 / 15 — Resume"; continues at the next round with that
-  day's frozen calibration and level.
+- Same date: Home shows "Day N · round 6 of 15" with **Resume**, which opens a prompt
+  ("Resume day N?", rounds done, "today's calibration and level are kept") → **Resume at
+  round 7** / Cancel. Play continues with that day's frozen calibration and level.
 - Cut **during calibration**: calibration restarts from the reach scan.
 - A later date: the unfinished day is marked incomplete in the data; the visit is the next
   study day.
+- **Tracker lost** (packets stop mid-round): soft pause — the game blurs, a card shows the
+  handle settling onto the table with "Place the handle back on the table / The game
+  continues by itself"; round timers stop and it resumes on its own when packets return.
+  No error codes.
 
 ### 4.9 Settings (operator)
 
@@ -166,6 +177,19 @@ Whole-session stars, overall %, rounds played, "Saved · Day N of 3", **Done** �
 
 **Lock protocol:** editable while piloting; once locked, values are read-only and the
 protocol version (e.g. "protocol v3") is written into every data file header.
+
+**Researcher overlay** (Mode page, off by default). It sits on the screen the participant
+watches, so it **never shows $p$, the lifetimes or the day's level** — it is safe to leave
+on with a participant present. It adds:
+
+- after calibration: the calibration check (§4.4);
+- during play: a small panel, bottom-left — tracker rate and missed frames, cursor
+  position, round and time left, current apple's pair, caught / missed this round, hold time.
+
+**Data page:** files per visit — visit header (ID, study day + date, level, protocol
+version, origin-lock stamp), hand stream (100 Hz), targets (one row per apple, with phase:
+reach scan / warm-up / calibration / play), calibration result (reach boundary, each pair's
+sorted MTs, the lifetimes used). Rows flushed as written; files use the ID only. Export to USB.
 
 ## 5. Look
 
@@ -185,7 +209,5 @@ protocol version (e.g. "protocol v3") is written into every data file header.
 - The final pair values (A, W).
 - Fixed dose (15 rounds) vs open-ended play.
 - Speed-point thresholds (time limits for 3 / 2 / 1 points).
-- Remaining screens to draw: Settings Mode / Device / Data, researcher overlay,
-  tracker-lost pause, Resume prompt.
 - Whether the apple stays code-drawn in the new app (the sprite multi-apple bug in the old
   app was never diagnosed).

@@ -9,7 +9,7 @@ every session, while you still remember. The full story lives in
 
 ---
 
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-26
 
 **This repo is the Dragon Q6A one.** The Raspberry Pi version is `bkdiwakar34/NOARKGames-pi`.
 
@@ -56,11 +56,13 @@ mockup approved: spec in [clinic_study_interface.md](clinic_study_interface.md),
 mockup [Reach Study Interface](https://claude.ai/artifact/NGWbDRwzpNHSiedrXAdayx).
 It is a **separate flow** — the current `app/ui` chooser → game flow stays untouched.
 
+2026-09-26: mockup complete (all screens, including Settings sub-pages, resume prompt,
+tracker-lost pause and the researcher overlay — which never shows p, lifetimes or the level).
+
 Next:
-1. Draw the remaining screens in the mockup (Settings Mode / Device / Data,
-   researcher overlay, tracker-lost pause, Resume prompt).
-2. Decide the open items (percentiles, final pairs, speed-point thresholds).
-3. Then plan the Godot implementation (own entry scene and folder).
+1. Plan the Godot implementation (own entry scene and folder), building with draft values.
+2. Pilot on the built app, then decide the open items from real movement times
+   (percentiles, final pairs, speed-point thresholds) and lock the protocol.
 
 The tracker items below wait for the cables.
 
