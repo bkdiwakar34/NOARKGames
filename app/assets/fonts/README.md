@@ -11,3 +11,8 @@ them up automatically on next launch (runtime-loaded, no import step):
 Get them from fonts.google.com/specimen/Nunito → Get font → Download all,
 then copy the two files from the `static/` folder of the zip. Nunito is
 SIL Open Font License — free for any use, no attribution screens needed.
+
+The clinic app's operator screens (`app/clinic/clinic_ui.gd`) use
+`Manrope-Variable.ttf` (google/fonts, `ofl/manrope/Manrope[wght].ttf`, licence
+in `Manrope-OFL.txt`), one variable file for every weight; they fall back to
+Nunito if it is missing.

@@ -209,6 +209,12 @@ func request_origin_relock() -> void:
 	_udp.put_packet("RELOCK".to_utf8_buffer())
 
 
+# One-shot command to the tracker, sent at once (like RELOCK). Used by the
+# clinic app's Settings -> Device: PREVIEW_ON / PREVIEW_OFF.
+func send_command(text: String) -> void:
+	_udp.put_packet(text.to_utf8_buffer())
+
+
 # Hand the buffered packet samples to the caller and clear the buffer.
 # Called once per frame by the game scene while logging.
 func take_samples() -> Array:

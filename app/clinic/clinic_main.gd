@@ -47,13 +47,26 @@ func _show_home() -> void:
 		reg.db = _db
 		reg.done.connect(_show_home)
 		_show(reg))
-	home.open_settings.connect(func():
-		var s := SettingsScreen.new()
-		s.db = _db
-		s.done.connect(_show_home)
-		_show(s))
+	home.open_settings.connect(_show_settings)
 	home.quit_app.connect(_quit)
 	_show(home)
+
+
+func _show_settings() -> void:
+	var s := SettingsScreen.new()
+	s.db = _db
+	s.done.connect(_show_home)
+	s.test_drive.connect(_run_test_drive)
+	_show(s)
+
+
+# Settings -> Device -> Test drive: the game with endless targets, nothing
+# saved and no participant. Esc ends it.
+func _run_test_drive() -> void:
+	var runner := RoundRunner.new()
+	runner.config = {"participant": "TEST", "day": 0, "quick": false, "resume": {},
+		"level_index": 0, "order_id": 0, "show_check": false, "test": true}
+	_show(runner)
 
 
 func _start_day(id: String) -> void:
@@ -65,6 +78,7 @@ func _start_day(id: String) -> void:
 
 func _resume_day(id: String) -> void:
 	var rec := _db.current_day(id)
+	_db.touch(id)
 	_run_visit(id, int(rec["day"]), bool(rec.get("quick", false)), rec)
 
 
@@ -88,6 +102,8 @@ func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo \
 			and event.keycode == KEY_ESCAPE):
 		return
+	if _screen and _screen.has_method("busy") and _screen.busy():
+		return   # an installer tool is open in Settings: its own Esc handles it
 	get_viewport().set_input_as_handled()
 	if _screen is HomeScreen:
 		_quit()

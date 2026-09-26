@@ -101,6 +101,7 @@ var _spawn_after: float = 0.0       # the next target waits for the catch's hits
 var _streak: int = 0                # "Perfect" catches in a row (calibration)
 var _trail: Array = []              # cursor tail: [{pos (px), t (ms)}]
 var _rounds_before: int = 0         # play rounds done before this session (a resumed day)
+var _test: bool = false             # test drive: endless, nothing saved
 
 
 func _ready() -> void:
@@ -118,8 +119,15 @@ func _ready() -> void:
 	_hand = _ts.screen_to_mm(vp * 0.5)
 	_scan = ReachScan.new(_ts, vp)
 	_quick = bool(config.get("quick", false))
+	_test = bool(config.get("test", false))
 	var resume: Dictionary = config.get("resume", {})
-	if resume.is_empty():
+	if _test:
+		# Test drive (Settings -> Device): one endless warm-up round on the whole
+		# screen, nothing saved.
+		_rounds.append({"phase": "warmup", "number": 1})
+		_start_round()
+		_stage_left = INF
+	elif resume.is_empty():
 		var calib: int = Protocol.QUICK_CALIB_ROUNDS if _quick else Protocol.CALIB_ROUNDS
 		var play: int = Protocol.QUICK_PLAY_ROUNDS if _quick else Protocol.PLAY_ROUNDS
 		for i in Protocol.WARMUP_ROUNDS:
@@ -132,7 +140,8 @@ func _ready() -> void:
 	else:
 		_restore(resume)
 	_log = VisitLogger.new()
-	_log.open(String(config["participant"]), _header_lines())
+	if not _test:
+		_log.open(String(config["participant"]), _header_lines())
 	UDPReceiver.log_enabled = true
 	# The participant sees only the laser dot; the system arrow is hidden (it
 	# still moves, for the mouse fallback in development).

@@ -12,6 +12,8 @@ extends RefCounted
 # "attempt" counts calibration redos (the check screen's C / S); analysis uses
 # the last attempt's calibration rows.
 
+const Protocol := preload("res://app/clinic/protocol.gd")
+
 const TARGET_COLUMNS: Array = [
 	"phase", "attempt", "round", "apple", "pair", "a_mm", "w_mm", "a_actual_mm", "angle_deg",
 	"start_x_mm", "start_y_mm", "target_x_mm", "target_y_mm",
@@ -38,8 +40,7 @@ var _calib: FileAccess = null
 # header: Array of "key,value" lines. Returns false if a file could not be made.
 func open(participant_id: String, header: Array) -> bool:
 	var stamp: String = Time.get_datetime_string_from_system().replace(":", "-")
-	folder = "%s/NOARK/clinic/%s/%s" % [
-		OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS), participant_id, stamp]
+	folder = "%s/%s/%s" % [Protocol.data_dir(), participant_id, stamp]
 	DirAccess.make_dir_recursive_absolute(folder)
 	_targets = _open_csv("targets.csv", header, TARGET_COLUMNS)
 	_hand = _open_csv("hand.csv", header, HAND_COLUMNS)

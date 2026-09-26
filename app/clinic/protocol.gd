@@ -49,8 +49,38 @@ const QUICK_PLAY_ROUNDS := 3
 const QUICK_REST_S := 5.0
 
 
+# Where everything is saved: Documents/NOARK/clinic unless Settings -> Data
+# chose another folder. A change is stored in user://clinic_paths.json and
+# used from the next start, so one run never splits its files over two places.
+const PATHS_FILE := "user://clinic_paths.json"
+static var _data_dir: String = ""
+
+
 static func data_dir() -> String:
-	return OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS) + "/NOARK/clinic"
+	if _data_dir == "":
+		_data_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS) + "/NOARK/clinic"
+		var d = JSON.parse_string(FileAccess.get_file_as_string(PATHS_FILE)) \
+			if FileAccess.file_exists(PATHS_FILE) else null
+		if d is Dictionary and String(d.get("data_dir", "")) != "":
+			_data_dir = d["data_dir"]
+	return _data_dir
+
+
+# The folder chosen for the next start, or "" when it is the current one.
+static func pending_data_dir() -> String:
+	if not FileAccess.file_exists(PATHS_FILE):
+		return ""
+	var d = JSON.parse_string(FileAccess.get_file_as_string(PATHS_FILE))
+	var next := String(d.get("data_dir", "")) if d is Dictionary else ""
+	return next if next != data_dir() else ""
+
+
+static func set_data_dir(path: String) -> void:
+	data_dir()   # fix this run's folder before the file changes
+	var f := FileAccess.open(PATHS_FILE, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify({"data_dir": path}))
+		f.close()
 
 
 static func points_for(mt: float) -> int:

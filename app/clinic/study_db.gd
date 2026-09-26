@@ -136,14 +136,25 @@ func begin_day(id: String, day: int, quick: bool) -> void:
 		days.append({"day": day, "date": today(), "status": "in_progress"})
 	days[-1]["quick"] = quick
 	days[-1]["level"] = level_index(id, day)
+	days[-1]["time"] = _clock()
 	save()
+
+
+# A resumed session: its start time becomes the "last session" time on Home.
+func touch(id: String) -> void:
+	participants[id]["days"][-1]["time"] = _clock()
+	save()
+
+
+static func _clock() -> String:
+	return Time.get_time_string_from_system().substr(0, 5)
 
 
 # The frozen calibration, so a stopped day can resume play with it.
 func save_calibration(id: String, state: Dictionary) -> void:
 	var rec: Dictionary = participants[id]["days"][-1]
 	rec.merge(state, true)
-	rec["calibrated_at"] = Time.get_time_string_from_system().substr(0, 5)
+	rec["calibrated_at"] = _clock()
 	rec["rounds_done"] = 0
 	save()
 

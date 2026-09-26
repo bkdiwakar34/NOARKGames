@@ -1674,6 +1674,8 @@ class MainClass:
             self._start_recording(cmd.decode(errors="replace").split(":", 1)[1])
         elif cmd == b"REC_STOP":
             self._stop_recording()
+        elif cmd in (b"PREVIEW_ON", b"PREVIEW_OFF"):
+            self._set_preview(cmd == b"PREVIEW_ON")   # clinic app, Settings -> Device
         elif cmd.startswith(b"MARK:"):
             # A labelled moment from the recorder screen (hold start/end,
             # target reached) — see Recording.write_mark.
@@ -1684,6 +1686,18 @@ class MainClass:
                         cmd.decode(errors="replace").split(":", 1)[1])
         elif cmd:
             self.received_message = cmd
+
+    def _set_preview(self, on: bool) -> None:
+        """Open or close the debug preview window while running (settings.json
+        debug_preview only sets how it starts). Needs debug on, like at start;
+        the window costs frame rate while open."""
+        if on and not self.debug:
+            print("Debug preview needs \"debug\": true in settings.json")
+            return
+        if self._debug_preview and not on:
+            cv2.destroyAllWindows()
+            cv2.waitKey(1)
+        self._debug_preview = on
 
     def process_frame(self) -> Optional[FrameResult]:
         """One pass: capture, detect, solve, fuse, and (with udp) send to
