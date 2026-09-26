@@ -271,14 +271,22 @@ sorted MTs, the lifetimes used). Rows flushed as written; files use the ID only.
 
 Each package is pushed and tested on the board before the next.
 
-1. **Skeleton + table space + round runner, plain shapes** — 3 pairs, hold, catch /
+1. ✅ **Skeleton + table space + round runner, plain shapes** — 3 pairs, hold, catch /
    timeout, speed points, 1-min rounds + rests, logger. Check: the drawn circle lights up
    exactly when the cursor is inside it (drawing and mm hit test agree). No ruler test —
    the hit test uses tracker numbers only; the tracker's scale is the OptiTrack
    validation's job.
-2. **Reach scan.**
-3. **Difficulty + play** — lifetimes from the day's calibration, frozen; calibration check.
-   A Python script replays the logs and checks each pair's real catch rate lands near $p$.
-4. **Study DB + operator screens** — Home, Registration, Resume, Settings.
-5. **Visuals** — orchard, apple, physics, particles, cards (as in the mockup).
+2. ✅ **Reach scan.**
+3. ✅ **Difficulty + play** — lifetimes from the day's calibration, frozen; calibration
+   check. `pyscripts/analysis/clinic_catch_rate.py` checks each pair's real catch rate
+   against $p$ from the files. Quick-test visits (Settings → Mode) for checking the app.
+4. ✅ **Study DB + operator screens** — Home, Registration, Resume, Settings (Mode,
+   Device, Protocol with lock + version, Data), styled like the mockup
+   (`clinic_ui.gd`). Participant screens still plain.
+5. **Visuals** — orchard, apple, physics, particles, cards (as in the mockup). Also: the
+   participant's feedback on catch / miss is weak (noted 2026-09-26).
 6. **Pilot** → set percentiles, pairs, point thresholds → lock the protocol.
+
+Done 2026-09-26 (all tested on the board). Layout note: the app draws on a
+**1152 × 648** logical canvas (project default, stretched to the monitor), so screens
+must fit 648 px of height.

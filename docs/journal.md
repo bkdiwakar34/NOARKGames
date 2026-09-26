@@ -16,6 +16,74 @@ New entries go at the **top**, under the date.
 
 ---
 
+## 2026-09-26 — Clinic study app built: packages 1–4
+
+**Ended with:** a working clinic-study app in `app/clinic/`, separate from the patient
+app (run with `--main-scene res://app/clinic/clinic_main.tscn`). A researcher registers
+a participant, starts the day, and the participant does the reach scan, a warm-up, the
+calibration rounds and the play rounds; the level follows the participant's hidden order
+and study day; a stopped day resumes. Operator screens look like the mockup; the game
+screens are still plain shapes (visuals are the next package). Spec:
+[clinic_study_interface.md](clinic_study_interface.md) §7.
+
+### 1. Mockup finished, then the build plan
+
+The remaining mockup screens were drawn (Settings pages, resume prompt, tracker-lost
+pause, researcher overlay). One rule came out of it: the researcher overlay sits on the
+screen the participant watches, so it **never shows the level, p or the lifetimes**.
+
+Planning found that the patient game measures targets in **screen pixels**, but the
+4-corner screen mapping stretches the table differently sideways and forward (e.g.
+3.2 vs 2.7 px/mm). So the new app places and hit-tests every apple in **table
+millimetres** from the tracker, and uses the screen only to draw.
+
+**Dropped:** a "ruler" test screen for package 1. The hit test uses tracker numbers only;
+checking the tracker's scale is the OptiTrack validation's job, and the grip point is
+not visible anyway.
+
+### 2. What was built
+
+1. **Round runner** — apples at the three fixed pairs, holds judged on every 100 Hz
+   tracker sample using the camera's capture time, movement time = hold start − spawn,
+   speed points in calibration, 1-minute rounds with rests, `targets.csv` + `hand.csv`.
+2. **Reach scan** — a light glides out to the screen edge along 8 directions; reach =
+   how far the hand got along each. Apples only appear where their whole circle fits
+   inside that outline. `reach.csv`.
+3. **Difficulty + play** — each pair's lifetime = the p-th of that day's sorted
+   calibration movement times (timeouts count as the slowest); frozen for play; a
+   calibration check screen (redo rounds / redo scan); `calibration.csv`;
+   `pyscripts/analysis/clinic_catch_rate.py` checks each pair's real catch rate against p.
+   A **quick-test** visit (2 + 3 rounds, 5 s rests) for checking the app.
+4. **Participants and screens** — `participants.json` with balanced blocks of the 6 level
+   orders, study day by visit, resume with the saved calibration, editable protocol with
+   version and lock (`protocol.json`), Home / Registration / Settings in the mockup's look.
+
+### 3. Found on the board, and fixed
+
+- **Apples kept reappearing on the same spot** (reach limited to half the table). When
+  no direction fit at the full distance, the code shortened the distance towards the
+  centre — the same spot every time, and the logged apple no longer matched its pair.
+  Now: never shorten; try another due pair; else an uncounted **reposition** apple at the
+  nearest spot from which a pair fits; a pair that fits nowhere is skipped and reported.
+- **Blank screen** — a GDScript parse error (`round_runner.gd`: a variable's type could
+  not be inferred from a list lookup). Godot prints these in the terminal it was started
+  from; that is the first place to look.
+- **"I'm inside but it doesn't count"** — a play apple stayed visible for one hold-time
+  after its lifetime, and a hold could no longer start then. Now the apple goes at the end
+  of its lifetime unless a hold is already under way, and the ring drains over the
+  lifetime: anything on screen can still be caught.
+- **No Register button** — the form was taller than the screen. The app draws on a
+  **1152 × 648** canvas (project default) stretched to the monitor; screens must fit
+  648 px. The button now sits in the top bar too.
+
+### 4. Open
+
+- The catch / miss **feedback feels weak**, and there are "some problems" in play still
+  to be listed — for the visuals package.
+- Percentiles, final pairs and point limits: from the pilot.
+
+---
+
 ## 2026-09-25 (afternoon) — Designing the clinic study interface
 
 **Ended with:** a page-by-page spec for the interface of the 3-day healthy-participant

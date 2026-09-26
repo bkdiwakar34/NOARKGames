@@ -56,11 +56,24 @@ mockup approved: spec in [clinic_study_interface.md](clinic_study_interface.md),
 mockup [Reach Study Interface](https://claude.ai/artifact/NGWbDRwzpNHSiedrXAdayx).
 It is a **separate flow** — the current `app/ui` chooser → game flow stays untouched.
 
-2026-09-26: mockup complete (all screens, including Settings sub-pages, resume prompt,
-tracker-lost pause and the researcher overlay — which never shows p, lifetimes or the level).
+**2026-09-26: packages 1–4 built and working on the board** (`app/clinic/`, see spec §7):
+reach scan → warm-up → calibration → check → play, lifetimes from the day's calibration,
+participants with balanced level orders, study days by visit, resume, Settings with
+protocol lock. Operator screens styled like the mockup; participant screens still plain.
+
+Run it:
+
+```bash
+taskset -c 0-3 ~/Downloads/Godot_v4.5-stable_linux.arm64 --path ~/Documents/NOARKGames --main-scene res://app/clinic/clinic_main.tscn
+```
+
+Data in `~/Documents/NOARK/clinic/`; check a visit with
+`python3 pyscripts/analysis/clinic_catch_rate.py` (newest visit by default).
 
 Next:
-1. Plan the Godot implementation (own entry scene and folder), building with draft values.
+1. **Package 5, visuals:** the orchard, apples, physics and rest cards from the mockup.
+   **Open:** the catch/miss feedback feels weak, and the user saw "some problems" in
+   play still to be listed — ask for them first.
 2. Pilot on the built app, then decide the open items from real movement times
    (percentiles, final pairs, speed-point thresholds) and lock the protocol.
 
