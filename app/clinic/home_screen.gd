@@ -2,8 +2,9 @@ extends Control
 
 # Home (docs/clinic_study_interface.md §4.1), in the mockup's layout: the
 # participant table (who, study progress, last session, today, action) with a
-# search box, a "Before you start" panel of live device checks, New
-# participant, and Settings (the sliders icon). Esc on this screen quits.
+# search box and a delete (bin) button per row, a "Before you start" panel of
+# live device checks, New participant, and Settings (the sliders icon). Esc on
+# this screen quits, or closes an open card.
 
 const UI := preload("res://app/clinic/clinic_ui.gd")
 const StudyDB := preload("res://app/clinic/study_db.gd")
@@ -21,6 +22,9 @@ const MONTHS: Array = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "
 
 var db: StudyDB                  # set by clinic_main before adding the screen
 var _table: VBoxContainer
+var _count: Label
+var _search: LineEdit
+var _modal: Control = null       # an open Resume / Delete card: Esc closes it, not the app
 var _tracker_slot: HBoxContainer
 var _tracker_chip: PanelContainer
 var _tracker_check: Label
@@ -54,15 +58,15 @@ func _ready() -> void:
 	var head := UI.row(main, 11)
 	var title := UI.label("Participants", UI.TITLE, UI.INK, true)
 	head.add_child(title)
-	var count := UI.label("%d registered" % db.participants.size(), 13, UI.MUTED)
-	count.size_flags_vertical = Control.SIZE_SHRINK_END
-	head.add_child(count)
+	_count = UI.label("%d registered" % db.participants.size(), 13, UI.MUTED)
+	_count.size_flags_vertical = Control.SIZE_SHRINK_END
+	head.add_child(_count)
 	UI.spacer(head)
-	var search := UI.field("", 216.0)
-	search.placeholder_text = "Search ID or name"
-	search.right_icon = _search_icon()
-	search.text_changed.connect(func(t: String): _fill_table(t))
-	head.add_child(search)
+	_search = UI.field("", 216.0)
+	_search.placeholder_text = "Search ID or name"
+	_search.right_icon = _search_icon()
+	_search.text_changed.connect(func(t: String): _fill_table(t))
+	head.add_child(_search)
 	head.add_child(UI.button("+  New participant", func(): open_registration.emit(), "primary"))
 
 	var scroll := ScrollContainer.new()
@@ -84,6 +88,16 @@ func _ready() -> void:
 	var quit := UI.label("Esc quits the app", 12, Color(UI.MUTED, 0.8))
 	quit.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	aside.add_child(quit)
+
+
+# Runs before clinic_main's _input (children first), so Esc closes an open card
+# instead of quitting.
+func _input(event: InputEvent) -> void:
+	if is_instance_valid(_modal) and event is InputEventKey and event.pressed \
+			and event.keycode == KEY_ESCAPE:
+		_modal.queue_free()
+		_modal = null
+		get_viewport().set_input_as_handled()
 
 
 # A small magnifier drawn into a texture for the search box.
@@ -138,12 +152,13 @@ func _cells(parent: Control) -> HBoxContainer:
 	return h
 
 
+# Columns: RATIOS-wide ones, then the action (135 px), then delete (30 px).
 func _cell(h: HBoxContainer, c: Control, i: int) -> void:
 	if i < RATIOS.size():
 		c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		c.size_flags_stretch_ratio = RATIOS[i]
 	else:
-		c.custom_minimum_size.x = 135.0
+		c.custom_minimum_size.x = 135.0 if i == RATIOS.size() else 30.0
 	h.add_child(c)
 
 
@@ -152,7 +167,7 @@ func _table_head(table: VBoxContainer) -> void:
 	panel.add_theme_stylebox_override("panel", UI._box(Color("FAF9F6"), Color("FAF9F6"), 16, 0, 0.0, 0.0))
 	table.add_child(panel)
 	var h := _cells(panel)
-	var names: Array = ["Participant", "Study progress", "Last session", "Today", ""]
+	var names: Array = ["Participant", "Study progress", "Last session", "Today", "", ""]
 	for i in names.size():
 		_cell(h, UI.caption(names[i]), i)
 
@@ -202,6 +217,70 @@ func _add_row(table: VBoxContainer, id: String) -> void:
 			action.add_child(UI.label("✓ Completed" if kind == "finished" else "✓ Done today",
 				13, UI.GOOD, true))
 	_cell(h, action, 4)
+	_cell(h, _delete_button(id), 5)
+
+
+# A small bin icon, grey, red on hover.
+func _delete_button(id: String) -> Button:
+	var b := Button.new()
+	b.flat = true
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(30.0, 30.0)
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	b.tooltip_text = "Delete participant"
+	b.pressed.connect(func(): _confirm_delete(id))
+	var paint := func():
+		var col: Color = UI.ACCENT if b.is_hovered() else Color(UI.MUTED, 0.75)
+		var c := b.size * 0.5
+		b.draw_line(c + Vector2(-7.0, -4.5), c + Vector2(7.0, -4.5), col, 1.6, true)
+		b.draw_polyline(PackedVector2Array([c + Vector2(-2.5, -4.5), c + Vector2(-2.5, -7.5),
+			c + Vector2(2.5, -7.5), c + Vector2(2.5, -4.5)]), col, 1.6, true)
+		b.draw_polyline(PackedVector2Array([c + Vector2(-5.2, -4.5), c + Vector2(-4.2, 7.5),
+			c + Vector2(4.2, 7.5), c + Vector2(5.2, -4.5)]), col, 1.6, true)
+		b.draw_line(c + Vector2(-1.5, -1.5), c + Vector2(-1.3, 4.5), col, 1.3, true)
+		b.draw_line(c + Vector2(1.5, -1.5), c + Vector2(1.3, 4.5), col, 1.3, true)
+	b.draw.connect(paint)
+	return b
+
+
+# Delete asks for the ID to be typed, so a stray click cannot remove anyone.
+func _confirm_delete(id: String) -> void:
+	var m := UI.modal(self, 470.0)
+	var layer: Control = m["layer"]
+	_modal = layer
+	var card: VBoxContainer = m["card"]
+	var p: Dictionary = db.participants[id]
+	var days: Array = p["days"]
+	var head := VBoxContainer.new()
+	head.add_theme_constant_override("separation", 4)
+	head.add_child(UI.label("%s · %s" % [id, p["name"]], 12, Color("6B6E66"), true))
+	head.add_child(UI.label("Delete this participant?", 22, UI.INK, true))
+	card.add_child(head)
+	var what: String = "No visits recorded yet." if days.is_empty() else \
+		"%d study day%s recorded." % [days.size(), "" if days.size() == 1 else "s"]
+	card.add_child(UI.label(what + " They leave the list; their recordings are not erased but "
+		+ "moved to “deleted” in the data folder. Their level order goes to the next "
+		+ "participant registered.", 13, UI.INK2, false, true))
+	card.add_child(UI.label("Type %s to confirm" % id, 12, UI.MUTED, true))
+	var typed := UI.field("", 0.0)
+	typed.placeholder_text = id
+	card.add_child(typed)
+	var buttons := UI.row(card, 11)
+	UI.spacer(buttons)
+	buttons.add_child(UI.button("Cancel", func(): layer.queue_free()))
+	var remove := func():
+		db.delete(id)
+		layer.queue_free()
+		_count.text = "%d registered" % db.participants.size()
+		_fill_table(_search.text)
+	var del := UI.button("Delete", remove, "primary")
+	del.disabled = true
+	typed.text_changed.connect(func(t: String): del.disabled = t.strip_edges() != id)
+	typed.text_submitted.connect(func(t: String):
+		if t.strip_edges() == id:
+			remove.call())
+	buttons.add_child(del)
+	typed.grab_focus.call_deferred()
 
 
 func _day_colour(days: Array, i: int) -> Color:
@@ -273,6 +352,7 @@ func _today_chip(kind: String, state: Dictionary, days: Array) -> PanelContainer
 func _confirm_resume(id: String, state: Dictionary) -> void:
 	var m := UI.modal(self, 470.0)
 	var layer: Control = m["layer"]
+	_modal = layer
 	var card: VBoxContainer = m["card"]
 	var done := int(state["rounds_done"])
 	var total := int(state["rounds_total"])

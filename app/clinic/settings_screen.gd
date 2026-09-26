@@ -312,10 +312,14 @@ func _tool_row(parent: VBoxContainer, title: String, note: String, state: String
 	h.add_child(b)
 
 
+# The tools lay out on the project's canvas and the 4-corner mapping is saved
+# in its pixels (clinic_ui.gd, "Canvas"), so switch to it while one is open.
 func _open_tool(path: String) -> void:
+	UI.use_canvas(false)
 	_tool = load(path).new()
 	add_child(_tool)
 	_tool.tree_exited.connect(func():
+		UI.use_canvas(true)
 		if is_inside_tree() and not is_queued_for_deletion():
 			_open.call_deferred(1))   # refresh the statuses it may have changed
 

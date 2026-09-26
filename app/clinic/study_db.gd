@@ -94,6 +94,30 @@ func register(id: String, name_text: String, age: int, gender: String, hand: Str
 	return ""
 
 
+# Takes a participant off the list. Nothing is erased: their recordings folder
+# and their record (participant.json) go to deleted/<ID>_<date>T<time>/ in the
+# data folder, which also frees the ID for reuse without mixing data. Their
+# level order goes back to the front of the block, so the next participant
+# registered takes it and the orders stay balanced.
+func delete(id: String) -> void:
+	var p: Dictionary = participants[id]
+	var dest := Protocol.data_dir() + "/deleted/%s_%s" % [id,
+		Time.get_datetime_string_from_system().replace(":", "-")]
+	DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
+	var src := Protocol.data_dir() + "/" + id
+	if DirAccess.dir_exists_absolute(src):
+		DirAccess.rename_absolute(src, dest)
+	else:
+		DirAccess.make_dir_recursive_absolute(dest)
+	var f := FileAccess.open(dest + "/participant.json", FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(p, "\t"))
+		f.close()
+	_block.push_front(int(p["order_id"]) - 1)
+	participants.erase(id)
+	save()
+
+
 # IDs, newest registration first.
 func ids() -> Array:
 	var out: Array = participants.keys()

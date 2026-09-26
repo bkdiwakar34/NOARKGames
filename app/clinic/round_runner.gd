@@ -785,6 +785,8 @@ func _arc(centre: Vector2, r_mm: float, frac: float, col: Color, width: float) -
 # The hand: a laser-pointer dot with a fading tail, as in the patient game
 # (GoodNotes style): red glow, red body, white-hot centre; the tail is the last
 # TRAIL_MS of movement, wide and faint outside, thin and bright inside.
+# Sizes are 1.5x those approved on the old 1152-wide canvas, so the cursor
+# keeps its size on screen (clinic_ui.gd, "Canvas").
 func _draw_cursor() -> void:
 	var now := Time.get_ticks_msec()
 	for pass_i in 2:
@@ -792,14 +794,14 @@ func _draw_cursor() -> void:
 			var age := float(now - int(_trail[i]["t"])) / float(TRAIL_MS)
 			if pass_i == 0:
 				draw_line(_trail[i - 1]["pos"], _trail[i]["pos"], Color(LASER, (1.0 - age) * 0.22),
-					lerpf(20.0, 6.0, age), true)
+					lerpf(30.0, 9.0, age), true)
 			else:
 				draw_line(_trail[i - 1]["pos"], _trail[i]["pos"], Color(1.0, 0.75, 0.70, (1.0 - age) * 0.85),
-					lerpf(6.0, 2.0, age), true)
+					lerpf(9.0, 3.0, age), true)
 	var c := _ts.mm_to_screen(_hand)
-	Art.blit(self, Art.glow(), c, Vector2(62.0, 62.0), Color(LASER, 0.45))
-	Art.blit(self, Art.disc(), c, Vector2(28.0, 28.0), LASER)
-	Art.blit(self, Art.disc(), c, Vector2(11.0, 11.0), Color(1.0, 0.95, 0.92))
+	Art.blit(self, Art.glow(), c, Vector2(93.0, 93.0), Color(LASER, 0.45))
+	Art.blit(self, Art.disc(), c, Vector2(42.0, 42.0), LASER)
+	Art.blit(self, Art.disc(), c, Vector2(16.5, 16.5), Color(1.0, 0.95, 0.92))
 
 
 # Round progress (a segment per round, the current one filling) and the score plate.

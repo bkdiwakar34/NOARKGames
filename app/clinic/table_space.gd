@@ -9,9 +9,15 @@ extends RefCounted
 # Drawing goes through WorkspaceConfig's 4-corner affine (metres -> px). That
 # affine may scale x and y differently, so a circle in mm can be a slight
 # ellipse on screen — which is correct: the hand still covers W mm.
+# The affine is in pixels of the project's canvas (1152 x 648, where the
+# installer's 4-corner tool runs); the clinic app lays out on a larger canvas
+# (clinic_ui.gd, "Canvas"), so the affine is scaled by canvas / project canvas.
+# The screen corners stay the table corners, whatever the canvas.
+
+const UI := preload("res://app/clinic/clinic_ui.gd")
 
 # Used when the 4-corner mapping has not been done (mouse-only development):
-# 3 px per mm, table origin at the screen centre.
+# 3 px per mm on the project's canvas, table origin at the screen centre.
 const FALLBACK_PX_PER_MM := 3.0
 
 var mapped: bool = false
@@ -20,15 +26,17 @@ var _inv: Transform2D   # screen px -> table mm
 
 
 func _init(viewport_size: Vector2) -> void:
+	var s: Vector2 = viewport_size / Vector2(UI.project_canvas())
 	if WorkspaceConfig.sensor_calibrated:
 		var a: Array = WorkspaceConfig.affine[0]
 		var b: Array = WorkspaceConfig.affine[1]
 		# Transform2D(x column, y column, origin); /1000 turns px-per-metre into px-per-mm.
+		# .scaled(s) scales the result (x by s.x, y by s.y), origin included.
 		_m = Transform2D(Vector2(a[0], b[0]) / 1000.0, Vector2(a[1], b[1]) / 1000.0,
-			Vector2(a[2], b[2]))
+			Vector2(a[2], b[2])).scaled(s)
 		mapped = true
 	else:
-		_m = Transform2D(Vector2(FALLBACK_PX_PER_MM, 0.0), Vector2(0.0, FALLBACK_PX_PER_MM),
+		_m = Transform2D(Vector2(FALLBACK_PX_PER_MM * s.x, 0.0), Vector2(0.0, FALLBACK_PX_PER_MM * s.y),
 			viewport_size * 0.5)
 	_inv = _m.affine_inverse()
 

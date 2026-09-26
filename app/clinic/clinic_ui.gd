@@ -2,11 +2,18 @@
 # dashboard — warm-grey ground, white rounded cards, one red accent — built as
 # a Theme plus a few helpers. Manrope, as in the mockup (one variable font
 # file in app/assets/fonts, loaded at runtime like app/ui/ui_theme.gd does, no
-# editor import step), else Nunito. The app lays out on 1152 x 648 (the
-# project's size, which the 4-corner screen mapping is tied to) where the
-# mockup is 1280 x 720, so sizes here are the mockup's x 0.9.
+# editor import step), else Nunito. Sizes here are the mockup's x 0.9 (they
+# were set on the project's 1152 x 648 canvas against the 1280 x 720 mockup).
 # Consumers use:  const UI := preload("res://app/clinic/clinic_ui.gd")
 # and set `theme = UI.theme()` on their root Control.
+#
+# Canvas: the project lays out on 1152 x 648, stretched 1.67x to the 1920 x 1080
+# screen — everything came out 1.5x the mockup and soft. The clinic app lays out
+# on CANVAS instead: 1.11x stretch, so those sizes land at the mockup's own size.
+# The installer tools (4-corner mapping, validation recorder) still assume the
+# project's canvas, so Settings switches back while one is open, and the
+# 4-corner mapping stays in project-canvas pixels (table_space.gd rescales it).
+const CANVAS := Vector2i(1728, 972)
 
 const BG := Color("F5F4F0")
 const CARD := Color("FFFFFF")
@@ -89,6 +96,19 @@ static func theme() -> Theme:
 	t.set_stylebox("separator", "HSeparator", sep)
 	_theme = t
 	return t
+
+
+# ── Canvas ────────────────────────────────────────────────────────────────────
+
+static func project_canvas() -> Vector2i:
+	return Vector2i(int(ProjectSettings.get_setting("display/window/size/viewport_width")),
+		int(ProjectSettings.get_setting("display/window/size/viewport_height")))
+
+
+# clinic = true: the clinic app's CANVAS; false: the project's (installer tools).
+static func use_canvas(clinic: bool) -> void:
+	var root := (Engine.get_main_loop() as SceneTree).root
+	root.content_scale_size = CANVAS if clinic else project_canvas()
 
 
 static func _font(path: String) -> Font:

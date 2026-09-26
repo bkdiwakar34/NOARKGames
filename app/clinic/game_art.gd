@@ -49,9 +49,11 @@ static func _radial(offsets: Array, colors: Array) -> GradientTexture2D:
 	t.gradient = g
 	t.fill = GradientTexture2D.FILL_RADIAL
 	t.fill_from = Vector2(0.5, 0.5)
+	# 512 px so targets are drawn without magnifying their edges (a glow has no
+	# edge, so magnifying it does not show).
 	t.fill_to = Vector2(1.0, 0.5)
-	t.width = 256
-	t.height = 256
+	t.width = 512
+	t.height = 512
 	return t
 
 
@@ -64,16 +66,18 @@ static func glow() -> Texture2D:
 
 
 # Solid disc with a thin soft edge (the texture's radius is 1.0 of fill_to).
+# The edge is the last 2.5 % of the radius: ~2 px on a 150 px disc, enough to
+# smooth it without the blur a wider fade gave.
 static func disc() -> Texture2D:
 	if _disc == null:
-		_disc = _radial([0.0, 0.955, 1.0], [Color(1, 1, 1, 1), Color(1, 1, 1, 1), Color(1, 1, 1, 0)])
+		_disc = _radial([0.0, 0.975, 1.0], [Color(1, 1, 1, 1), Color(1, 1, 1, 1), Color(1, 1, 1, 0)])
 	return _disc
 
 
 # The firefly's body: its edge is the catch circle.
 static func orb() -> Texture2D:
 	if _orb == null:
-		_orb = _radial([0.0, 0.38, 0.72, 0.955, 1.0],
+		_orb = _radial([0.0, 0.38, 0.72, 0.975, 1.0],
 			[FF_CORE, FF_BODY, FF_MID, FF_RIM, Color(FF_RIM, 0.0)])
 	return _orb
 
