@@ -156,22 +156,22 @@ func draw(ci: CanvasItem, _font: Font) -> void:
 		ci.draw_line(ring[i], ring[(i + 1) % ring.size()], Color(1.0, 1.0, 1.0, ring_a), 3.0, true)
 
 	if _step in [Step.OUT, Step.WAIT, Step.BACK]:
+		# The light to follow: a firefly with a short trail.
 		var dir := -1.0 if _step == Step.BACK else 1.0
-		for k in [3, 2, 1]:   # trail of fading ghosts behind the light
-			var g := _ts.mm_to_screen(home + _u * (_light - dir * 9.0 * float(k)))
-			ci.draw_circle(g, 11.0 - 2.0 * float(k), Color(1.0, 0.89, 0.5, 0.16 * float(4 - k)))
+		for k in [4, 3, 2, 1]:
+			var g := _ts.mm_to_screen(home + _u * (_light - dir * 8.0 * float(k)))
+			Art.blit(ci, Art.glow(), g, Vector2.ONE * (30.0 - 4.0 * float(k)), Color(Art.FF_GLOW, 0.12 * float(5 - k)))
 		var p := _ts.mm_to_screen(home + _u * _light)
 		var pulse := 1.0 + 0.12 * sin(now * 5.0)
-		for k in 6:
-			ci.draw_circle(p, (38.0 - 5.0 * float(k)) * pulse, Color(1.0, 0.84, 0.35, 0.07 + 0.03 * float(k)))
-		ci.draw_circle(p, 13.0, Color("FFE27A"))
-		ci.draw_circle(p + Vector2(-3.0, -3.0), 6.0, Color("FFFDF0"))
+		Art.blit(ci, Art.glow(), p, Vector2(90.0, 90.0) * pulse, Color(Art.FF_GLOW, 0.55))
+		Art.blit(ci, Art.orb(), p, Vector2(26.0, 26.0))
+		Art.blit(ci, Art.disc(), p, Vector2(10.0, 10.0), Art.FF_CORE)
 
 	# Progress: one dot per spoke in a dark pill, and the instruction below it.
 	var n := Protocol.REACH_SPOKES
 	var w := 26.0 * float(n) + 14.0
 	var pill := Rect2(_vp.x * 0.5 - w * 0.5, 16.0, w, 34.0)
-	Art.draw_pill(ci, pill, Color(0.13, 0.11, 0.08, 0.36))
+	Art.draw_glass(ci, pill, 17)
 	for i in n:
 		var c := Vector2(pill.position.x + 20.0 + 26.0 * float(i), pill.get_center().y)
 		if i < _spoke:
@@ -184,5 +184,5 @@ func draw(ci: CanvasItem, _font: Font) -> void:
 	var msg: String = "Hold the cursor in the ring to start" if _step == Step.HOME else "Follow the light"
 	var tw := Art.font().get_string_size(msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x + 44.0
 	var tp := Rect2(_vp.x * 0.5 - tw * 0.5, 60.0, tw, 42.0)
-	Art.draw_pill(ci, tp, Color(0.13, 0.11, 0.08, 0.45))
+	Art.draw_glass(ci, tp, 21)
 	Art.text(ci, tp.get_center(), msg, 22, Color.WHITE)

@@ -1,13 +1,16 @@
 extends Node2D
 
 # One clinic visit (docs/clinic_study_interface.md §3-5; build plan §7.2,
-# packages 1-3 and 5 for the look: orchard.gd, game_art.gd, effects.gd):
+# packages 1-3, and 5 for the look — night fireflies: night_sky.gd,
+# night_life.gd, game_art.gd, effects.gd, sounds.gd):
 #   reach scan -> warm-up -> calibration rounds -> calibration check -> play rounds.
-# One apple at a time at one of the three fixed pairs; hold inside it for HOLD_S
-# to catch it. Calibration rewards speed with points and waits up to the cap;
-# play gives each pair the day's lifetime (difficulty.gd) and counts catches.
+# One target (a firefly; "apple" in the code and the files) at a time at one of
+# the three fixed pairs; hold inside it for HOLD_S to catch it. Calibration
+# rewards speed with points (3 / 2 / 1, shown as pips on the target) and waits
+# up to the cap; play gives each pair the day's lifetime (difficulty.gd) and
+# counts catches.
 #
-#   - Apples are placed and hit-tested in table mm (§3.4, table_space.gd); the
+#   - Targets are placed and hit-tested in table mm (§3.4, table_space.gd); the
 #     screen only draws them. The whole circle must lie inside the reach
 #     outline from the scan (reach_scan.gd) and on screen, always at the
 #     pair's exact distance (_spawn).
@@ -37,17 +40,18 @@ const ReachScan := preload("res://app/clinic/reach_scan.gd")
 const Difficulty := preload("res://app/clinic/difficulty.gd")
 const Art := preload("res://app/clinic/game_art.gd")
 const Effects := preload("res://app/clinic/effects.gd")
-const Orchard := preload("res://app/clinic/orchard.gd")
+const NightSky := preload("res://app/clinic/night_sky.gd")
+const NightLife := preload("res://app/clinic/night_life.gd")
+const Sounds := preload("res://app/clinic/sounds.gd")
 
 const TIMEOUT_GRACE_S := 0.15     # samples reach Godot ~20 ms after capture; wait for them
 const EDGE_MARGIN_PX := 12.0
 const REPOSITION_W_MM := 60.0     # the uncounted apple that brings the hand where a pair fits
 const SPOT_GRID_MM := 25.0        # grid for searching reposition spots
 const FEW_SAMPLES := 20           # calibration check flags a pair with fewer apples
-const APPLE_FILL := 0.80          # apple radius / catch-circle radius (the circle is the target)
+const STREAK := 3                 # this many "Perfect" catches in a row make a streak
 
-const WHITE := Color(1.0, 1.0, 1.0, 0.95)
-const GOLD := Color("FFC23D")
+const GOLD := Color("FFE27A")
 const AMBER := Color(1.0, 0.75, 0.4)
 
 enum Stage { SCAN, ROUND, REST, CHECK, DONE }
@@ -85,18 +89,24 @@ var _calib: Array = []              # per pair, this attempt's calibration: {cau
 var _lifetimes: Array = []          # per pair, s; -1 = not played
 var _play: Array = []               # per pair: {caught, missed}
 
-var _fx: Effects                    # visual-only physics and particles
+var _fx: Effects                    # catch / miss feedback (visual only)
+var _life: NightLife                # the moving backdrop; flares on a streak
+var _snd: Sounds
 var _stage_t: float = 0.0           # seconds since the stage began (card animations)
 var _shown_stage: int = -1
-var _trail: Array = []              # cursor's recent screen positions
-var _leaf_t: float = 0.0
+var _float_t: float = 0.0
+var _spawn_after: float = 0.0       # the next target waits for the catch's hitstop
+var _streak: int = 0                # "Perfect" catches in a row (calibration)
 
 
 func _ready() -> void:
 	var vp := get_viewport_rect().size
 	_ts = TableSpace.new(vp)
-	var backdrop := Orchard.new()
-	add_child(backdrop)
+	add_child(NightSky.new())
+	_life = NightLife.new()
+	add_child(_life)
+	_snd = Sounds.new()
+	add_child(_snd)
 	_fx = Effects.new(vp)
 	for k in Protocol.PAIRS.size():
 		_play.append({"caught": 0, "missed": 0})
@@ -218,7 +228,8 @@ func _process(delta: float) -> void:
 			Stage.ROUND:
 				_stage_left -= delta
 				if _apple.is_empty():
-					_spawn()
+					if _now() >= _spawn_after:   # after the last catch's hitstop
+						_spawn()
 				elif _apple_expired():
 					_finish_apple("timeout", _window_end())
 				if _stage_left <= 0.0:
@@ -227,20 +238,25 @@ func _process(delta: float) -> void:
 				_stage_left -= delta
 				if _stage_left <= 0.0:
 					_start_round()
-	# Visuals only from here.
+	# Visuals and sound only from here.
 	if int(_stage) != _shown_stage:
 		_shown_stage = int(_stage)
 		_stage_t = 0.0
+	var before := _stage_t
 	_stage_t += delta
+	if _stage == Stage.REST:
+		# A bell for each star as it pops in on the rest card.
+		for i in _rest_stars():
+			var at := 0.25 + 0.28 * float(i)
+			if before < at and _stage_t >= at:
+				_snd.star(i)
 	_fx.update(delta)
 	if _stage == Stage.DONE:
-		_leaf_t += delta
-		if _leaf_t > 0.25:
-			_leaf_t = 0.0
-			_fx.leaf_shower(get_viewport_rect().size)
-	_trail.push_front(_ts.mm_to_screen(_hand))
-	if _trail.size() > 7:
-		_trail.pop_back()
+		_float_t += delta
+		if _float_t > 0.2:
+			_float_t = 0.0
+			var vp := get_viewport_rect().size
+			_fx.float_up(Vector2(randf() * vp.x, vp.y + 10.0))
 	queue_redraw()
 
 
@@ -287,6 +303,7 @@ func _on_sample(t: float, mm: Vector2) -> void:
 	if hold_start < 0.0:
 		if t - spawn <= float(_apple["window"]):   # past the window no new hold may start
 			_apple["hold_start"] = t
+			_snd.hold_started()
 	elif t - hold_start >= Protocol.HOLD_S:
 		_finish_apple("caught", t)
 
@@ -311,6 +328,7 @@ func _update_pause() -> void:
 func _start_round() -> void:
 	_stage = Stage.ROUND
 	_stage_left = Protocol.ROUND_S
+	_fx.release_jar()
 	_round_points = 0
 	_round_caught = 0
 	_round_missed = 0
@@ -616,26 +634,37 @@ func _finish_apple(outcome: String, t: float) -> void:
 		("%.6f" % a["hold_start"]) if caught else "",
 		outcome, "%.6f" % t, ("%.4f" % mt) if caught else "", pts,
 	])
-	# Visual only (already logged): a caught apple flies into the basket, a
-	# missed one falls and rolls away; an aborted one just goes.
+	# Feedback only (already logged): a catch holds still for a moment (hitstop,
+	# longer for a better grade), bursts with its grade and sound, and flies to
+	# the jar; a miss dims and sinks; an aborted one just goes.
 	var pos := _ts.mm_to_screen(centre)
-	var r := _apple_radius(float(a["w_mm"]))
+	var size := _target_size(float(a["w_mm"]))
 	if caught:
-		_fx.catch_at(pos, r, _apple_tones(a, t), ("+%d" % pts) if pts > 0 else "")
+		var grade := 0 if in_play else pts
+		_spawn_after = _now() + _fx.catch_at(pos, size, grade)
+		_snd.caught(grade)
+		if not in_play:
+			_streak = _streak + 1 if pts == 3 else 0
+			if _streak > 0 and _streak % STREAK == 0:
+				_life.flare = 1.0
+				_snd.streak()
+				_fx.word(Vector2(get_viewport_rect().size.x * 0.5, 120.0), "Streak ×%d" % _streak, "", GOLD, 30)
 	elif outcome == "missed" or outcome == "timeout":
-		_fx.miss_at(pos, r)
+		_fx.miss_at(pos, size)
+		_snd.missed()
+		_streak = 0
 
 
 # ── Drawing ───────────────────────────────────────────────────────────────────
 
 func _draw() -> void:
 	var vp := get_viewport_rect().size
-	# The orchard backdrop is a child drawn behind this node (orchard.gd).
-	_fx.draw_basket(self)
+	# The night backdrop is two children drawn behind this node (night_sky.gd, night_life.gd).
+	if _stage == Stage.ROUND or _stage == Stage.REST:
+		_fx.draw_jar(self)
 	if _stage == Stage.ROUND and not _paused and not _apple.is_empty():
 		_draw_apple()
 	_fx.draw(self)
-	_fx.draw_basket_front(self)
 	if _stage == Stage.SCAN:
 		_scan.draw(self, Art.font())
 	_draw_cursor()
@@ -659,67 +688,65 @@ func _draw() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, AMBER)
 
 
-# Text with a soft dark shadow, readable on the sky and the grass.
+# Text with a soft dark halo, readable anywhere on the night sky.
 func _label(pos: Vector2, s: String, size: int, col: Color) -> void:
-	Art.text(self, pos + Vector2(0.0, 2.0), s, size, Color(0.0, 0.0, 0.0, 0.35))
-	Art.text(self, pos, s, size, col)
+	Art.text(self, pos, s, size, col, Color(0.02, 0.03, 0.08, 0.6))
 
 
-func _apple_radius(w_mm: float) -> float:
+# The catch circle on screen: W mm across, which may be a slight ellipse when
+# the screen mapping scales x and y differently (§3.4).
+func _target_size(w_mm: float) -> Vector2:
 	var ppm := _ts.px_per_mm()
-	return 0.5 * w_mm * 0.5 * (ppm.x + ppm.y) * APPLE_FILL
+	return Vector2(w_mm * ppm.x, w_mm * ppm.y)
 
 
-# Calibration apples ripen from gold (3 points) to red (1 point) as time passes;
-# play apples are red.
-func _apple_tones(a: Dictionary, now: float) -> Array:
-	if a["play"]:
-		return Art.RED
-	var e := clampf((now - float(a["spawn_time"])) / float(Protocol.POINT_LIMITS_S[1]), 0.0, 1.0)
-	var out: Array = []
-	for i in 3:
-		var from: Color = Art.RIPE_GOLD[i]
-		out.append(from.lerp(Art.RED[i], e))
-	return out
+# Points it is worth right now (calibration): 3, 2, 1 as the limits pass.
+func _worth(now: float) -> int:
+	return Protocol.points_for(now - float(_apple["spawn_time"]))
 
 
+# The target is one object: a firefly whose edge is the catch circle.
+#   calibration: three pips above it, one fading at each point limit (3 -> 2 -> 1);
+#   holding:     it fills with light from its centre — full = caught;
+#   play:        its own edge drains over the lifetime (no extra ring).
 func _draw_apple() -> void:
 	var centre: Vector2 = _apple["centre"]
 	var w: float = _apple["w_mm"]
 	var now := _now()
 	var age := now - float(_apple["spawn_time"])
 	var c := _ts.mm_to_screen(centre)
-	var r := _apple_radius(w)
+	var size := _target_size(w)
 	var inside := TableSpace.inside(_hand, centre, w)
-	# The catch circle is the target (exactly W wide in table mm); the apple sits in it.
-	var ring := _ts.circle_outline(centre, w * 0.5, 56)
-	var closed := ring.duplicate()
-	closed.append(ring[0])
-	draw_set_transform(c + Vector2(0.0, r * 1.2), 0.0, Vector2(r * 0.85, r * 0.2))
-	draw_circle(Vector2.ZERO, 1.0, Color(0.1, 0.15, 0.05, 0.22))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	var pulse := 0.5 + 0.5 * sin(now * 3.5)
-	if inside:
-		draw_colored_polygon(ring, Color(GOLD, 0.16))
-	draw_polyline(closed, Color(1.0, 1.0, 1.0, 0.08 + 0.12 * pulse), 10.0, true)
-	draw_polyline(closed, GOLD if inside else WHITE, 4.0 if inside else 3.0, true)
-	var s := 1.0   # pop in: grow to 112 %, settle to 100 %
-	if age < 0.18:
-		s = age / 0.18 * 1.12
-	elif age < 0.32:
-		s = lerpf(1.12, 1.0, (age - 0.18) / 0.14)
-	Art.draw_apple(self, c, r * s, _apple_tones(_apple, now))
-	if _apple["play"]:
-		# Time left to start the hold: an orange ring draining over the lifetime.
-		var window: float = _apple["window"]
-		var left := clampf((_window_end() - now) / window, 0.0, 1.0)
-		_arc(centre, w * 0.5 + 9.0, 1.0, Color(1.0, 1.0, 1.0, 0.18), 5.0)
-		_arc(centre, w * 0.5 + 9.0, left, Color(1.0, 0.62, 0.2), 5.0)
+	var pop := 1.0   # appears with a little overshoot
+	if age < 0.16:
+		pop = age / 0.16 * 1.1
+	elif age < 0.3:
+		pop = lerpf(1.1, 1.0, (age - 0.16) / 0.14)
+	var breath := 1.0 + 0.06 * sin(now * 3.2)
+	Art.blit(self, Art.glow(), c, size * (2.3 * breath) * pop,
+		Color(Art.FF_GLOW, 0.55 if inside else 0.38))
+	Art.blit(self, Art.orb(), c, size * pop)
 	var hold_start: float = _apple["hold_start"]
 	if hold_start >= 0.0:
-		var frac: float = (now - hold_start) / Protocol.HOLD_S
-		_arc(centre, w * 0.5 + 4.0, frac, Color(GOLD, 0.35), 12.0)
-		_arc(centre, w * 0.5 + 4.0, frac, GOLD, 6.0)
+		var frac: float = clampf((now - hold_start) / Protocol.HOLD_S, 0.0, 1.0)
+		Art.blit(self, Art.disc(), c, size * frac, Color(1.0, 1.0, 0.94, 0.92))
+		Art.blit(self, Art.glow(), c, size * (1.0 + 1.2 * frac), Color(1.0, 1.0, 0.9, 0.35 * frac))
+	elif inside:
+		Art.blit(self, Art.disc(), c, size * 0.2, Color(1, 1, 1, 0.7))
+	if _apple["play"]:
+		var window: float = _apple["window"]
+		var left := clampf((_window_end() - now) / window, 0.0, 1.0)
+		_arc(centre, w * 0.5, 1.0, Color(1.0, 1.0, 1.0, 0.16), 4.0)
+		_arc(centre, w * 0.5, left, Color(1.0, 1.0, 1.0, 0.95), 4.0)
+	elif _apple["kind"] == "pair":
+		var worth := _worth(now) if hold_start < 0.0 else Protocol.points_for(hold_start - float(_apple["spawn_time"]))
+		for i in 3:
+			var p := c + Vector2((float(i) - 1.0) * 16.0, -size.y * 0.5 - 16.0)
+			if i < worth:
+				Art.blit(self, Art.glow(), p, Vector2(26.0, 26.0), Color(Art.GOLD, 0.7))
+				Art.blit(self, Art.disc(), p, Vector2(9.0, 9.0), Color.WHITE)
+			else:
+				Art.blit(self, Art.disc(), p, Vector2(7.0, 7.0), Color(1, 1, 1, 0.2))
 
 
 # Part of a table-space ring, from the top, clockwise.
@@ -734,16 +761,12 @@ func _arc(centre: Vector2, r_mm: float, frac: float, col: Color, width: float) -
 	draw_polyline(pts, col, width, true)
 
 
+# The hand: a simple white dot with a soft halo and a dark rim.
 func _draw_cursor() -> void:
-	for i in range(_trail.size() - 1, 0, -1):
-		var fade := 1.0 - float(i) / float(_trail.size())
-		draw_circle(_trail[i], 4.0 + 5.0 * fade, Color(1.0, 1.0, 1.0, 0.35 * fade))
 	var c := _ts.mm_to_screen(_hand)
-	draw_circle(c, 22.0, Color(1.0, 1.0, 1.0, 0.16))
-	draw_circle(c, 14.0, Color(0.08, 0.16, 0.24, 0.5))
-	draw_circle(c, 12.0, Color.WHITE)
-	draw_circle(c, 8.5, Color(1.0, 1.0, 1.0, 0.55).blend(Color(0.85, 0.9, 1.0, 0.5)))
-	draw_circle(c, 4.0, Color.WHITE)
+	Art.blit(self, Art.glow(), c, Vector2(46.0, 46.0), Color(1, 1, 1, 0.3))
+	Art.blit(self, Art.disc(), c, Vector2(26.0, 26.0), Color(0.05, 0.08, 0.18, 0.6))
+	Art.blit(self, Art.disc(), c, Vector2(20.0, 20.0), Color.WHITE)
 
 
 # Round progress (a segment per round, the current one filling) and the score plate.
@@ -756,47 +779,62 @@ func _draw_hud(vp: Vector2) -> void:
 	for i in _rounds.size():
 		if (_rounds[i]["phase"] == "play") == play:
 			segs.append(i)
+	# Round progress: a dot per round in a glass pill; done rounds glow.
 	var n := segs.size()
-	var sw := minf(28.0, 380.0 / float(maxi(n, 1)))
-	var w := float(n) * sw + float(n - 1) * 5.0 + 28.0
+	var w := float(n) * 17.0 + 22.0
 	var pill := Rect2(vp.x * 0.5 - w * 0.5, 16.0, w, 30.0)
-	Art.draw_pill(self, pill, Color(0.13, 0.11, 0.08, 0.36))
+	Art.draw_glass(self, pill, 15)
 	for j in n:
 		var gi: int = segs[j]
-		var rect := Rect2(pill.position.x + 14.0 + float(j) * (sw + 5.0), pill.get_center().y - 5.0, sw, 10.0)
-		var done := gi < _round_idx
-		Art.draw_pill(self, rect, Color("FFF4DC") if done else Color(1.0, 1.0, 1.0, 0.3))
-		if gi == _round_idx and _stage == Stage.ROUND:
+		var p := Vector2(pill.position.x + 19.0 + float(j) * 17.0, pill.get_center().y)
+		if gi < _round_idx:
+			Art.blit(self, Art.glow(), p, Vector2(22.0, 22.0), Color(Art.FF_GLOW, 0.6))
+			Art.blit(self, Art.disc(), p, Vector2(9.0, 9.0), Art.FF_BODY)
+		elif gi == _round_idx and _stage == Stage.ROUND:
 			var frac := clampf(1.0 - _stage_left / Protocol.ROUND_S, 0.0, 1.0)
-			if frac * sw >= 10.0:
-				Art.draw_pill(self, Rect2(rect.position, Vector2(frac * sw, 10.0)), GOLD)
-	var plate := Rect2(vp.x - 196.0, 14.0, 176.0, 54.0)
-	Art.draw_plate(self, plate)
-	Art.draw_apple(self, plate.position + Vector2(32.0, 29.0), 16.0, Art.RED if play else Art.RIPE_GOLD)
-	var f := Art.font()
+			draw_arc(p, 7.0, 0.0, TAU, 24, Color(1, 1, 1, 0.25), 2.0, true)
+			if frac > 0.0:
+				draw_arc(p, 7.0, -PI * 0.5, -PI * 0.5 + TAU * frac, 24, Color.WHITE, 2.0, true)
+			Art.blit(self, Art.disc(), p, Vector2(6.0, 6.0), Color.WHITE)
+		else:
+			Art.blit(self, Art.disc(), p, Vector2(7.0, 7.0), Color(1, 1, 1, 0.22))
+	# Score: caught this round (play) or points (calibration).
 	var score := str(_round_caught) if play else str(_round_points)
-	draw_string(f, plate.position + Vector2(62.0, 39.0), score, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Art.INK)
-	if not play:
-		var sx := f.get_string_size(score, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
-		draw_string(f, plate.position + Vector2(68.0 + sx, 39.0), "pts", HORIZONTAL_ALIGNMENT_LEFT, -1, 16,
-			Art.INK_SOFT)
+	var unit := "caught" if play else "points"
+	var sw := Art.text_width(score, 32) + Art.text_width(unit, 15) + 52.0
+	var plate := Rect2(vp.x - 20.0 - sw, 14.0, sw, 50.0)
+	Art.draw_glass(self, plate, 16)
+	var f := Art.font()
+	draw_string(f, plate.position + Vector2(20.0, 36.0), score, HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Art.INK)
+	draw_string(f, plate.position + Vector2(28.0 + Art.text_width(score, 32), 36.0), unit,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Art.INK_SOFT)
 
 
-func _dim(vp: Vector2, a: float = 0.38) -> void:
-	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.11, 0.09, 0.07, a))
+func _dim(vp: Vector2, a: float = 0.45) -> void:
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.02, 0.03, 0.08, a))
 
 
-# Dark pill with a small draining ring: "Next round in 12".
+# Glass pill with a small draining ring: "Next round in 12".
 func _countdown_pill(centre: Vector2, text: String) -> void:
-	var w := Art.font().get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x + 70.0
+	var w := Art.text_width(text, 18) + 70.0
 	var rect := Rect2(centre.x - w * 0.5, centre.y - 21.0, w, 42.0)
-	Art.draw_pill(self, rect, Art.INK)
+	Art.draw_glass(self, rect, 21)
 	var rc := rect.position + Vector2(24.0, 21.0)
-	draw_arc(rc, 10.0, 0.0, TAU, 32, Color("5A4A3A"), 4.0, true)
+	draw_arc(rc, 10.0, 0.0, TAU, 32, Color(1, 1, 1, 0.18), 4.0, true)
 	var left := clampf(_stage_left / _rest_s(), 0.0, 1.0)
 	if left > 0.0:
-		draw_arc(rc, 10.0, -PI * 0.5, -PI * 0.5 + TAU * left, 32, GOLD, 4.0, true)
-	Art.text(self, rect.get_center() + Vector2(14.0, 0.0), text, 18, Color("FFF8EA"))
+		draw_arc(rc, 10.0, -PI * 0.5, -PI * 0.5 + TAU * left, 32, Art.FF_BODY, 4.0, true)
+	Art.text(self, rect.get_center() + Vector2(14.0, 0.0), text, 18, Art.INK)
+
+
+# How many stars the rest card shows (for the star bells in _process).
+func _rest_stars() -> int:
+	var prev := _prev_round()
+	if prev.is_empty():
+		return 0
+	if prev["phase"] == "play":
+		return roundi(5.0 * float(_round_caught) / float(maxi(_round_caught + _round_missed, 1)))
+	return roundi(5.0 * float(_round_points) / float(maxi(3 * _round_hits, 1)))
 
 
 # Five stars that pop in one by one, the first `filled` gold.
@@ -828,22 +866,23 @@ func _draw_rest(vp: Vector2) -> void:
 		return
 	var play: bool = prev["phase"] == "play"
 	var frac := 0.0
-	var ring_col := GOLD
+	var ring_col := Art.FF_BODY
 	if play:
 		frac = float(_round_caught) / float(maxi(_round_caught + _round_missed, 1))
-		ring_col = Color("5DB04A")
 	else:
 		frac = float(_round_points) / float(maxi(3 * _round_hits, 1))
+		ring_col = Art.GOLD
 	var grow := 1.0 - pow(1.0 - clampf((_stage_t - 0.3) / 1.1, 0.0, 1.0), 3.0)   # ease out
-	_stars(Vector2(cx, card.position.y + 70.0), roundi(5.0 * frac), 24.0)
+	_stars(Vector2(cx, card.position.y + 70.0), _rest_stars(), 24.0)
 	var rc := Vector2(cx, card.position.y + 190.0)
-	draw_arc(rc, 62.0, 0.0, TAU, 72, Color("ECE3D2"), 14.0, true)
+	draw_arc(rc, 62.0, 0.0, TAU, 72, Color(1, 1, 1, 0.1), 14.0, true)
 	if frac * grow > 0.0:
+		Art.blit(self, Art.glow(), rc, Vector2(230.0, 230.0), Color(ring_col, 0.12 * grow))
 		draw_arc(rc, 62.0, -PI * 0.5, -PI * 0.5 + TAU * frac * grow, 72, ring_col, 14.0, true)
 	var big := "%d%%" % roundi(100.0 * frac * grow) if play else str(roundi(float(_round_points) * grow))
 	Art.text(self, rc + Vector2(0.0, -6.0), big, 40, Art.INK)
 	Art.text(self, rc + Vector2(0.0, 26.0), "caught" if play else "points", 15, Art.INK_SOFT)
-	var line := "%d of %d apples" % [_round_caught, _round_caught + _round_missed] if play \
+	var line := "%d of %d fireflies" % [_round_caught, _round_caught + _round_missed] if play \
 		else "Faster catches earn more"
 	Art.text(self, Vector2(cx, card.position.y + 285.0), line, 17, Art.INK_SOFT)
 	_countdown_pill(Vector2(cx, card.end.y - 42.0), "Next round in %d" % ceili(_stage_left))
@@ -865,17 +904,17 @@ func _draw_complete(vp: Vector2) -> void:
 	Art.text(self, Vector2(cx, y0 + 62.0), "Session complete", 38, Art.INK)
 	Art.text(self, Vector2(cx, y0 + 104.0), "Thank you — well played", 18, Art.INK_SOFT)
 	_stars(Vector2(cx, y0 + 165.0), roundi(5.0 * frac), 26.0)
-	var tiles: Array = [["%d%%" % roundi(100.0 * frac), "apples caught"],
+	var tiles: Array = [["%d%%" % roundi(100.0 * frac), "fireflies caught"],
 		[str(_rounds_of("play")), "rounds played"]]
 	for i in 2:
 		var tile := Rect2(cx - 185.0 + float(i) * 200.0, y0 + 222.0, 170.0, 84.0)
-		draw_style_box(Art._box(Color.WHITE, 18, Color("EADFC9"), 1), tile)
+		Art.draw_glass(self, tile, 18)
 		Art.text(self, tile.get_center() + Vector2(0.0, -12.0), tiles[i][0], 32, Art.INK)
 		Art.text(self, tile.get_center() + Vector2(0.0, 22.0), tiles[i][1], 14, Art.INK_SOFT)
 	var btn := Rect2(cx - 100.0, y0 + 336.0, 200.0, 54.0)
-	draw_style_box(Art._box(Color("8E2A1F"), 16), btn.grow_side(SIDE_BOTTOM, 6.0))
-	draw_style_box(Art._box(Art.RED_BUTTON, 16), btn)
-	Art.text(self, btn.get_center(), "Done  (Enter)", 22, Color.WHITE)
+	Art.blit(self, Art.glow(), btn.get_center(), Vector2(320.0, 150.0), Color(Art.FF_GLOW, 0.18))
+	draw_style_box(Art._box(Art.FF_BODY, 27), btn)
+	Art.text(self, btn.get_center(), "Done  (Enter)", 22, Art.NAVY)
 	Art.text(self, Vector2(cx, y0 + 425.0), "✓ Saved · day %d of 3" % int(config["day"]), 14, Art.INK_SOFT)
 
 
@@ -891,14 +930,15 @@ func _draw_pause(vp: Vector2) -> void:
 	var table_y := y0 + 150.0
 	draw_polygon(PackedVector2Array([Vector2(cx - 130, table_y), Vector2(cx + 130, table_y),
 		Vector2(cx + 112, table_y + 40), Vector2(cx - 112, table_y + 40)]),
-		PackedColorArray([Color("D8B07C"), Color("D8B07C"), Color("A9794A"), Color("A9794A")]))
-	draw_rect(Rect2(cx - 130, table_y - 6, 260, 9), Color("C99A62"))
+		PackedColorArray([Color("3A4A63"), Color("3A4A63"), Color("222D40"), Color("222D40")]))
+	draw_rect(Rect2(cx - 130, table_y - 6, 260, 9), Color("4A5B76"))
 	var spot_a := 0.35 + 0.65 * drop
+	Art.blit(self, Art.glow(), Vector2(cx, table_y - 2), Vector2(170.0, 40.0), Color(Art.FF_GLOW, 0.35 * spot_a))
 	for i in 12:
 		var a0 := TAU * float(i) / 12.0
 		var p0 := Vector2(cx, table_y - 2) + Vector2(cos(a0) * 64.0, sin(a0) * 8.0)
 		var p1 := Vector2(cx, table_y - 2) + Vector2(cos(a0 + 0.3) * 64.0, sin(a0 + 0.3) * 8.0)
-		draw_line(p0, p1, Color(Art.RED_BUTTON, spot_a), 3.0, true)
+		draw_line(p0, p1, Color(Art.FF_BODY, spot_a), 3.0, true)
 	var dy := -34.0 * (1.0 - drop)
 	var body := Rect2(cx - 56, table_y - 50 + dy, 112, 46)
 	draw_style_box(Art._box(Color("65727E"), 12), body)
@@ -912,7 +952,7 @@ func _draw_pause(vp: Vector2) -> void:
 	for i in 3:
 		var bob := sin(float(Time.get_ticks_msec()) / 1000.0 * 5.0 - float(i) * 0.9)
 		draw_circle(Vector2(cx - 18.0 + 18.0 * float(i), y0 + 342.0 - 3.0 * bob), 5.0,
-			Color(Art.RED_BUTTON, 0.45 + 0.4 * bob))
+			Color(Art.FF_BODY, 0.45 + 0.4 * bob))
 
 
 # Researcher overlay during play (§4.9): diagnostics only — never p, the

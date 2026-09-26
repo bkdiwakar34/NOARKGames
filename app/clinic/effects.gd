@@ -1,184 +1,212 @@
 extends RefCounted
 
-# Visual-only physics for the participant screens (mockup: "caught apples fly
-# into a basket and bounce; missed ones dull, fall, bounce and roll away"),
-# plus particle bursts and the "+3" pops. Screen pixels, simple ballistic
-# motion under GRAVITY. Nothing here touches the data: an apple is logged as
-# caught or missed before its effect starts.
+# Catch and miss feedback for the fireflies (feedback design 2026-09-26, from
+# osu!, Aim Lab, game-juice practice and rehab-game studies). Visual only:
+# an apple — a firefly — is logged as caught or missed before its effect starts.
+#   catch: hitstop (the firefly squashes and holds still, longer for a better
+#          grade), then a flash, sparks, the grade's word ("Perfect!" +3 ...),
+#          and it flies into the jar, which glows brighter as it fills;
+#   miss:  the light dims, shrinks a little and sinks away;
+#   round start: the jar's fireflies are let go.
+# Screen pixels.
 
 const Art := preload("res://app/clinic/game_art.gd")
 
-const GRAVITY := 1500.0     # px / s², logical 1152 x 648 screen
-const FLY_S := 0.8          # flight time from the catch to the basket
-const PILE_MAX := 9
+const HITSTOP: Array = [0.08, 0.07, 0.10, 0.14]   # s, by grade (0 = play, no grade)
+const FLY_S := 0.75
+const JAR_SHOWN := 24                             # at most this many drawn inside
 
-var basket: Rect2           # the basket's body, px
-var ground_y: float         # where missed apples land
-var pile: int = 0           # apples resting in the basket
+var jar: Rect2
+var count: int = 0                                # fireflies in the jar this round
 
-var _flyers: Array = []     # caught apples on their way: {pos, vel, rot, spin, r, tones, bounced}
-var _fallers: Array = []    # missed apples: {pos, vel, rot, r, t, bounces}
-var _parts: Array = []      # {pos, vel, t, life, col, leaf, size, rot, spin, g}
-var _pops: Array = []       # {pos, t, text}
+var _hit: Dictionary = {}       # the frozen moment: {pos, size, t, dur, grade}
+var _flyers: Array = []         # {p0, c, p1, t}
+var _sinkers: Array = []        # {pos, size, t}
+var _sparks: Array = []         # {pos, vel, t, life, col, size}
+var _flashes: Array = []        # {pos, size, t, col}
+var _words: Array = []          # {pos, t, word, sub, col, big}
+var _freed: Array = []          # {pos, vel, t}
+var _t: float = 0.0
 
 
 func _init(vp: Vector2) -> void:
-	basket = Rect2(vp.x - 190.0, vp.y - 92.0, 150.0, 76.0)
-	ground_y = vp.y * 0.935
+	jar = Rect2(vp.x - 150.0, vp.y - 158.0, 104.0, 128.0)
 
 
-func _rim() -> Vector2:
-	return Vector2(basket.get_center().x, basket.position.y + 4.0)
+func _mouth() -> Vector2:
+	return Vector2(jar.get_center().x, jar.position.y + 18.0)
 
 
-# A caught apple: it flies into the basket (aimed to arrive in FLY_S), with a
-# burst of leaves and juice and an optional "+3".
-func catch_at(pos: Vector2, r: float, tones: Array, pop_text: String) -> void:
-	var target := _rim() + Vector2(randf_range(-30.0, 30.0), -6.0)
-	var vel := (target - pos - Vector2(0.0, 0.5 * GRAVITY * FLY_S * FLY_S)) / FLY_S
-	_flyers.append({"pos": pos, "vel": vel, "rot": 0.0, "spin": randf_range(4.0, 7.0),
-		"r": r, "tones": tones, "bounced": false, "t": 0.0})
-	for i in 14:
-		var a := randf() * TAU
-		var leaf := i % 3 == 0
-		_parts.append({"pos": pos, "vel": Vector2(cos(a), sin(a) - 0.6) * randf_range(140.0, 320.0),
-			"t": 0.0, "life": randf_range(0.6, 1.0), "leaf": leaf, "g": GRAVITY * 0.6,
-			"col": Art.LEAF if leaf else Color("FFD45A").lerp(Color("FFB23D"), randf()),
-			"size": randf_range(6.0, 10.0) if leaf else randf_range(2.5, 5.0),
-			"rot": randf() * TAU, "spin": randf_range(-8.0, 8.0)})
-	if pop_text != "":
-		_pops.append({"pos": pos + Vector2(0.0, -r - 16.0), "t": 0.0, "text": pop_text})
+# Returns how long the hitstop lasts, so the next target waits for it.
+func catch_at(pos: Vector2, size: Vector2, grade: int) -> float:
+	var dur: float = HITSTOP[clampi(grade, 0, 3)]
+	if not _hit.is_empty():
+		_burst(_hit)
+	_hit = {"pos": pos, "size": size, "t": 0.0, "dur": dur, "grade": grade}
+	return dur
 
 
-# A missed apple: it dulls, drops to the grass, bounces twice and rolls away.
-func miss_at(pos: Vector2, r: float) -> void:
-	_fallers.append({"pos": pos, "vel": Vector2(randf_range(-30.0, 30.0), -60.0), "rot": 0.0,
-		"r": r, "t": 0.0, "bounces": 0})
+func miss_at(pos: Vector2, size: Vector2) -> void:
+	_sinkers.append({"pos": pos, "size": size, "t": 0.0})
 
 
-# Slowly falling leaves (session complete).
-func leaf_shower(vp: Vector2) -> void:
-	_parts.append({"pos": Vector2(randf() * vp.x, -20.0), "vel": Vector2(randf_range(-30.0, 30.0), 70.0),
-		"t": 0.0, "life": 9.0, "leaf": true, "g": 0.0, "size": randf_range(7.0, 11.0),
-		"col": [Art.LEAF, Color("E6A92A"), Color("CC3524"), Color("7DBE55")].pick_random(),
-		"rot": randf() * TAU, "spin": randf_range(-2.0, 2.0)})
+func word(pos: Vector2, text: String, sub: String, col: Color, big: int = 30) -> void:
+	_words.append({"pos": pos, "t": 0.0, "word": text, "sub": sub, "col": col, "big": big})
+
+
+# A firefly rising from pos (the closing card's gentle celebration).
+func float_up(pos: Vector2) -> void:
+	_freed.append({"pos": pos, "vel": Vector2(randf_range(-20.0, 20.0), randf_range(-70.0, -40.0)), "t": 0.0})
+
+
+# Round start: the fireflies in the jar fly off into the night.
+func release_jar() -> void:
+	for i in mini(count, JAR_SHOWN):
+		_freed.append({"pos": _jar_spot(i), "vel": Vector2(randf_range(-90.0, 30.0), randf_range(-160.0, -90.0)),
+			"t": 0.0})
+	count = 0
+
+
+func _burst(h: Dictionary) -> void:
+	var grade: int = h["grade"]
+	var pos: Vector2 = h["pos"]
+	var size: Vector2 = h["size"]
+	var col: Color = Art.GRADE_COL[grade] if grade > 0 else Art.FF_GLOW
+	_flashes.append({"pos": pos, "size": size, "t": 0.0, "col": col})
+	var n := 10 + 6 * grade
+	for i in n:
+		var a := TAU * float(i) / float(n) + randf() * 0.3
+		_sparks.append({"pos": pos, "vel": Vector2(cos(a), sin(a)) * randf_range(160.0, 260.0 + 60.0 * grade),
+			"t": 0.0, "life": randf_range(0.45, 0.8), "size": randf_range(10.0, 18.0),
+			"col": col if i % 2 == 0 else Art.FF_GLOW})
+	if grade > 0:
+		word(pos + Vector2(0.0, -size.y * 0.5 - 30.0), Art.GRADE_WORD[grade], "+%d" % grade, col,
+			26 + 6 * grade)
+	var end := _mouth()
+	var ctrl := (pos + end) * 0.5 + Vector2(0.0, -160.0)
+	_flyers.append({"p0": pos, "c": ctrl, "p1": end, "t": 0.0})
 
 
 func update(dt: float) -> void:
+	_t += dt
+	if not _hit.is_empty():
+		_hit["t"] += dt
+		if float(_hit["t"]) >= float(_hit["dur"]):
+			_burst(_hit)
+			_hit = {}
 	var keep: Array = []
-	var rim_y: float = _rim().y
 	for f in _flyers:
-		var vel: Vector2 = f["vel"] + Vector2(0.0, GRAVITY * dt)
-		var pos: Vector2 = f["pos"] + vel * dt
-		f["t"] += dt
-		f["rot"] += f["spin"] * dt
-		if float(f["t"]) > 0.3 and pos.y >= rim_y and vel.y > 0.0:
-			if f["bounced"]:
-				pile = mini(pile + 1, PILE_MAX)   # settles into the pile
-				continue
-			f["bounced"] = true                  # one small bounce off the rim
-			pos.y = rim_y
-			vel = Vector2(vel.x * 0.25, -vel.y * 0.28)
-			f["spin"] = float(f["spin"]) * 0.3
-		f["vel"] = vel
-		f["pos"] = pos
-		keep.append(f)
-	_flyers = keep
-
-	keep = []
-	for f in _fallers:
-		var r: float = f["r"]
-		var vel: Vector2 = f["vel"] + Vector2(0.0, GRAVITY * dt)
-		var pos: Vector2 = f["pos"] + vel * dt
-		f["t"] += dt
-		if pos.y >= ground_y - r and vel.y > 0.0:
-			pos.y = ground_y - r
-			if int(f["bounces"]) < 2:
-				vel.y = -vel.y * 0.38
-				f["bounces"] += 1
-				if absf(vel.x) < 40.0:
-					vel.x = 90.0 if randf() < 0.5 else -90.0
-			else:
-				vel.y = 0.0
-				vel.x *= maxf(0.0, 1.0 - 1.1 * dt)   # rolling friction
-		f["rot"] += vel.x / r * dt                 # rolling without slipping
-		f["vel"] = vel
-		f["pos"] = pos
-		if float(f["t"]) < 2.6:
+		f["t"] += dt / FLY_S
+		if float(f["t"]) >= 1.0:
+			count += 1
+		else:
 			keep.append(f)
-	_fallers = keep
-
+	_flyers = keep
+	_sinkers = _aged(_sinkers, dt, 1.0)
 	keep = []
-	for p in _parts:
-		var vel: Vector2 = p["vel"] + Vector2(0.0, float(p["g"]) * dt)
-		p["vel"] = vel
-		p["pos"] += vel * dt
-		p["t"] += dt
-		p["rot"] += p["spin"] * dt
-		if float(p["t"]) < float(p["life"]):
-			keep.append(p)
-	_parts = keep
-
+	for s in _sparks:
+		var vel: Vector2 = s["vel"] * maxf(0.0, 1.0 - 3.2 * dt) + Vector2(0.0, -30.0 * dt)
+		s["vel"] = vel
+		s["pos"] += vel * dt
+		s["t"] += dt
+		if float(s["t"]) < float(s["life"]):
+			keep.append(s)
+	_sparks = keep
+	_flashes = _aged(_flashes, dt, 0.45)
+	_words = _aged(_words, dt, 1.0)
 	keep = []
-	for p in _pops:
-		p["t"] += dt
-		if p["t"] < 0.9:
-			keep.append(p)
-	_pops = keep
+	for f in _freed:
+		f["pos"] += f["vel"] * dt
+		f["t"] += dt
+		if float(f["t"]) < 2.0:
+			keep.append(f)
+	_freed = keep
 
 
-func draw_basket(ci: CanvasItem) -> void:
-	var b := basket
-	var rim := _rim()
-	ci.draw_set_transform(Vector2(b.get_center().x, b.end.y + 4.0), 0.0, Vector2(b.size.x * 0.55, 8.0))
-	ci.draw_circle(Vector2.ZERO, 1.0, Color(0.1, 0.15, 0.05, 0.3))
-	ci.draw_set_transform(rim, 0.0, Vector2(b.size.x * 0.5, 13.0))
-	ci.draw_circle(Vector2.ZERO, 1.0, Color("5E3719"))
-	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	# The pile: apples resting in the basket's mouth.
-	var slots: Array = [[-40, 2], [0, 0], [40, 2], [-20, -12], [20, -12], [-58, 6], [58, 6], [0, -22], [-38, -18]]
-	for i in pile:
-		var s: Array = slots[i]
-		Art.draw_apple(ci, rim + Vector2(s[0], s[1] - 8.0), 17.0, Art.RED if i % 3 != 1 else Art.RIPE_GOLD,
-			0.25 * sin(float(i) * 2.1))
+# Ages every item by dt and keeps those younger than life.
+func _aged(items: Array, dt: float, life: float) -> Array:
+	var keep: Array = []
+	for it in items:
+		it["t"] += dt
+		if float(it["t"]) < life:
+			keep.append(it)
+	return keep
 
 
-func draw_basket_front(ci: CanvasItem) -> void:
-	var b := basket
-	var body := PackedVector2Array([b.position, Vector2(b.end.x, b.position.y),
-		Vector2(b.end.x - 16.0, b.end.y), Vector2(b.position.x + 16.0, b.end.y)])
-	ci.draw_polygon(body, PackedColorArray([Color("CC9254"), Color("CC9254"), Color("7A4820"), Color("7A4820")]))
-	for i in 3:
-		var y := b.position.y + b.size.y * (0.3 + 0.25 * float(i))
-		var inset := 16.0 * (y - b.position.y) / b.size.y
-		ci.draw_line(Vector2(b.position.x + inset + 2.0, y), Vector2(b.end.x - inset - 2.0, y),
-			Color(0.37, 0.2, 0.09, 0.55), 2.5, true)
-	for i in 5:
-		var x := b.position.x + b.size.x * (0.15 + 0.175 * float(i))
-		ci.draw_line(Vector2(x, b.position.y + 4.0), Vector2(x + (b.get_center().x - x) * 0.2, b.end.y - 2.0),
-			Color(0.37, 0.2, 0.09, 0.4), 2.0, true)
-	ci.draw_line(b.position, Vector2(b.end.x, b.position.y), Color("E0A86C"), 7.0, true)
+# Where the i-th firefly in the jar is now: a slow wander inside the glass.
+func _jar_spot(i: int) -> Vector2:
+	var inner := jar.grow(-18.0)
+	inner.position.y += 16.0
+	inner.size.y -= 16.0
+	var fx := 0.5 + 0.42 * sin(_t * (0.6 + 0.07 * float(i % 5)) + float(i) * 1.9)
+	var fy := 0.5 + 0.42 * cos(_t * (0.5 + 0.05 * float(i % 7)) + float(i) * 2.7)
+	return inner.position + Vector2(fx, fy) * inner.size
+
+
+# The jar behind the flying fireflies; its glow grows with what it holds.
+func draw_jar(ci: CanvasItem) -> void:
+	var tex := Art.glow()
+	var fill := clampf(float(count) / 15.0, 0.0, 1.0)
+	Art.blit(ci, tex, jar.get_center(), jar.size * (1.6 + 0.8 * fill), Color(Art.FF_GLOW, 0.10 + 0.35 * fill))
+	ci.draw_style_box(Art._box(Color(0.75, 0.9, 1.0, 0.07), 22, Color(1, 1, 1, 0.28), 2),
+		Rect2(jar.position + Vector2(0.0, 14.0), jar.size - Vector2(0.0, 14.0)))
+	for i in mini(count, JAR_SHOWN):
+		var blink := 0.55 + 0.45 * sin(_t * 2.3 + float(i) * 1.3)
+		Art.blit(ci, tex, _jar_spot(i), Vector2(22.0, 22.0), Color(Art.FF_GLOW, blink))
+		Art.blit(ci, Art.disc(), _jar_spot(i), Vector2(4.0, 4.0), Color(Art.FF_CORE, blink))
+	ci.draw_line(jar.position + Vector2(14.0, 34.0), jar.position + Vector2(14.0, jar.size.y - 22.0),
+		Color(1, 1, 1, 0.22), 3.0, true)
+	ci.draw_style_box(Art._box(Color("3C4658"), 6, Color(1, 1, 1, 0.18), 1),
+		Rect2(jar.position + Vector2(10.0, 0.0), Vector2(jar.size.x - 20.0, 16.0)))
 
 
 func draw(ci: CanvasItem) -> void:
+	var tex := Art.glow()
+	for f in _freed:
+		var a := 1.0 - float(f["t"]) / 2.0
+		Art.blit(ci, tex, f["pos"], Vector2(20.0, 20.0), Color(Art.FF_GLOW, 0.8 * a))
+	for s in _sinkers:
+		var t: float = s["t"]
+		var size: Vector2 = s["size"]
+		var p: Vector2 = s["pos"] + Vector2(0.0, 50.0 * t * t)
+		var k := 1.0 - 0.3 * t
+		Art.blit(ci, Art.orb(), p, size * k, Color(Art.MISS, (1.0 - t) * 0.7))
+	for fl in _flashes:
+		var t: float = float(fl["t"]) / 0.45
+		var size: Vector2 = fl["size"]
+		Art.blit(ci, tex, fl["pos"], size * (1.2 + 2.6 * t), Color(fl["col"], 0.9 * (1.0 - t)))
+		ci.draw_arc(fl["pos"], size.x * (0.5 + 0.9 * t), 0.0, TAU, 64, Color(fl["col"], 0.6 * (1.0 - t)), 3.0, true)
+	if not _hit.is_empty():
+		# The hitstop: squashed, extra bright, still.
+		var size: Vector2 = _hit["size"]
+		var p: Vector2 = _hit["pos"]
+		Art.blit(ci, tex, p, size * 2.6, Color(Art.FF_GLOW, 0.6))
+		Art.blit(ci, Art.orb(), p, Vector2(size.x * 1.16, size.y * 0.84))
+		Art.blit(ci, Art.disc(), p, Vector2(size.x * 1.16, size.y * 0.84) * 0.9, Color(1, 1, 1, 0.85))
+	for s in _sparks:
+		var a := 1.0 - float(s["t"]) / float(s["life"])
+		Art.blit(ci, tex, s["pos"], Vector2.ONE * float(s["size"]), Color(s["col"], a))
 	for f in _flyers:
-		Art.draw_apple(ci, f["pos"], f["r"], f["tones"], f["rot"])
-	for f in _fallers:
-		var fade := clampf((2.6 - float(f["t"])) / 0.8, 0.0, 1.0)
-		Art.draw_apple(ci, f["pos"], f["r"], Art.DULL, f["rot"], fade)
-	for p in _parts:
-		var a := clampf(1.0 - float(p["t"]) / float(p["life"]), 0.0, 1.0)
-		if p["leaf"]:
-			ci.draw_set_transform(p["pos"], p["rot"], Vector2(p["size"], p["size"] * 0.45))
-			ci.draw_circle(Vector2.ZERO, 1.0, Color(p["col"], a))
-			ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		else:
-			ci.draw_circle(p["pos"], p["size"], Color(p["col"], a))
-	for p in _pops:
-		var t: float = p["t"]
-		var rise := 60.0 * t
-		var s := 1.0 + 0.25 * maxf(0.0, 1.0 - t * 6.0)
-		var a := clampf(1.0 - (t - 0.5) / 0.4, 0.0, 1.0)
-		var pos: Vector2 = p["pos"] + Vector2(0.0, -rise)
-		Art.text(ci, pos + Vector2(0.0, 3.0), p["text"], int(34 * s), Color(0.66, 0.42, 0.0, a))
-		Art.text(ci, pos, p["text"], int(34 * s), Color(Art.GOLD, a))
+		var t: float = f["t"]
+		var e := t * t * (3.0 - 2.0 * t)   # smoothstep: speeds up, then settles
+		var p0: Vector2 = f["p0"]
+		var c: Vector2 = f["c"]
+		var p1: Vector2 = f["p1"]
+		var p := p0.lerp(c, e).lerp(c.lerp(p1, e), e)
+		for k in 4:   # a short trail
+			var e2 := maxf(0.0, e - 0.04 * float(k + 1))
+			var q := p0.lerp(c, e2).lerp(c.lerp(p1, e2), e2)
+			Art.blit(ci, tex, q, Vector2.ONE * (16.0 - 3.0 * float(k)), Color(Art.FF_GLOW, 0.35 - 0.07 * float(k)))
+		Art.blit(ci, tex, p, Vector2(30.0, 30.0), Color(Art.FF_GLOW, 0.9))
+		Art.blit(ci, Art.disc(), p, Vector2(6.0, 6.0), Art.FF_CORE)
+	for w in _words:
+		var t: float = w["t"]
+		var pop := 1.0 + 0.3 * maxf(0.0, 1.0 - t * 7.0)
+		var a := clampf((1.0 - t) / 0.35, 0.0, 1.0)
+		var p: Vector2 = w["pos"] + Vector2(0.0, -46.0 * t)
+		var col: Color = w["col"]
+		var big := int(float(w["big"]) * pop)
+		Art.text(ci, p, w["word"], big, Color(col, a), Color(0.02, 0.03, 0.08, 0.55 * a))
+		if String(w["sub"]) != "":
+			Art.text(ci, p + Vector2(0.0, float(big) * 0.9), w["sub"], int(big * 0.7), Color(col, a),
+				Color(0.02, 0.03, 0.08, 0.55 * a))

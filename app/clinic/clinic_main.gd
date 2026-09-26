@@ -21,6 +21,9 @@ var _visit_id: String = ""       # participant of the running visit
 
 
 func _ready() -> void:
+	# Smooth edges on shapes and lines, for this app only (the patient app's
+	# project settings are untouched).
+	get_viewport().msaa_2d = Viewport.MSAA_4X
 	Protocol.load_saved()
 	_db = StudyDB.new()
 	_show_home()
