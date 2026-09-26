@@ -52,6 +52,7 @@ var _stage: Stage = Stage.READY
 var _stage_left: float = 0.0     # seconds left in the current round or rest
 var _paused: bool = false        # tracker lost
 var _level: int = 1              # index into Protocol.TEST_LEVELS
+var _quick: bool = false         # quick test: fewer rounds, short rests (Q)
 var _attempt: int = 1            # calibration attempt; C / S on the check screen add one
 
 var _hand: Vector2 = Vector2.ZERO   # latest hand position, table mm
@@ -74,18 +75,15 @@ var _pops: Array = []               # floating "+3": {pos (mm), t0, text}
 func _ready() -> void:
 	var vp := get_viewport_rect().size
 	_ts = TableSpace.new(vp)
-	for i in Protocol.WARMUP_ROUNDS:
-		_rounds.append({"phase": "warmup", "number": i + 1})
-	for i in Protocol.CALIB_ROUNDS:
-		_rounds.append({"phase": "calibration", "number": i + 1})
-	for i in Protocol.PLAY_ROUNDS:
-		_rounds.append({"phase": "play", "number": i + 1})
 	for k in Protocol.PAIRS.size():
 		_play.append({"caught": 0, "missed": 0})
 	_reset_calibration()
 	_hand = _ts.screen_to_mm(vp * 0.5)
 	_scan = ReachScan.new(_ts, vp)
 	_log = VisitLogger.new()
+	# Samples drive the cursor from the start; they are only written once the
+	# visit's files are open (_begin_visit).
+	UDPReceiver.log_enabled = true
 
 
 func _exit_tree() -> void:
@@ -93,11 +91,30 @@ func _exit_tree() -> void:
 	_log.close()
 
 
-# Opened on Space, once the level is known (it goes in the header).
+# On Space, once the level and quick-test choice are known (both go in the header).
 func _begin_visit() -> void:
+	var calib: int = Protocol.QUICK_CALIB_ROUNDS if _quick else Protocol.CALIB_ROUNDS
+	var play: int = Protocol.QUICK_PLAY_ROUNDS if _quick else Protocol.PLAY_ROUNDS
+	for i in Protocol.WARMUP_ROUNDS:
+		_rounds.append({"phase": "warmup", "number": i + 1})
+	for i in calib:
+		_rounds.append({"phase": "calibration", "number": i + 1})
+	for i in play:
+		_rounds.append({"phase": "play", "number": i + 1})
 	_log.open(PARTICIPANT_ID, _header_lines())
-	UDPReceiver.log_enabled = true
 	_stage = Stage.SCAN
+
+
+func _rest_s() -> float:
+	return Protocol.QUICK_REST_S if _quick else Protocol.REST_S
+
+
+func _rounds_of(phase: String) -> int:
+	var n := 0
+	for r in _rounds:
+		if r["phase"] == phase:
+			n += 1
+	return n
 
 
 func _header_lines() -> Array:
@@ -113,6 +130,7 @@ func _header_lines() -> Array:
 		"participant,%s" % PARTICIPANT_ID,
 		"protocol_version,%s" % Protocol.VERSION,
 		"level_p,%.2f" % _level_p(),
+		"quick_test,%s" % _quick,
 		"pairs_a_w_mm,%s" % " ".join(pairs),
 		"hold_s,%s" % Protocol.HOLD_S,
 		"point_cap_s,%s" % Protocol.POINT_CAP_S,
@@ -133,6 +151,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _stage == Stage.READY:
 		if key >= KEY_1 and key < KEY_1 + Protocol.TEST_LEVELS.size():
 			_level = key - KEY_1
+		elif key == KEY_Q:
+			_quick = not _quick
 		elif key == KEY_SPACE:
 			_begin_visit()
 	elif _stage == Stage.CHECK:
@@ -262,7 +282,7 @@ func _end_round() -> void:
 		_enter_check()
 	else:
 		_stage = Stage.REST
-		_stage_left = Protocol.REST_S
+		_stage_left = _rest_s()
 
 
 func _phase_name() -> String:
@@ -324,7 +344,7 @@ func _accept_calibration() -> void:
 	_log.log_calibration(rows)
 	_no_fit = false
 	_stage = Stage.REST
-	_stage_left = Protocol.REST_S
+	_stage_left = _rest_s()
 
 
 # C: play the calibration rounds again. S: the reach scan first, then them.
@@ -552,8 +572,11 @@ func _draw() -> void:
 			for i in Protocol.TEST_LEVELS.size():
 				var mark: String = "[%d]" % (i + 1) if i == _level else " %d " % (i + 1)
 				levels.append("%s p = %.2f" % [mark, Protocol.TEST_LEVELS[i]])
-			_draw_card(font, vp, ["Visit test", "Test level:  " + "    ".join(levels),
-				"Press 1, 2 or 3 to change it, Space to start"])
+			var quick: String = "Quick test: ON — %d calibration + %d play rounds, %d s rests" % [
+				Protocol.QUICK_CALIB_ROUNDS, Protocol.QUICK_PLAY_ROUNDS, int(Protocol.QUICK_REST_S)] \
+				if _quick else "Quick test: off (full visit, about 27 min)"
+			_draw_card(font, vp, ["Visit test", "Test level:  " + "    ".join(levels), quick,
+				"1, 2, 3: level    Q: quick test    Space: start"])
 		Stage.REST:
 			_draw_card(font, vp, _rest_lines())
 		Stage.CHECK:
@@ -605,7 +628,7 @@ func _draw_hud(font: Font, vp: Vector2) -> void:
 	var label := "Rest"
 	if _stage == Stage.ROUND:
 		var r: Dictionary = _rounds[_round_idx]
-		var total: int = Protocol.PLAY_ROUNDS if play else Protocol.CALIB_ROUNDS
+		var total := _rounds_of("play" if play else "calibration")
 		label = "Warm-up" if r["phase"] == "warmup" else "Round %d of %d" % [r["number"], total]
 		var left := maxi(ceili(_stage_left), 0)
 		_text(font, Vector2(vp.x * 0.5, 44.0), "%d:%02d" % [left / 60, left % 60], 30, INK, 200.0)

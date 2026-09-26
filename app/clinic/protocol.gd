@@ -20,6 +20,12 @@ const WARMUP_ROUNDS := 1     # played like calibration, not counted
 const CALIB_ROUNDS := 5
 const PLAY_ROUNDS := 15
 
+# Quick test (Q on the start screen): a short visit for checking the app, not
+# for data — the visit header says quick_test,true.
+const QUICK_CALIB_ROUNDS := 2
+const QUICK_PLAY_ROUNDS := 3
+const QUICK_REST_S := 5.0
+
 # Test levels, picked with keys 1-3 on the start screen until the study DB
 # (package 4) assigns them from order + study day. DRAFT: the study's three
 # percentiles are not decided (spec §6).
