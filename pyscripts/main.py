@@ -33,6 +33,11 @@ FRAME_WAIT_S = 0.05
 # counted as missed). 3 frames = 30 ms of slack at 100 fps.
 FRAME_QUEUE_DEPTH = 3
 
+# Longest the pairing waits for the second camera's matching frame (it can
+# arrive a fraction of a ms after the driving camera's; see _FrameQueue.nearest).
+# Only spent in full when that camera has no frame near this one at all.
+PAIR_WAIT_S = 0.004
+
 # First float32 of a UDP packet to Godot: 2.0 = a position sample (24 bytes,
 # see _send_coordinates), 7.0 = a validation-recorder status packet (4 bytes
 # + JSON). udp_receiver.gd branches on this.
@@ -73,10 +78,20 @@ class _FrameQueue:
                 return pick()
             return None
 
-    def nearest(self, ts: float):
+    def nearest(self, ts: float, tol: float = 0.0, timeout: float = 0.0):
         """The queued frame captured closest in time to ts — for pairing the
-        second camera with the driving camera's frame. (frame, ts, seq) or None."""
+        second camera with the driving camera's frame. (frame, ts, seq) or None.
+
+        With a timeout, first waits up to that long for a frame within tol of
+        ts: the second camera's matching frame can land a moment after the
+        driving camera's (it captured a fraction of a ms later), and without
+        the wait the closest queued frame is the previous one, a whole frame
+        period away — so that camera was dropped from nearly every pass
+        whenever the start-up phase came out negative (2026-09-26)."""
         with self._cond:
+            if timeout > 0.0:
+                self._cond.wait_for(
+                    lambda: any(abs(item[1] - ts) <= tol for item in self._items), timeout)
             if not self._items:
                 return None
             return min(self._items, key=lambda item: abs(item[1] - ts))
@@ -786,7 +801,8 @@ class MainClass:
 
         frame_o = None
         if self._cam_errors[other] is None:
-            match = self._frame_slots[other].nearest(ts_d)
+            match = self._frame_slots[other].nearest(
+                ts_d, self._stereo_max_frame_skew_s, PAIR_WAIT_S)
             if match is not None:
                 frame_o, ts_o, seq_o = match
                 if abs(ts_d - ts_o) > self._stereo_max_frame_skew_s:
