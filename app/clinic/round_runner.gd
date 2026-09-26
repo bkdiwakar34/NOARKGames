@@ -623,7 +623,7 @@ func _arc(centre: Vector2, r_mm: float, frac: float, col: Color, width: float) -
 func _draw_hud(font: Font, vp: Vector2) -> void:
 	if _stage != Stage.ROUND and _stage != Stage.REST:
 		return   # ready, scan, check, done: no round HUD
-	var play := _phase_name() == "play" or (_stage == Stage.REST \
+	var play: bool = _phase_name() == "play" or (_stage == Stage.REST \
 		and _rounds[_round_idx - 1]["phase"] == "play")
 	var label := "Rest"
 	if _stage == Stage.ROUND:
