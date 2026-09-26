@@ -90,6 +90,22 @@ Because calibration now carries everything, it runs every visit (learning betwee
 would otherwise shift the real success rate: a Day-1 model on a faster Day 3 turns a
 70 % level into ~90 %), and it is preceded by a warm-up round.
 
+Because $\ell_k$ is a percentile of MT, and MT excludes the hold, an apple in play expires at
+$t_{\mathrm{spawn}} + \ell_k + t_{\mathrm{hold}}$ — so a movement with $\mathrm{MT} \le \ell_k$ is always caught.
+
+### 3.4 Geometry lives in table millimetres
+
+$A$ and $W$ are millimetres of hand movement on the table. The screen mapping
+(`WorkspaceConfig`, 4-corner affine) stretches the reach area onto the full screen and may
+scale x and y differently — e.g. 600 × 400 mm onto 1920 × 1080 px gives 3.2 vs 2.7 px/mm,
+18 % apart. So targets are **placed and hit-tested in table space**, never in pixels:
+
+- hand position $\mathbf{h}$ (mm) from the tracker;
+- target centre $\mathbf{c} = \mathbf{h}_0 + A\,(\cos\theta, \sin\theta)$, with $\mathbf{h}_0$ the hand at spawn;
+- inside the catch zone when $\lVert \mathbf{h} - \mathbf{c} \rVert \le W/2$;
+- the screen only draws: $\mathbf{c}$ and the zone outline go through the affine (a circle
+  becomes a slight ellipse when the two scales differ).
+
 ## 4. Pages
 
 ### 4.1 Home (operator)
@@ -211,3 +227,42 @@ sorted MTs, the lifetimes used). Rows flushed as written; files use the ID only.
 - Speed-point thresholds (time limits for 3 / 2 / 1 points).
 - Whether the apple stays code-drawn in the new app (the sprite multi-apple bug in the old
   app was never diagnosed).
+
+## 7. Build plan
+
+### 7.1 Architecture — nothing existing is touched
+
+- New folder `app/clinic/`, own entry scene `app/clinic/clinic_main.tscn`. Run with
+  `--main-scene res://app/clinic/clinic_main.tscn`. **No edits** to `project.godot`,
+  `app/ui/` or `app/platform/`.
+- Reused read-only: `UDPReceiver` (tracker, `is_fresh()` for the pause, `take_samples()` for
+  the 100 Hz log), `WorkspaceConfig` (the affine), `AudioManager`. `AdaptiveManager`,
+  `PatientDB` and `SessionManager` still load as autoloads but are never called.
+- One scene with a screen router: study state lives in its root node, so no new autoloads.
+
+| Module | Job |
+|---|---|
+| `table_space.gd` | mm ↔ screen through the affine; hit test in mm (§3.4) |
+| `study_db.gd` | participants file (separate from `patients.json`), balanced-block orders, study day by visit, day dates and status, resume point |
+| `protocol.gd` | protocol values, lock, version stamp |
+| `difficulty.gd` | sorted MTs per pair → lifetime at $p$ (§3.2) |
+| `visit_logger.gd` | the 4 files per visit, every row flushed |
+| `round_runner.gd` | one engine for warm-up, calibration and play: 1-min rounds, rests, spawn, hold, catch / timeout, points or lifetime |
+| `reach_scan.gd` | 8 spokes, edge detection |
+| screens | Home, Registration, Resume, Settings (4 pages), researcher overlay, calibration check |
+| game visuals | orchard, apple, ballistic fall / bounce / roll, particles, HUD, rest cards, pause, complete card |
+
+### 7.2 Build order — function first, polish last
+
+Each package is pushed and tested on the board before the next.
+
+1. **Skeleton + table space + test drive** — mm grid, circles and live cursor; check with a
+   ruler on the table that 300 mm reads 300 mm. Everything else rests on this.
+2. **Round runner, plain shapes** — 3 pairs, hold, catch / timeout, speed points, 1-min
+   rounds + rests, logger.
+3. **Reach scan.**
+4. **Difficulty + play** — lifetimes from the day's calibration, frozen; calibration check.
+   A Python script replays the logs and checks each pair's real catch rate lands near $p$.
+5. **Study DB + operator screens** — Home, Registration, Resume, Settings.
+6. **Visuals** — orchard, apple, physics, particles, cards (as in the mockup).
+7. **Pilot** → set percentiles, pairs, point thresholds → lock the protocol.
