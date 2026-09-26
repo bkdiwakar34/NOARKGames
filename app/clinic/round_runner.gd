@@ -49,7 +49,6 @@ const EDGE_MARGIN_PX := 12.0
 const REPOSITION_W_MM := 60.0     # the uncounted apple that brings the hand where a pair fits
 const SPOT_GRID_MM := 25.0        # grid for searching reposition spots
 const FEW_SAMPLES := 20           # calibration check flags a pair with fewer apples
-const STREAK := 3                 # this many "Perfect" catches in a row make a streak
 
 const GOLD := Color("FFE27A")
 const AMBER := Color(1.0, 0.75, 0.4)
@@ -92,13 +91,12 @@ var _lifetimes: Array = []          # per pair, s; -1 = not played
 var _play: Array = []               # per pair: {caught, missed}
 
 var _fx: Effects                    # catch / miss feedback (visual only)
-var _life: NightLife                # the moving backdrop; flares on a streak
+var _life: NightLife                # the moving backdrop
 var _snd: Sounds
 var _stage_t: float = 0.0           # seconds since the stage began (card animations)
 var _shown_stage: int = -1
 var _float_t: float = 0.0
 var _spawn_after: float = 0.0       # the next target waits for the catch's hitstop
-var _streak: int = 0                # "Perfect" catches in a row (calibration)
 var _trail: Array = []              # cursor tail: [{pos (px), t (ms)}]
 var _rounds_before: int = 0         # play rounds done before this session (a resumed day)
 var _test: bool = false             # test drive: endless, nothing saved
@@ -667,16 +665,9 @@ func _finish_apple(outcome: String, t: float) -> void:
 		var grade := 0 if in_play else pts
 		_spawn_after = _now() + _fx.catch_at(pos, size, grade)
 		_snd.caught(grade)
-		if not in_play:
-			_streak = _streak + 1 if pts == 3 else 0
-			if _streak > 0 and _streak % STREAK == 0:
-				_life.flare = 1.0
-				_snd.streak()
-				_fx.word(Vector2(get_viewport_rect().size.x * 0.5, 120.0), "Streak ×%d" % _streak, "", GOLD, 30)
 	elif outcome == "missed" or outcome == "timeout":
 		_fx.miss_at(pos, size)
 		_snd.missed()
-		_streak = 0
 
 
 # ── Drawing ───────────────────────────────────────────────────────────────────

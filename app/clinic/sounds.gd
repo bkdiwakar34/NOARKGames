@@ -1,7 +1,7 @@
 extends Node
 
 # Sounds of the clinic game (feedback design 2026-09-26: graded catches as in
-# osu!, a soft miss, a pluck when a hold starts, a streak sparkle, stars).
+# osu!, a soft miss, a pluck when a hold starts, stars).
 # Synthesized at start-up like app/platform/audio_manager.gd (no audio files,
 # no editor import), with players of their own so the patient app's
 # AudioManager is left alone.
@@ -13,7 +13,6 @@ static var _bell: AudioStreamWAV = null    # one bell; pitch sets the grade
 static var _chord: AudioStreamWAV = null   # "Perfect": bell plus a fifth and an octave
 static var _miss: AudioStreamWAV = null
 static var _pluck: AudioStreamWAV = null
-static var _sparkle: AudioStreamWAV = null
 
 var _players: Array = []
 var _next: int = 0
@@ -30,7 +29,6 @@ func _ready() -> void:
 		_chord = _make_bell([1.0, 1.5, 2.0], 1.1)
 		_miss = _make_miss()
 		_pluck = _make_pluck()
-		_sparkle = _make_sparkle()
 
 
 func _play(stream: AudioStream, pitch: float = 1.0, db: float = 0.0) -> void:
@@ -61,10 +59,6 @@ func missed() -> void:
 
 func hold_started() -> void:
 	_play(_pluck, 1.0, -8.0)
-
-
-func streak() -> void:
-	_play(_sparkle, 1.0, -1.0)
 
 
 func star(i: int) -> void:
@@ -133,23 +127,4 @@ func _make_pluck() -> AudioStreamWAV:
 	for i in n:
 		var t := float(i) / RATE
 		s[i] = sin(TAU * 1568.0 * t) * exp(-t * 30.0) * minf(t * 800.0, 1.0) * 0.4
-	return _wav(s)
-
-
-# Quick rising arpeggio for a streak.
-func _make_sparkle() -> AudioStreamWAV:
-	var notes: Array = [1318.5, 1568.0, 2093.0, 2637.0]
-	var step := 0.06
-	var dur := step * float(notes.size()) + 0.5
-	var n := int(RATE * dur)
-	var s := PackedFloat32Array()
-	s.resize(n)
-	for i in n:
-		var t := float(i) / RATE
-		var v := 0.0
-		for k in notes.size():
-			var tk := t - step * float(k)
-			if tk >= 0.0:
-				v += sin(TAU * float(notes[k]) * tk) * exp(-tk * 7.0) * minf(tk * 600.0, 1.0)
-		s[i] = v * 0.22
 	return _wav(s)

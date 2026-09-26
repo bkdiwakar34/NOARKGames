@@ -3,7 +3,8 @@ extends Node2D
 # The moving part of the night backdrop: twinkling stars and a few fireflies
 # drifting low near the sides (never where targets appear, never target-sized).
 # Drawn behind its parent, above night_sky.gd. `flare` (0..1, decays by itself)
-# brightens everything for a moment — the round runner raises it on a streak.
+# brightens everything for a moment; nothing raises it since the catch streak
+# was removed as distracting (2026-09-26).
 
 const Art := preload("res://app/clinic/game_art.gd")
 

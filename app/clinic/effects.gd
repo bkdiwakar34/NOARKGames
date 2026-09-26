@@ -133,31 +133,106 @@ func _aged(items: Array, dt: float, life: float) -> Array:
 	return keep
 
 
+# The jar's inside, where the caught fireflies wander (below the shoulders).
+func _jar_inner() -> Rect2:
+	var w := jar.size.x
+	var h := jar.size.y
+	return Rect2(jar.position + Vector2(0.16 * w, 0.40 * h), Vector2(0.68 * w, 0.46 * h))
+
+
 # Where the i-th firefly in the jar is now: a slow wander inside the glass.
 func _jar_spot(i: int) -> Vector2:
-	var inner := jar.grow(-18.0)
-	inner.position.y += 16.0
-	inner.size.y -= 16.0
-	var fx := 0.5 + 0.42 * sin(_t * (0.6 + 0.07 * float(i % 5)) + float(i) * 1.9)
-	var fy := 0.5 + 0.42 * cos(_t * (0.5 + 0.05 * float(i % 7)) + float(i) * 2.7)
+	var inner := _jar_inner()
+	var fx := 0.5 + 0.45 * sin(_t * (0.6 + 0.07 * float(i % 5)) + float(i) * 1.9)
+	var fy := 0.5 + 0.45 * cos(_t * (0.5 + 0.05 * float(i % 7)) + float(i) * 2.7)
 	return inner.position + Vector2(fx, fy) * inner.size
 
 
-# The jar behind the flying fireflies; its glow grows with what it holds.
+# The jar's glass outline: neck, curved shoulders, straight sides, rounded
+# bottom (clockwise from the neck's left edge), in screen pixels.
+func _jar_outline() -> PackedVector2Array:
+	var o := jar.position
+	var w := jar.size.x
+	var h := jar.size.y
+	var pts := PackedVector2Array()
+	var neck_l := o + Vector2(0.22 * w, 0.17 * h)
+	var neck_r := o + Vector2(0.78 * w, 0.17 * h)
+	var side_l := o + Vector2(0.03 * w, 0.36 * h)
+	var side_r := o + Vector2(0.97 * w, 0.36 * h)
+	var r := 0.16 * w                       # bottom corner radius
+	pts.append(neck_l)
+	for i in range(1, 9):                   # left shoulder: a quadratic curve
+		var t := float(i) / 8.0
+		var ctrl := Vector2(side_l.x, neck_l.y + 0.02 * h)
+		pts.append(neck_l.lerp(ctrl, t).lerp(ctrl.lerp(side_l, t), t))
+	pts.append(Vector2(side_l.x, o.y + h - r))
+	for i in range(1, 8):                   # bottom-left corner (screen y points down)
+		var a := PI - PI * 0.5 * float(i) / 7.0
+		pts.append(Vector2(side_l.x + r, o.y + h - r) + Vector2(cos(a), sin(a)) * r)
+	for i in range(0, 8):                   # bottom-right corner, ending on the right side
+		var a := PI * 0.5 - PI * 0.5 * float(i) / 7.0
+		pts.append(Vector2(side_r.x - r, o.y + h - r) + Vector2(cos(a), sin(a)) * r)
+	pts.append(side_r)
+	for i in range(1, 9):                   # right shoulder
+		var t := float(i) / 8.0
+		var ctrl := Vector2(side_r.x, neck_r.y + 0.02 * h)
+		pts.append(side_r.lerp(ctrl, t).lerp(ctrl.lerp(neck_r, t), t))
+	return pts
+
+
+# A glass jar: shadow, faint glass body with thicker edges and a heavy base,
+# soft highlights, the fireflies' glow inside, a ribbed metal lid. Its glow
+# grows with what it holds.
 func draw_jar(ci: CanvasItem) -> void:
 	var tex := Art.glow()
+	var o := jar.position
+	var w := jar.size.x
+	var h := jar.size.y
 	var fill := clampf(float(count) / 15.0, 0.0, 1.0)
-	Art.blit(ci, tex, jar.get_center(), jar.size * (1.6 + 0.8 * fill), Color(Art.FF_GLOW, 0.10 + 0.35 * fill))
-	ci.draw_style_box(Art._box(Color(0.75, 0.9, 1.0, 0.07), 22, Color(1, 1, 1, 0.28), 2),
-		Rect2(jar.position + Vector2(0.0, 14.0), jar.size - Vector2(0.0, 14.0)))
+	var inner := _jar_inner()
+	# Shadow on the ground and the light the fireflies throw around the jar.
+	ci.draw_set_transform(o + Vector2(0.5 * w, h + 3.0), 0.0, Vector2(0.62 * w, 7.0))
+	ci.draw_circle(Vector2.ZERO, 1.0, Color(0.0, 0.02, 0.04, 0.45))
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if count > 0:
+		Art.blit(ci, tex, inner.get_center(), jar.size * (1.5 + 1.2 * fill), Color(Art.FF_GLOW, 0.08 + 0.3 * fill))
+	# Glass body: barely tinted, the fireflies' light inside it.
+	var body := _jar_outline()
+	ci.draw_colored_polygon(body, Color(0.75, 0.88, 1.0, 0.06))
+	if count > 0:
+		Art.blit(ci, tex, inner.get_center(), inner.size * 1.3, Color(Art.FF_GLOW, 0.18 + 0.4 * fill))
 	for i in mini(count, JAR_SHOWN):
 		var blink := 0.55 + 0.45 * sin(_t * 2.3 + float(i) * 1.3)
-		Art.blit(ci, tex, _jar_spot(i), Vector2(22.0, 22.0), Color(Art.FF_GLOW, blink))
+		Art.blit(ci, tex, _jar_spot(i), Vector2(20.0, 20.0), Color(Art.FF_GLOW, blink))
 		Art.blit(ci, Art.disc(), _jar_spot(i), Vector2(4.0, 4.0), Color(Art.FF_CORE, blink))
-	ci.draw_line(jar.position + Vector2(14.0, 34.0), jar.position + Vector2(14.0, jar.size.y - 22.0),
-		Color(1, 1, 1, 0.22), 3.0, true)
-	ci.draw_style_box(Art._box(Color("3C4658"), 6, Color(1, 1, 1, 0.18), 1),
-		Rect2(jar.position + Vector2(10.0, 0.0), Vector2(jar.size.x - 20.0, 16.0)))
+	# Thick glass at the edges and the base.
+	var closed := body.duplicate()
+	closed.append(body[0])
+	ci.draw_polyline(closed, Color(0.8, 0.9, 1.0, 0.10), 7.0, true)
+	ci.draw_polyline(closed, Color(1.0, 1.0, 1.0, 0.42), 1.6, true)
+	ci.draw_set_transform(o + Vector2(0.5 * w, h - 7.0), 0.0, Vector2(0.4 * w, 4.5))
+	ci.draw_circle(Vector2.ZERO, 1.0, Color(0.85, 0.95, 1.0, 0.12))
+	ci.draw_arc(Vector2.ZERO, 1.0, 0.15 * PI, 0.85 * PI, 24, Color(1, 1, 1, 0.35), 0.35, true)
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Highlights: a long soft streak on the left, a short one on the right.
+	Art.blit(ci, tex, o + Vector2(0.17 * w, 0.62 * h), Vector2(12.0, 0.62 * h), Color(1, 1, 1, 0.30))
+	ci.draw_line(o + Vector2(0.15 * w, 0.42 * h), o + Vector2(0.15 * w, 0.82 * h), Color(1, 1, 1, 0.45), 2.2, true)
+	Art.blit(ci, tex, o + Vector2(0.86 * w, 0.52 * h), Vector2(7.0, 0.26 * h), Color(1, 1, 1, 0.22))
+	# The neck's opening, seen slightly from above.
+	ci.draw_set_transform(o + Vector2(0.5 * w, 0.17 * h), 0.0, Vector2(0.28 * w, 3.5))
+	ci.draw_arc(Vector2.ZERO, 1.0, 0.0, TAU, 32, Color(1, 1, 1, 0.4), 0.45, true)
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Ribbed metal lid: light on top, dark underneath.
+	var lid := Rect2(o + Vector2(0.17 * w, 0.0), Vector2(0.66 * w, 0.15 * h))
+	ci.draw_polygon(PackedVector2Array([lid.position, Vector2(lid.end.x, lid.position.y), lid.end,
+		Vector2(lid.position.x, lid.end.y)]),
+		PackedColorArray([Color("B8C0CC"), Color("B8C0CC"), Color("4A5260"), Color("4A5260")]))
+	for i in 7:
+		var x := lid.position.x + lid.size.x * (0.1 + 0.13 * float(i))
+		ci.draw_line(Vector2(x, lid.position.y + 3.0), Vector2(x, lid.end.y - 2.0), Color(0.15, 0.17, 0.22, 0.35), 1.2, true)
+	ci.draw_line(lid.position + Vector2(3.0, 1.5), Vector2(lid.end.x - 3.0, lid.position.y + 1.5),
+		Color(1, 1, 1, 0.55), 1.5, true)
+	ci.draw_rect(Rect2(lid.position.x - 2.0, lid.end.y - 3.0, lid.size.x + 4.0, 4.0), Color("3A414D"))
 
 
 func draw(ci: CanvasItem) -> void:
