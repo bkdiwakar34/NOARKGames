@@ -256,13 +256,14 @@ sorted MTs, the lifetimes used). Rows flushed as written; files use the ID only.
 
 Each package is pushed and tested on the board before the next.
 
-1. **Skeleton + table space + test drive** — mm grid, circles and live cursor; check with a
-   ruler on the table that 300 mm reads 300 mm. Everything else rests on this.
-2. **Round runner, plain shapes** — 3 pairs, hold, catch / timeout, speed points, 1-min
-   rounds + rests, logger.
-3. **Reach scan.**
-4. **Difficulty + play** — lifetimes from the day's calibration, frozen; calibration check.
+1. **Skeleton + table space + round runner, plain shapes** — 3 pairs, hold, catch /
+   timeout, speed points, 1-min rounds + rests, logger. Check: the drawn circle lights up
+   exactly when the cursor is inside it (drawing and mm hit test agree). No ruler test —
+   the hit test uses tracker numbers only; the tracker's scale is the OptiTrack
+   validation's job.
+2. **Reach scan.**
+3. **Difficulty + play** — lifetimes from the day's calibration, frozen; calibration check.
    A Python script replays the logs and checks each pair's real catch rate lands near $p$.
-5. **Study DB + operator screens** — Home, Registration, Resume, Settings.
-6. **Visuals** — orchard, apple, physics, particles, cards (as in the mockup).
-7. **Pilot** → set percentiles, pairs, point thresholds → lock the protocol.
+4. **Study DB + operator screens** — Home, Registration, Resume, Settings.
+5. **Visuals** — orchard, apple, physics, particles, cards (as in the mockup).
+6. **Pilot** → set percentiles, pairs, point thresholds → lock the protocol.
