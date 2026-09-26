@@ -21,68 +21,65 @@ var _error: Label
 
 func _ready() -> void:
 	var p := UI.page(self, "Reach Study")
+	# The save button sits in the top bar as well, so it is on screen whatever
+	# the window height (the logical screen is only 648 px tall).
 	var bar: HBoxContainer = p["bar"]
-	bar.add_child(UI.button("‹  Participants", func(): done.emit(), "ghost"))
+	bar.add_child(UI.button("Cancel", func(): done.emit(), "ghost"))
+	bar.add_child(UI.button("Register participant", _register, "primary"))
 
-	var content: VBoxContainer = p["content"]
-	var centre := UI.row(content, 0)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	p["content"].add_child(scroll)
+	var centre := HBoxContainer.new()
+	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(centre)
 	UI.spacer(centre)
 	var holder := VBoxContainer.new()
-	holder.custom_minimum_size = Vector2(720.0, 0.0)
+	holder.custom_minimum_size = Vector2(760.0, 0.0)
 	centre.add_child(holder)
 	UI.spacer(centre)
 
-	var c := UI.card(holder, 34.0, 20)
-	var head := VBoxContainer.new()
-	head.add_theme_constant_override("separation", 4)
-	head.add_child(UI.label("New participant", 26, UI.INK, true))
-	head.add_child(UI.label("Healthy-participant study · %d visits" % StudyDB.DAYS, 15, UI.MUTED))
-	c.add_child(head)
+	var c := UI.card(holder, 28.0, 14)
+	var head := UI.row(c, 12)
+	head.add_child(UI.label("New participant", 24, UI.INK, true))
+	head.add_child(UI.label("Healthy-participant study · %d visits" % StudyDB.DAYS, 14, UI.MUTED))
 
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 20)
-	grid.add_theme_constant_override("v_separation", 18)
-	c.add_child(grid)
-
+	var row1 := UI.row(c, 16)
 	_id = UI.field(db.next_id(), 0.0)
-	_add(grid, "Participant ID", _id, "Next free ID, filled in for you")
+	_add(row1, "Participant ID", _id, 1.0)
 	_name = UI.field("", 0.0)
-	_name.placeholder_text = "First and last name"
-	_add(grid, "Full name", _name, "Stays on this device only")
+	_name.placeholder_text = "First and last name (stays on this device)"
+	_name.text_submitted.connect(func(_t): _register())
+	_add(row1, "Full name", _name, 2.0)
+
+	var row2 := UI.row(c, 16)
 	_age = SpinBox.new()
 	_age.min_value = 18
 	_age.max_value = 100
 	_age.value = 30
-	_age.custom_minimum_size = Vector2(0.0, 46.0)
-	_age.get_line_edit().custom_minimum_size = Vector2(0.0, 46.0)
-	_add(grid, "Age", _age, "")
-	_add(grid, "Gender", UI.segmented(["Female", "Male", "Other"], func(o): _gender = o), "")
-	_add(grid, "Dominant hand", UI.segmented(["Left", "Right"], func(o): _hand = o), "")
+	_age.get_line_edit().custom_minimum_size = Vector2(0.0, 42.0)
+	_add(row2, "Age", _age, 0.6)
+	_add(row2, "Gender", UI.segmented(["Female", "Male", "Other"], func(o): _gender = o), 1.5)
+	_add(row2, "Dominant hand", UI.segmented(["Left", "Right"], func(o): _hand = o), 1.0)
 
-	UI.note_box(c, "Level order is assigned for you. On save, the app gives this participant the next "
-		+ "order from a balanced block of the 6 possible orders. It is stored with the data and "
-		+ "never shown on screen.")
+	UI.note_box(c, "Level order is assigned for you on save (the next order from a balanced block "
+		+ "of the 6). It is stored with the data and never shown on screen.")
 	_error = UI.label("", 15, UI.ACCENT, true, true)
 	c.add_child(_error)
-	var buttons := UI.row(c, 12)
-	UI.spacer(buttons)
-	buttons.add_child(UI.button("Cancel", func(): done.emit()))
-	buttons.add_child(UI.button("Register participant", _register, "primary"))
 	_name.grab_focus()
 
 
-# One form cell: caption above, the control, an optional hint below.
-func _add(grid: GridContainer, caption: String, control: Control, hint: String) -> void:
+# One form cell: caption above the control; ratio = its share of the row width.
+func _add(parent: HBoxContainer, caption: String, control: Control, ratio: float) -> void:
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", 5)
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.size_flags_stretch_ratio = ratio
 	v.add_child(UI.label(caption, 14, UI.INK2, true))
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_child(control)
-	if hint != "":
-		v.add_child(UI.label(hint, 13, UI.MUTED))
-	grid.add_child(v)
+	parent.add_child(v)
 
 
 func _register() -> void:
