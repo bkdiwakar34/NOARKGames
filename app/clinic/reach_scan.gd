@@ -156,17 +156,17 @@ func draw(ci: CanvasItem, _font: Font) -> void:
 		ci.draw_line(ring[i], ring[(i + 1) % ring.size()], Color(1.0, 1.0, 1.0, ring_a), 3.0, true)
 
 	if _step in [Step.OUT, Step.WAIT, Step.BACK]:
-		# The light to follow: a firefly with a short trail. Sizes 1.5x those of
-		# the old 1152-wide canvas, so it keeps its size on screen.
+		# The light to follow: a firefly with a short trail. Sizes 1.67x those of
+		# the old stretched 1152-wide canvas, so it keeps its size on screen.
 		var dir := -1.0 if _step == Step.BACK else 1.0
 		for k in [4, 3, 2, 1]:
 			var g := _ts.mm_to_screen(home + _u * (_light - dir * 8.0 * float(k)))
-			Art.blit(ci, Art.glow(), g, Vector2.ONE * (45.0 - 6.0 * float(k)), Color(Art.FF_GLOW, 0.12 * float(5 - k)))
+			Art.blit(ci, Art.glow(), g, Vector2.ONE * (50.0 - 6.7 * float(k)), Color(Art.FF_GLOW, 0.12 * float(5 - k)))
 		var p := _ts.mm_to_screen(home + _u * _light)
 		var pulse := 1.0 + 0.12 * sin(now * 5.0)
-		Art.blit(ci, Art.glow(), p, Vector2(135.0, 135.0) * pulse, Color(Art.FF_GLOW, 0.55))
-		Art.blit(ci, Art.orb(), p, Vector2(39.0, 39.0))
-		Art.blit(ci, Art.disc(), p, Vector2(15.0, 15.0), Art.FF_CORE)
+		Art.blit(ci, Art.glow(), p, Vector2(150.0, 150.0) * pulse, Color(Art.FF_GLOW, 0.55))
+		Art.blit(ci, Art.orb(), p, Vector2(43.0, 43.0))
+		Art.blit(ci, Art.disc(), p, Vector2(17.0, 17.0), Art.FF_CORE)
 
 	# Progress: one dot per spoke in a dark pill, and the instruction below it.
 	var n := Protocol.REACH_SPOKES

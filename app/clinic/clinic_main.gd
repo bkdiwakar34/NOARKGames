@@ -31,6 +31,19 @@ func _ready() -> void:
 	Protocol.load_saved()
 	_db = StudyDB.new()
 	_show_home()
+	get_tree().create_timer(1.0).timeout.connect(_print_display)   # after fullscreen settles
+
+
+# One terminal line to check the picture is 1 : 1: canvas = window = screen,
+# desktop scale 1. If text is soft while this reads 1 : 1, the desktop is
+# rescaling Godot. (screen_get_size is used for this check only, not layout.)
+func _print_display() -> void:
+	var w := get_window()
+	var screen := DisplayServer.screen_get_size(w.current_screen)
+	var canvas := get_viewport().get_visible_rect().size
+	print("Clinic display: screen %dx%d, window %dx%d, canvas %dx%d, desktop scale %.2f, %s" % [
+		screen.x, screen.y, w.size.x, w.size.y, int(canvas.x), int(canvas.y),
+		DisplayServer.screen_get_scale(w.current_screen), DisplayServer.get_name()])
 
 
 func _show(screen: Node) -> void:

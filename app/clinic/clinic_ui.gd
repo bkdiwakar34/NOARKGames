@@ -8,12 +8,14 @@
 # and set `theme = UI.theme()` on their root Control.
 #
 # Canvas: the project lays out on 1152 x 648, stretched 1.67x to the 1920 x 1080
-# screen — everything came out 1.5x the mockup and soft. The clinic app lays out
-# on CANVAS instead: 1.11x stretch, so those sizes land at the mockup's own size.
-# The installer tools (4-corner mapping, validation recorder) still assume the
-# project's canvas, so Settings switches back while one is open, and the
-# 4-corner mapping stays in project-canvas pixels (table_space.gd rescales it).
-const CANVAS := Vector2i(1728, 972)
+# screen — everything came out 1.5x the mockup, and soft: at any stretch other
+# than 1.000 a canvas position like y = 100 lands between screen pixels
+# (y = 111.1 at 1.11x), so every letter edge is split over two pixel rows. So the
+# clinic app is not stretched at all: one canvas pixel is one screen pixel and
+# the canvas is the screen (1920 x 1080 here; these sizes come out at 0.9x the
+# mockup). The installer tools (4-corner mapping, validation recorder) still
+# assume the project's canvas, so Settings switches back while one is open, and
+# the 4-corner mapping stays in project-canvas pixels (table_space.gd rescales it).
 
 const BG := Color("F5F4F0")
 const CARD := Color("FFFFFF")
@@ -105,25 +107,18 @@ static func project_canvas() -> Vector2i:
 		int(ProjectSettings.get_setting("display/window/size/viewport_height")))
 
 
-# clinic = true: the clinic app's CANVAS; false: the project's (installer tools).
-# The clinic canvas is stretched by one factor in both directions (EXPAND: a
-# window of another shape shows a little more canvas instead). The project's
-# IGNORE stretches x and y separately, and text drawn for one scale then gets
-# resampled in the other direction — the blur seen on the board (2026-09-26).
-static var _project_aspect: Window.ContentScaleAspect = Window.CONTENT_SCALE_ASPECT_IGNORE
+# clinic = true: no stretch, the canvas is the window, 1 : 1 (see "Canvas" at
+# the top); false: the project's stretched 1152 x 648 (installer tools).
+static var _project_mode: Window.ContentScaleMode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 static var _saved: bool = false
 
 static func use_canvas(clinic: bool) -> void:
 	var root := (Engine.get_main_loop() as SceneTree).root
 	if not _saved:
-		_project_aspect = root.content_scale_aspect
+		_project_mode = root.content_scale_mode
 		_saved = true
-	if clinic:
-		root.content_scale_size = CANVAS
-		root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
-	else:
-		root.content_scale_size = project_canvas()
-		root.content_scale_aspect = _project_aspect
+	root.content_scale_size = project_canvas()
+	root.content_scale_mode = Window.CONTENT_SCALE_MODE_DISABLED if clinic else _project_mode
 
 
 static func _font(path: String) -> Font:

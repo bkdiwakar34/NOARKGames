@@ -290,11 +290,12 @@ Each package is pushed and tested on the board before the next.
    cursor with a tail.
 6. **Pilot** → set percentiles, pairs, point thresholds → lock the protocol.
 
-Done 2026-09-26 (all tested on the board). Layout note: the clinic app draws on a
-**1728 × 972** logical canvas (`clinic_ui.gd`, `CANVAS`), fullscreen and stretched
-1.11× — the same factor across and down — to the 1920 × 1080 monitor, so operator
-sizes come out at the mockup's. (A maximized window is ~1920 × 1020; stretching x and
-y by different factors blurred all text.) The project's own
-1152 × 648 (stretched 1.67×) made everything big and soft. The 4-corner mapping stays
-in 1152 × 648 pixels: `table_space.gd` scales it by 1728 / 1152 = 1.5, and Settings
-switches back to 1152 × 648 while an installer tool is open.
+Done 2026-09-26 (all tested on the board). Layout note: the clinic app runs
+fullscreen and **unstretched** — one canvas pixel is one screen pixel, the canvas is
+the screen (1920 × 1080) — see `clinic_ui.gd`, "Canvas". Any stretch other than 1.000
+blurs text: the project's 1152 × 648 stretched 1.67× (also 1.5× too big), and a
+1728 × 972 canvas at 1.11× was still soft, because positions land between screen
+pixels. Operator sizes come out at 0.9× the mockup. The 4-corner mapping stays in
+1152 × 648 pixels: `table_space.gd` scales it by screen / 1152 × 648 (= 1.67), and
+Settings switches back to the stretched 1152 × 648 while an installer tool is open.
+At start the terminal prints one line (`Clinic display: …`) to confirm 1 : 1.
