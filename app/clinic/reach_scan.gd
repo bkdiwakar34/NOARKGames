@@ -15,6 +15,7 @@ extends RefCounted
 
 const Protocol := preload("res://app/clinic/protocol.gd")
 const TableSpace := preload("res://app/clinic/table_space.gd")
+const Art := preload("res://app/clinic/game_art.gd")
 
 const HOME_R_MM := 30.0
 const HOME_HOLD_S := 1.0
@@ -142,28 +143,46 @@ func csv_rows() -> Array:
 	return rows
 
 
-func draw(ci: CanvasItem, font: Font) -> void:
-	var ring := _ts.circle_outline(home, HOME_R_MM)
-	var closed := ring.duplicate()
-	closed.append(ring[0])
+# The mockup's look: a pulsing dashed ring at the centre, a glowing light with
+# a short trail, eight progress dots and a "Follow the light" pill.
+func draw(ci: CanvasItem, _font: Font) -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	var ring := _ts.circle_outline(home, HOME_R_MM, 48)
 	var in_ring := _hand.distance_to(home) <= HOME_R_MM
 	if _step == Step.HOME and in_ring:
 		ci.draw_colored_polygon(ring, Color(0.35, 0.85, 0.45, 0.35))
-	ci.draw_polyline(closed, Color(1.0, 1.0, 1.0, 0.85), 3.0, true)
+	var ring_a := 0.55 + 0.35 * sin(now * 2.6)
+	for i in range(0, ring.size(), 2):   # dashed: every other segment
+		ci.draw_line(ring[i], ring[(i + 1) % ring.size()], Color(1.0, 1.0, 1.0, ring_a), 3.0, true)
 
 	if _step in [Step.OUT, Step.WAIT, Step.BACK]:
+		var dir := -1.0 if _step == Step.BACK else 1.0
+		for k in [3, 2, 1]:   # trail of fading ghosts behind the light
+			var g := _ts.mm_to_screen(home + _u * (_light - dir * 9.0 * float(k)))
+			ci.draw_circle(g, 11.0 - 2.0 * float(k), Color(1.0, 0.89, 0.5, 0.16 * float(4 - k)))
 		var p := _ts.mm_to_screen(home + _u * _light)
-		ci.draw_circle(p, 30.0, Color(1.0, 0.85, 0.35, 0.18))
-		ci.draw_circle(p, 20.0, Color(1.0, 0.85, 0.35, 0.35))
-		ci.draw_circle(p, 12.0, Color("FFC23D"))
+		var pulse := 1.0 + 0.12 * sin(now * 5.0)
+		for k in 6:
+			ci.draw_circle(p, (38.0 - 5.0 * float(k)) * pulse, Color(1.0, 0.84, 0.35, 0.07 + 0.03 * float(k)))
+		ci.draw_circle(p, 13.0, Color("FFE27A"))
+		ci.draw_circle(p + Vector2(-3.0, -3.0), 6.0, Color("FFFDF0"))
 
-	# Progress: one dot per spoke along the top.
+	# Progress: one dot per spoke in a dark pill, and the instruction below it.
 	var n := Protocol.REACH_SPOKES
-	var x0 := _vp.x * 0.5 - 14.0 * float(n - 1)
+	var w := 26.0 * float(n) + 14.0
+	var pill := Rect2(_vp.x * 0.5 - w * 0.5, 16.0, w, 34.0)
+	Art.draw_pill(ci, pill, Color(0.13, 0.11, 0.08, 0.36))
 	for i in n:
-		var c: Color = Color("FFC23D") if i < _spoke else Color(1.0, 1.0, 1.0, 0.3)
-		ci.draw_circle(Vector2(x0 + 28.0 * float(i), 36.0), 8.0, c)
-
+		var c := Vector2(pill.position.x + 20.0 + 26.0 * float(i), pill.get_center().y)
+		if i < _spoke:
+			ci.draw_circle(c, 7.0, Art.GOLD)
+		elif i == _spoke and _step != Step.HOME:
+			ci.draw_circle(c, 7.0 + 2.0 * sin(now * 5.0), Color(1.0, 0.89, 0.48, 0.5))
+			ci.draw_circle(c, 6.0, Color("FFF4DC"))
+		else:
+			ci.draw_circle(c, 6.0, Color(1.0, 1.0, 1.0, 0.3))
 	var msg: String = "Hold the cursor in the ring to start" if _step == Step.HOME else "Follow the light"
-	ci.draw_string(font, Vector2(0.0, 92.0), msg, HORIZONTAL_ALIGNMENT_CENTER, _vp.x, 30,
-		Color(1.0, 1.0, 1.0, 0.92))
+	var tw := Art.font().get_string_size(msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x + 44.0
+	var tp := Rect2(_vp.x * 0.5 - tw * 0.5, 60.0, tw, 42.0)
+	Art.draw_pill(ci, tp, Color(0.13, 0.11, 0.08, 0.45))
+	Art.text(ci, tp.get_center(), msg, 22, Color.WHITE)

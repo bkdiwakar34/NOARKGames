@@ -1,7 +1,7 @@
 extends Node2D
 
-# One clinic visit with plain shapes (docs/clinic_study_interface.md §3-4;
-# build plan §7.2, packages 1-3):
+# One clinic visit (docs/clinic_study_interface.md §3-5; build plan §7.2,
+# packages 1-3 and 5 for the look: orchard.gd, game_art.gd, effects.gd):
 #   reach scan -> warm-up -> calibration rounds -> calibration check -> play rounds.
 # One apple at a time at one of the three fixed pairs; hold inside it for HOLD_S
 # to catch it. Calibration rewards speed with points and waits up to the cap;
@@ -35,16 +35,18 @@ const TableSpace := preload("res://app/clinic/table_space.gd")
 const VisitLogger := preload("res://app/clinic/visit_logger.gd")
 const ReachScan := preload("res://app/clinic/reach_scan.gd")
 const Difficulty := preload("res://app/clinic/difficulty.gd")
+const Art := preload("res://app/clinic/game_art.gd")
+const Effects := preload("res://app/clinic/effects.gd")
+const Orchard := preload("res://app/clinic/orchard.gd")
 
 const TIMEOUT_GRACE_S := 0.15     # samples reach Godot ~20 ms after capture; wait for them
 const EDGE_MARGIN_PX := 12.0
-const POP_S := 0.8                # how long a "+3" floats
 const REPOSITION_W_MM := 60.0     # the uncounted apple that brings the hand where a pair fits
 const SPOT_GRID_MM := 25.0        # grid for searching reposition spots
 const FEW_SAMPLES := 20           # calibration check flags a pair with fewer apples
+const APPLE_FILL := 0.80          # apple radius / catch-circle radius (the circle is the target)
 
-const BG := Color("1E221D")
-const INK := Color(1.0, 1.0, 1.0, 0.92)
+const WHITE := Color(1.0, 1.0, 1.0, 0.95)
 const GOLD := Color("FFC23D")
 const AMBER := Color(1.0, 0.75, 0.4)
 
@@ -78,15 +80,24 @@ var _repositions: int = 0           # reposition apples during calibration round
 var _round_points: int = 0
 var _round_caught: int = 0          # play: pair apples caught / missed this round
 var _round_missed: int = 0
+var _round_hits: int = 0            # calibration: apples that earned points this round
 var _calib: Array = []              # per pair, this attempt's calibration: {caught, timeouts, mts}
 var _lifetimes: Array = []          # per pair, s; -1 = not played
 var _play: Array = []               # per pair: {caught, missed}
-var _pops: Array = []               # floating "+3": {pos (mm), t0, text}
+
+var _fx: Effects                    # visual-only physics and particles
+var _stage_t: float = 0.0           # seconds since the stage began (card animations)
+var _shown_stage: int = -1
+var _trail: Array = []              # cursor's recent screen positions
+var _leaf_t: float = 0.0
 
 
 func _ready() -> void:
 	var vp := get_viewport_rect().size
 	_ts = TableSpace.new(vp)
+	var backdrop := Orchard.new()
+	add_child(backdrop)
+	_fx = Effects.new(vp)
 	for k in Protocol.PAIRS.size():
 		_play.append({"caught": 0, "missed": 0})
 	_reset_calibration()
@@ -216,8 +227,20 @@ func _process(delta: float) -> void:
 				_stage_left -= delta
 				if _stage_left <= 0.0:
 					_start_round()
-	var now := _now()
-	_pops = _pops.filter(func(p): return now - float(p["t0"]) < POP_S)
+	# Visuals only from here.
+	if int(_stage) != _shown_stage:
+		_shown_stage = int(_stage)
+		_stage_t = 0.0
+	_stage_t += delta
+	_fx.update(delta)
+	if _stage == Stage.DONE:
+		_leaf_t += delta
+		if _leaf_t > 0.25:
+			_leaf_t = 0.0
+			_fx.leaf_shower(get_viewport_rect().size)
+	_trail.push_front(_ts.mm_to_screen(_hand))
+	if _trail.size() > 7:
+		_trail.pop_back()
 	queue_redraw()
 
 
@@ -291,6 +314,7 @@ func _start_round() -> void:
 	_round_points = 0
 	_round_caught = 0
 	_round_missed = 0
+	_round_hits = 0
 	_apple_n = 0
 	_pair_bag = []
 
@@ -572,7 +596,7 @@ func _finish_apple(outcome: String, t: float) -> void:
 	elif caught and _phase_name() != "play":
 		pts = Protocol.points_for(mt)
 		_round_points += pts
-		_pops.append({"pos": a["centre"], "t0": _now(), "text": "+%d" % pts})
+		_round_hits += 1
 	if in_calib:
 		if caught:
 			_calib[k]["caught"] += 1
@@ -592,146 +616,437 @@ func _finish_apple(outcome: String, t: float) -> void:
 		("%.6f" % a["hold_start"]) if caught else "",
 		outcome, "%.6f" % t, ("%.4f" % mt) if caught else "", pts,
 	])
+	# Visual only (already logged): a caught apple flies into the basket, a
+	# missed one falls and rolls away; an aborted one just goes.
+	var pos := _ts.mm_to_screen(centre)
+	var r := _apple_radius(float(a["w_mm"]))
+	if caught:
+		_fx.catch_at(pos, r, _apple_tones(a, t), ("+%d" % pts) if pts > 0 else "")
+	elif outcome == "missed" or outcome == "timeout":
+		_fx.miss_at(pos, r)
 
 
 # ── Drawing ───────────────────────────────────────────────────────────────────
 
 func _draw() -> void:
 	var vp := get_viewport_rect().size
-	var font: Font = ThemeDB.fallback_font
-	draw_rect(Rect2(Vector2.ZERO, vp), BG)
-	if _stage == Stage.SCAN:
-		_scan.draw(self, font)
+	# The orchard backdrop is a child drawn behind this node (orchard.gd).
+	_fx.draw_basket(self)
 	if _stage == Stage.ROUND and not _paused and not _apple.is_empty():
 		_draw_apple()
+	_fx.draw(self)
+	_fx.draw_basket_front(self)
+	if _stage == Stage.SCAN:
+		_scan.draw(self, Art.font())
+	_draw_cursor()
+	_draw_hud(vp)
 	if _stage == Stage.ROUND and _no_fit:
-		_text(font, Vector2(vp.x * 0.5, vp.y * 0.5), "None of the pairs fits this reach area",
-			30, AMBER, vp.x)
-	for p in _pops:
-		var age: float = _now() - float(p["t0"])
-		var pos := _ts.mm_to_screen(p["pos"]) + Vector2(0.0, -50.0 - 70.0 * age)
-		_text(font, pos, p["text"], 40, Color(GOLD, 1.0 - age / POP_S), 200.0)
-	var cur := _ts.mm_to_screen(_hand)
-	draw_circle(cur, 11.0, Color(0.0, 0.0, 0.0, 0.5))
-	draw_circle(cur, 8.0, Color.WHITE)
-	_draw_hud(font, vp)
+		_label(vp * 0.5, "None of the pairs fits this reach area", 24, AMBER)
+	if _stage == Stage.ROUND and _phase_name() == "play" and bool(config.get("show_check", false)):
+		_draw_overlay(vp)
 	match _stage:
 		Stage.REST:
-			_draw_card(font, vp, _rest_lines())
+			_draw_rest(vp)
 		Stage.CHECK:
-			_draw_check(font, vp)
+			_draw_check(vp)
 		Stage.DONE:
-			_draw_summary(font, vp)
+			_draw_complete(vp)
 	if _paused:
-		_draw_card(font, vp, ["Tracker lost", "Place the handle back on the table"])
+		_draw_pause(vp)
 	if not _ts.mapped:
-		_text(font, Vector2(20.0, vp.y - 20.0),
+		draw_string(Art.font(), Vector2(16.0, vp.y - 12.0),
 			"Screen mapping not set: drawing at 3 px/mm. Run the 4-corner mapping in the installer.",
-			18, AMBER)
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, AMBER)
+
+
+# Text with a soft dark shadow, readable on the sky and the grass.
+func _label(pos: Vector2, s: String, size: int, col: Color) -> void:
+	Art.text(self, pos + Vector2(0.0, 2.0), s, size, Color(0.0, 0.0, 0.0, 0.35))
+	Art.text(self, pos, s, size, col)
+
+
+func _apple_radius(w_mm: float) -> float:
+	var ppm := _ts.px_per_mm()
+	return 0.5 * w_mm * 0.5 * (ppm.x + ppm.y) * APPLE_FILL
+
+
+# Calibration apples ripen from gold (3 points) to red (1 point) as time passes;
+# play apples are red.
+func _apple_tones(a: Dictionary, now: float) -> Array:
+	if a["play"]:
+		return Art.RED
+	var e := clampf((now - float(a["spawn_time"])) / float(Protocol.POINT_LIMITS_S[1]), 0.0, 1.0)
+	var out: Array = []
+	for i in 3:
+		var from: Color = Art.RIPE_GOLD[i]
+		out.append(from.lerp(Art.RED[i], e))
+	return out
 
 
 func _draw_apple() -> void:
 	var centre: Vector2 = _apple["centre"]
 	var w: float = _apple["w_mm"]
+	var now := _now()
+	var age := now - float(_apple["spawn_time"])
+	var c := _ts.mm_to_screen(centre)
+	var r := _apple_radius(w)
 	var inside := TableSpace.inside(_hand, centre, w)
-	var ring := _ts.circle_outline(centre, w * 0.5)
+	# The catch circle is the target (exactly W wide in table mm); the apple sits in it.
+	var ring := _ts.circle_outline(centre, w * 0.5, 56)
 	var closed := ring.duplicate()
 	closed.append(ring[0])
-	draw_colored_polygon(ring, Color(0.35, 0.85, 0.45, 0.35) if inside else Color(1.0, 1.0, 1.0, 0.10))
-	draw_polyline(closed, Color(0.45, 0.95, 0.55) if inside else INK, 3.0, true)
+	draw_set_transform(c + Vector2(0.0, r * 1.2), 0.0, Vector2(r * 0.85, r * 0.2))
+	draw_circle(Vector2.ZERO, 1.0, Color(0.1, 0.15, 0.05, 0.22))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var pulse := 0.5 + 0.5 * sin(now * 3.5)
+	if inside:
+		draw_colored_polygon(ring, Color(GOLD, 0.16))
+	draw_polyline(closed, Color(1.0, 1.0, 1.0, 0.08 + 0.12 * pulse), 10.0, true)
+	draw_polyline(closed, GOLD if inside else WHITE, 4.0 if inside else 3.0, true)
+	var s := 1.0   # pop in: grow to 112 %, settle to 100 %
+	if age < 0.18:
+		s = age / 0.18 * 1.12
+	elif age < 0.32:
+		s = lerpf(1.12, 1.0, (age - 0.18) / 0.14)
+	Art.draw_apple(self, c, r * s, _apple_tones(_apple, now))
 	if _apple["play"]:
-		# Time left to start the hold: an orange arc 10 mm outside the circle.
+		# Time left to start the hold: an orange ring draining over the lifetime.
 		var window: float = _apple["window"]
-		var left := clampf((_window_end() - _now()) / window, 0.0, 1.0)
-		_arc(centre, w * 0.5 + 10.0, left, Color(1.0, 0.6, 0.2), 4.0)
+		var left := clampf((_window_end() - now) / window, 0.0, 1.0)
+		_arc(centre, w * 0.5 + 9.0, 1.0, Color(1.0, 1.0, 1.0, 0.18), 5.0)
+		_arc(centre, w * 0.5 + 9.0, left, Color(1.0, 0.62, 0.2), 5.0)
 	var hold_start: float = _apple["hold_start"]
 	if hold_start >= 0.0:
-		# Hold progress: a gold arc 5 mm outside the circle.
-		_arc(centre, w * 0.5 + 5.0, (_now() - hold_start) / Protocol.HOLD_S, GOLD, 5.0)
+		var frac: float = (now - hold_start) / Protocol.HOLD_S
+		_arc(centre, w * 0.5 + 4.0, frac, Color(GOLD, 0.35), 12.0)
+		_arc(centre, w * 0.5 + 4.0, frac, GOLD, 6.0)
 
 
+# Part of a table-space ring, from the top, clockwise.
 func _arc(centre: Vector2, r_mm: float, frac: float, col: Color, width: float) -> void:
-	var pts := _ts.circle_outline(centre, r_mm, 64)
-	pts.append(pts[0])
-	var n := int(clampf(frac, 0.0, 1.0) * 64.0) + 1
-	if n >= 2:
-		draw_polyline(pts.slice(0, n), col, width, true)
+	var n := int(clampf(frac, 0.0, 1.0) * 64.0)
+	if n < 1:
+		return
+	var pts := PackedVector2Array()
+	for i in n + 1:
+		var a := -PI * 0.5 + TAU * float(i) / 64.0
+		pts.append(_ts.mm_to_screen(centre + Vector2(cos(a), sin(a)) * r_mm))
+	draw_polyline(pts, col, width, true)
 
 
-func _draw_hud(font: Font, vp: Vector2) -> void:
+func _draw_cursor() -> void:
+	for i in range(_trail.size() - 1, 0, -1):
+		var fade := 1.0 - float(i) / float(_trail.size())
+		draw_circle(_trail[i], 4.0 + 5.0 * fade, Color(1.0, 1.0, 1.0, 0.35 * fade))
+	var c := _ts.mm_to_screen(_hand)
+	draw_circle(c, 22.0, Color(1.0, 1.0, 1.0, 0.16))
+	draw_circle(c, 14.0, Color(0.08, 0.16, 0.24, 0.5))
+	draw_circle(c, 12.0, Color.WHITE)
+	draw_circle(c, 8.5, Color(1.0, 1.0, 1.0, 0.55).blend(Color(0.85, 0.9, 1.0, 0.5)))
+	draw_circle(c, 4.0, Color.WHITE)
+
+
+# Round progress (a segment per round, the current one filling) and the score plate.
+func _draw_hud(vp: Vector2) -> void:
 	if _stage != Stage.ROUND and _stage != Stage.REST:
 		return   # scan, check, done: no round HUD
 	var play: bool = _phase_name() == "play" or (_stage == Stage.REST \
 		and _prev_round().get("phase", "play") == "play")
-	var label := "Rest"
-	if _stage == Stage.ROUND:
-		var r: Dictionary = _rounds[_round_idx]
-		var total := _rounds_of("play" if play else "calibration")
-		label = "Warm-up" if r["phase"] == "warmup" else "Round %d of %d" % [r["number"], total]
-		var left := maxi(ceili(_stage_left), 0)
-		_text(font, Vector2(vp.x * 0.5, 44.0), "%d:%02d" % [left / 60, left % 60], 30, INK, 200.0)
-	_text(font, Vector2(24.0, 44.0), label, 28, INK)
-	var score := "%d caught" % _round_caught if play else "%d points" % _round_points
-	_text(font, Vector2(vp.x - 244.0, 44.0), score, 28, INK, 220.0)
+	var segs: Array = []
+	for i in _rounds.size():
+		if (_rounds[i]["phase"] == "play") == play:
+			segs.append(i)
+	var n := segs.size()
+	var sw := minf(28.0, 380.0 / float(maxi(n, 1)))
+	var w := float(n) * sw + float(n - 1) * 5.0 + 28.0
+	var pill := Rect2(vp.x * 0.5 - w * 0.5, 16.0, w, 30.0)
+	Art.draw_pill(self, pill, Color(0.13, 0.11, 0.08, 0.36))
+	for j in n:
+		var gi: int = segs[j]
+		var rect := Rect2(pill.position.x + 14.0 + float(j) * (sw + 5.0), pill.get_center().y - 5.0, sw, 10.0)
+		var done := gi < _round_idx
+		Art.draw_pill(self, rect, Color("FFF4DC") if done else Color(1.0, 1.0, 1.0, 0.3))
+		if gi == _round_idx and _stage == Stage.ROUND:
+			var frac := clampf(1.0 - _stage_left / Protocol.ROUND_S, 0.0, 1.0)
+			if frac * sw >= 10.0:
+				Art.draw_pill(self, Rect2(rect.position, Vector2(frac * sw, 10.0)), GOLD)
+	var plate := Rect2(vp.x - 196.0, 14.0, 176.0, 54.0)
+	Art.draw_plate(self, plate)
+	Art.draw_apple(self, plate.position + Vector2(32.0, 29.0), 16.0, Art.RED if play else Art.RIPE_GOLD)
+	var f := Art.font()
+	var score := str(_round_caught) if play else str(_round_points)
+	draw_string(f, plate.position + Vector2(62.0, 39.0), score, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Art.INK)
+	if not play:
+		var sx := f.get_string_size(score, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+		draw_string(f, plate.position + Vector2(68.0 + sx, 39.0), "pts", HORIZONTAL_ALIGNMENT_LEFT, -1, 16,
+			Art.INK_SOFT)
 
 
-func _rest_lines() -> Array:
+func _dim(vp: Vector2, a: float = 0.38) -> void:
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.11, 0.09, 0.07, a))
+
+
+# Dark pill with a small draining ring: "Next round in 12".
+func _countdown_pill(centre: Vector2, text: String) -> void:
+	var w := Art.font().get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x + 70.0
+	var rect := Rect2(centre.x - w * 0.5, centre.y - 21.0, w, 42.0)
+	Art.draw_pill(self, rect, Art.INK)
+	var rc := rect.position + Vector2(24.0, 21.0)
+	draw_arc(rc, 10.0, 0.0, TAU, 32, Color("5A4A3A"), 4.0, true)
+	var left := clampf(_stage_left / _rest_s(), 0.0, 1.0)
+	if left > 0.0:
+		draw_arc(rc, 10.0, -PI * 0.5, -PI * 0.5 + TAU * left, 32, GOLD, 4.0, true)
+	Art.text(self, rect.get_center() + Vector2(14.0, 0.0), text, 18, Color("FFF8EA"))
+
+
+# Five stars that pop in one by one, the first `filled` gold.
+func _stars(centre: Vector2, filled: int, big: float) -> void:
+	for i in 5:
+		var p := centre + Vector2(float(i - 2) * big * 2.3, -6.0 if i == 2 else 0.0)
+		var rr := big * (1.2 if i == 2 else 1.0)
+		Art.draw_star(self, p, rr, false)
+		if i < filled:
+			var st := clampf((_stage_t - 0.25 - 0.28 * float(i)) / 0.3, 0.0, 1.0)
+			if st > 0.0:
+				var sc := st * 1.25 if st < 0.7 else lerpf(1.25, 1.0, (st - 0.7) / 0.3)
+				Art.draw_star(self, p, rr * sc, true)
+
+
+# Rest card, TypingClub style: stars, a ring that fills to the round's result,
+# the number counting up, and the countdown (§4.6).
+func _draw_rest(vp: Vector2) -> void:
+	_dim(vp)
+	var card := Rect2(vp.x * 0.5 - 250.0, vp.y * 0.5 - 200.0, 500.0, 380.0)
+	Art.draw_card(self, card)
+	var cx := card.get_center().x
 	var prev := _prev_round()
-	if prev.is_empty():
-		return ["Welcome back", "Day %d continues" % int(config["day"]),
-			"First round in %d" % ceili(_stage_left)]
-	var title: String = "Warm-up done" if prev["phase"] == "warmup" \
-		else "Round %d done" % prev["number"]
-	var next := "Next round in %d" % ceili(_stage_left)
-	if prev["phase"] != "play":
-		return [title, "%d points" % _round_points, next]
-	var n := _round_caught + _round_missed
-	var rate := 100.0 * float(_round_caught) / float(maxi(n, 1))
-	return [title, "%d of %d caught · %d %%" % [_round_caught, n, roundi(rate)], next]
+	if prev.is_empty():   # a resumed day
+		Art.text(self, Vector2(cx, card.position.y + 120.0), "Welcome back", 38, Art.INK)
+		Art.text(self, Vector2(cx, card.position.y + 175.0), "Day %d continues" % int(config["day"]),
+			20, Art.INK_SOFT)
+		_countdown_pill(Vector2(cx, card.end.y - 60.0), "First round in %d" % ceili(_stage_left))
+		return
+	var play: bool = prev["phase"] == "play"
+	var frac := 0.0
+	var ring_col := GOLD
+	if play:
+		frac = float(_round_caught) / float(maxi(_round_caught + _round_missed, 1))
+		ring_col = Color("5DB04A")
+	else:
+		frac = float(_round_points) / float(maxi(3 * _round_hits, 1))
+	var grow := 1.0 - pow(1.0 - clampf((_stage_t - 0.3) / 1.1, 0.0, 1.0), 3.0)   # ease out
+	_stars(Vector2(cx, card.position.y + 70.0), roundi(5.0 * frac), 24.0)
+	var rc := Vector2(cx, card.position.y + 190.0)
+	draw_arc(rc, 62.0, 0.0, TAU, 72, Color("ECE3D2"), 14.0, true)
+	if frac * grow > 0.0:
+		draw_arc(rc, 62.0, -PI * 0.5, -PI * 0.5 + TAU * frac * grow, 72, ring_col, 14.0, true)
+	var big := "%d%%" % roundi(100.0 * frac * grow) if play else str(roundi(float(_round_points) * grow))
+	Art.text(self, rc + Vector2(0.0, -6.0), big, 40, Art.INK)
+	Art.text(self, rc + Vector2(0.0, 26.0), "caught" if play else "points", 15, Art.INK_SOFT)
+	var line := "%d of %d apples" % [_round_caught, _round_caught + _round_missed] if play \
+		else "Faster catches earn more"
+	Art.text(self, Vector2(cx, card.position.y + 285.0), line, 17, Art.INK_SOFT)
+	_countdown_pill(Vector2(cx, card.end.y - 42.0), "Next round in %d" % ceili(_stage_left))
 
 
-# Researcher's calibration check (§4.4). Never shows the lifetimes or the level.
-func _draw_check(font: Font, vp: Vector2) -> void:
-	var lines: Array = ["Calibration check"]
-	for k in Protocol.PAIRS.size():
-		var c: Dictionary = _calib[k]
-		var n: int = c["caught"] + c["timeouts"]
-		var line := "Pair %d · %d / %d mm — " % [k + 1, int(_pair_a(k)), int(_pair_w(k))]
-		if _unfit.has(k):
-			line += "does not fit this reach area"
-		else:
-			line += "caught %d, timeouts %d, median %s" % [
-				c["caught"], c["timeouts"], _median_text(c["mts"], true)]
-			if n < FEW_SAMPLES:
-				line += "  (few apples)"
-		lines.append(line)
-	lines.append(_reach_text() + ", %d reposition apples" % _repositions)
-	lines.append("Enter: start play    C: redo calibration rounds    S: redo from reach scan")
-	_draw_card(font, vp, lines, 26)
-
-
-# End of the visit, plain (the visuals package makes it the mockup's closing
-# card). The participant can see it, so no level and no lifetimes: the per-pair
-# check against p is pyscripts/analysis/clinic_catch_rate.py.
-func _draw_summary(font: Font, vp: Vector2) -> void:
+# Closing card (§4.7): stars and the whole session's result; Enter returns to Home.
+func _draw_complete(vp: Vector2) -> void:
+	_dim(vp, 0.32)
+	var card := Rect2(vp.x * 0.5 - 300.0, vp.y * 0.5 - 235.0, 600.0, 460.0)
+	Art.draw_card(self, card)
+	var cx := card.get_center().x
+	var y0 := card.position.y
 	var c := 0
 	var n := 0
 	for k in Protocol.PAIRS.size():
 		c += int(_play[k]["caught"])
 		n += int(_play[k]["caught"]) + int(_play[k]["missed"])
-	_draw_card(font, vp, ["Session complete — thank you",
-		"%d of %d apples caught · %d %%" % [c, n, roundi(100.0 * float(c) / float(maxi(n, 1)))],
-		"Saved · day %d of 3" % int(config["day"]),
-		"Enter: back to participants"])
+	var frac := float(c) / float(maxi(n, 1))
+	Art.text(self, Vector2(cx, y0 + 62.0), "Session complete", 38, Art.INK)
+	Art.text(self, Vector2(cx, y0 + 104.0), "Thank you — well played", 18, Art.INK_SOFT)
+	_stars(Vector2(cx, y0 + 165.0), roundi(5.0 * frac), 26.0)
+	var tiles: Array = [["%d%%" % roundi(100.0 * frac), "apples caught"],
+		[str(_rounds_of("play")), "rounds played"]]
+	for i in 2:
+		var tile := Rect2(cx - 185.0 + float(i) * 200.0, y0 + 222.0, 170.0, 84.0)
+		draw_style_box(Art._box(Color.WHITE, 18, Color("EADFC9"), 1), tile)
+		Art.text(self, tile.get_center() + Vector2(0.0, -12.0), tiles[i][0], 32, Art.INK)
+		Art.text(self, tile.get_center() + Vector2(0.0, 22.0), tiles[i][1], 14, Art.INK_SOFT)
+	var btn := Rect2(cx - 100.0, y0 + 336.0, 200.0, 54.0)
+	draw_style_box(Art._box(Color("8E2A1F"), 16), btn.grow_side(SIDE_BOTTOM, 6.0))
+	draw_style_box(Art._box(Art.RED_BUTTON, 16), btn)
+	Art.text(self, btn.get_center(), "Done  (Enter)", 22, Color.WHITE)
+	Art.text(self, Vector2(cx, y0 + 425.0), "✓ Saved · day %d of 3" % int(config["day"]), 14, Art.INK_SOFT)
 
 
-func _draw_card(font: Font, vp: Vector2, lines: Array, body_size: int = 30) -> void:
-	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.0, 0.0, 0.0, 0.55))
-	var step := float(body_size) * 1.6
-	var y := vp.y * 0.5 - step * 0.5 * float(lines.size() - 1)
-	for i in lines.size():
-		_text(font, Vector2(vp.x * 0.5, y), lines[i], 48 if i == 0 else body_size, INK, vp.x)
-		y += 64.0 if i == 0 else step
+# Tracker lost (§4.8): the handle settling onto its spot on the table.
+func _draw_pause(vp: Vector2) -> void:
+	_dim(vp, 0.5)
+	var card := Rect2(vp.x * 0.5 - 240.0, vp.y * 0.5 - 190.0, 480.0, 370.0)
+	Art.draw_card(self, card)
+	var cx := card.get_center().x
+	var y0 := card.position.y
+	var t := fmod(_stage_t + float(Time.get_ticks_msec()) / 1000.0, 2.4) / 2.4
+	var drop := clampf((t - 0.15) / 0.4, 0.0, 1.0) if t < 0.85 else 1.0 - (t - 0.85) / 0.15
+	var table_y := y0 + 150.0
+	draw_polygon(PackedVector2Array([Vector2(cx - 130, table_y), Vector2(cx + 130, table_y),
+		Vector2(cx + 112, table_y + 40), Vector2(cx - 112, table_y + 40)]),
+		PackedColorArray([Color("D8B07C"), Color("D8B07C"), Color("A9794A"), Color("A9794A")]))
+	draw_rect(Rect2(cx - 130, table_y - 6, 260, 9), Color("C99A62"))
+	var spot_a := 0.35 + 0.65 * drop
+	for i in 12:
+		var a0 := TAU * float(i) / 12.0
+		var p0 := Vector2(cx, table_y - 2) + Vector2(cos(a0) * 64.0, sin(a0) * 8.0)
+		var p1 := Vector2(cx, table_y - 2) + Vector2(cos(a0 + 0.3) * 64.0, sin(a0 + 0.3) * 8.0)
+		draw_line(p0, p1, Color(Art.RED_BUTTON, spot_a), 3.0, true)
+	var dy := -34.0 * (1.0 - drop)
+	var body := Rect2(cx - 56, table_y - 50 + dy, 112, 46)
+	draw_style_box(Art._box(Color("65727E"), 12), body)
+	draw_rect(Rect2(cx - 46, table_y - 40 + dy, 18, 18), Color("F2F2F2"))
+	draw_rect(Rect2(cx + 28, table_y - 40 + dy, 18, 18), Color("F2F2F2"))
+	draw_style_box(Art._box(Color("3E4852"), 10), Rect2(cx - 14, table_y - 88 + dy, 28, 42))
+	draw_style_box(Art._box(Color("5B6773"), 6), Rect2(cx - 20, table_y - 94 + dy, 40, 12))
+	Art.text(self, Vector2(cx, y0 + 238.0), "Place the handle", 30, Art.INK)
+	Art.text(self, Vector2(cx, y0 + 274.0), "back on the table", 30, Art.INK)
+	Art.text(self, Vector2(cx, y0 + 312.0), "The game continues by itself", 17, Art.INK_SOFT)
+	for i in 3:
+		var bob := sin(float(Time.get_ticks_msec()) / 1000.0 * 5.0 - float(i) * 0.9)
+		draw_circle(Vector2(cx - 18.0 + 18.0 * float(i), y0 + 342.0 - 3.0 * bob), 5.0,
+			Color(Art.RED_BUTTON, 0.45 + 0.4 * bob))
+
+
+# Researcher overlay during play (§4.9): diagnostics only — never p, the
+# lifetimes or the level, since the participant can see the screen.
+func _draw_overlay(vp: Vector2) -> void:
+	var box := Rect2(16.0, vp.y - 164.0, 290.0, 148.0)
+	draw_style_box(Art._box(Color(0.08, 0.09, 0.07, 0.78), 12), box)
+	var f: Font = ThemeDB.fallback_font
+	var y := box.position.y + 26.0
+	draw_circle(Vector2(box.position.x + 18.0, y - 5.0), 4.0, Color("E4553F"))
+	draw_string(Art.font(), Vector2(box.position.x + 30.0, y), "RESEARCHER OVERLAY", HORIZONTAL_ALIGNMENT_LEFT,
+		-1, 12, Color("F3B6AC"))
+	var left := maxi(ceili(_stage_left), 0)
+	var pair := "—"
+	if not _apple.is_empty() and int(_apple["pair"]) >= 0:
+		var k: int = _apple["pair"]
+		pair = "pair %d (A %d · W %d)" % [k + 1, int(_pair_a(k)), int(_pair_w(k))]
+	var rows: Array = [
+		["Tracker", "%d Hz" % UDPReceiver.packets_per_sec],
+		["Round", "%d of %d · %d:%02d left" % [_round_number(), _rounds_of("play"), left / 60, left % 60]],
+		["Apple", pair],
+		["This round", "%d caught · %d missed" % [_round_caught, _round_missed]],
+	]
+	for row in rows:
+		y += 26.0
+		draw_string(f, Vector2(box.position.x + 16.0, y), row[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+			Color("C9C5BB"))
+		draw_string(f, Vector2(box.position.x + 110.0, y), row[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+			Color("F4F2EC"))
+
+
+# Researcher's calibration check (§4.4), operator style. Each pair's movement
+# times as a 10th–90th percentile bar with the median; the reach outline.
+# Never shows the lifetimes or the level.
+func _draw_check(vp: Vector2) -> void:
+	_dim(vp, 0.55)
+	var panel := Rect2(vp.x * 0.5 - 500.0, vp.y * 0.5 - 280.0, 1000.0, 560.0)
+	draw_style_box(Art._box(Color(0, 0, 0, 0.25), 20), panel.grow(6.0))
+	draw_style_box(Art._box(Color.WHITE, 18), panel)
+	var f: Font = ThemeDB.fallback_font
+	var b := Art.font()
+	var x0 := panel.position.x + 30.0
+	var y := panel.position.y + 34.0
+	var ink := Color("191A17")
+	var muted := Color("5F625B")
+	draw_circle(Vector2(x0 + 4.0, y - 5.0), 4.0, Color("C0392B"))
+	draw_string(b, Vector2(x0 + 14.0, y), "RESEARCHER OVERLAY", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, muted)
+	draw_string(b, Vector2(x0, y + 32.0), "Calibration check", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, ink)
+	var total := 0
+	for k in Protocol.PAIRS.size():
+		total += int(_calib[k]["caught"]) + int(_calib[k]["timeouts"])
+	draw_string(f, Vector2(x0, y + 58.0), "%d calibration apples, %d reposition. Play waits for you." % [
+		total, _repositions], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, muted)
+
+	# Scale for the bars: 0 to a bit past the slowest pair's 90th percentile.
+	var span := 1.0
+	for k in Protocol.PAIRS.size():
+		var v: Array = _calib[k]["mts"].duplicate()
+		v.sort()
+		if not v.is_empty():
+			span = maxf(span, _pct(v, 0.9) * 1.2)
+	var bar_x := x0 + 330.0
+	var bar_w := 380.0
+	y += 100.0
+	for k in Protocol.PAIRS.size():
+		var c: Dictionary = _calib[k]
+		draw_line(Vector2(x0, y - 22.0), Vector2(x0 + 700.0, y - 22.0), Color("EEEBE4"), 1.0)
+		draw_string(b, Vector2(x0, y), "Pair %d · %.2f bits" % [k + 1, Protocol.id_bits(_pair_a(k), _pair_w(k))],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ink)
+		draw_string(f, Vector2(x0, y + 20.0), "A %d · W %d mm" % [int(_pair_a(k)), int(_pair_w(k))],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, muted)
+		if _unfit.has(k):
+			draw_string(b, Vector2(x0 + 180.0, y + 8.0), "does not fit this reach area",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("9A5B0B"))
+			y += 74.0
+			continue
+		var caught: int = c["caught"]
+		var timeouts: int = c["timeouts"]
+		draw_string(b, Vector2(x0 + 180.0, y), "%d / %d caught" % [caught, caught + timeouts],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, ink)
+		var note := "no timeouts" if timeouts == 0 else "%d timeout%s" % [timeouts, "" if timeouts == 1 else "s"]
+		if caught + timeouts < FEW_SAMPLES:
+			note += " · few apples"
+		draw_string(f, Vector2(x0 + 180.0, y + 20.0), note, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+			Color("9A5B0B") if timeouts > 0 or caught + timeouts < FEW_SAMPLES else muted)
+		var track := Rect2(bar_x, y - 12.0, bar_w, 22.0)
+		draw_style_box(Art._box(Color("F3F1EC"), 6), track)
+		var v: Array = c["mts"].duplicate()
+		v.sort()
+		if not v.is_empty():
+			var lo := _pct(v, 0.1)
+			var hi := _pct(v, 0.9)
+			var md := _pct(v, 0.5)
+			draw_style_box(Art._box(Color("9CC3A5"), 6),
+				Rect2(bar_x + bar_w * lo / span, y - 7.0, maxf(4.0, bar_w * (hi - lo) / span), 12.0))
+			draw_rect(Rect2(bar_x + bar_w * md / span - 1.5, y - 14.0, 3.0, 26.0), Color("1F4D2C"))
+			draw_string(f, Vector2(bar_x, y + 28.0), "median %.2f s · %.2f–%.2f s" % [md, lo, hi],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("3B3D38"))
+		y += 74.0
+	draw_string(f, Vector2(bar_x, y - 16.0), "0 s", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, muted)
+	draw_string(f, Vector2(bar_x + bar_w - 40.0, y - 16.0), "%.1f s" % span, HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
+		muted)
+
+	# Reach outline, the screen as the frame.
+	var map := Rect2(panel.end.x - 250.0, panel.position.y + 110.0, 220.0, 160.0)
+	draw_string(b, Vector2(map.position.x, map.position.y - 12.0), "REACH", HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
+		muted)
+	draw_style_box(Art._box(Color("F6F4EE"), 8, Color("D9D5CC"), 1), map)
+	if _boundary.size() >= 3:
+		var k2 := minf(map.size.x / vp.x, map.size.y / vp.y)
+		var off := map.position + (map.size - vp * k2) * 0.5
+		var poly := PackedVector2Array()
+		for p in _boundary:
+			poly.append(off + _ts.mm_to_screen(p) * k2)
+		draw_colored_polygon(poly, Color(0.75, 0.22, 0.17, 0.15))
+		var closed := poly.duplicate()
+		closed.append(poly[0])
+		draw_polyline(closed, Color("C0392B"), 2.0, true)
+		draw_circle(off + _ts.mm_to_screen(_scan.home) * k2, 3.0, ink)
+	draw_string(f, Vector2(map.position.x, map.end.y + 20.0), _reach_text(), HORIZONTAL_ALIGNMENT_LEFT, 220.0,
+		12, muted)
+
+	var foot_y := panel.end.y - 30.0
+	draw_line(Vector2(x0, foot_y - 26.0), Vector2(panel.end.x - 30.0, foot_y - 26.0), Color("EEEBE4"), 1.0)
+	draw_string(f, Vector2(x0, foot_y), "Lifetimes and the level are never shown here.",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, muted)
+	draw_string(b, Vector2(panel.end.x - 560.0, foot_y),
+		"Enter: start play    C: redo calibration    S: redo from reach scan",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("8E2A1F"))
+
+
+# q-th percentile of an ascending list (nearest rank).
+func _pct(sorted: Array, q: float) -> float:
+	return float(sorted[clampi(roundi(q * float(sorted.size() - 1)), 0, sorted.size() - 1)])
 
 
 func _reach_text() -> String:
@@ -757,12 +1072,3 @@ func _median_text(values: Array, with_unit: bool) -> String:
 	var m: int = v.size() / 2
 	var med: float = v[m] if v.size() % 2 == 1 else (float(v[m - 1]) + float(v[m])) * 0.5
 	return ("%.2f s" % med) if with_unit else ("%.4f" % med)
-
-
-# Left-aligned at pos, or centred on pos.x when width > 0 (pos.y = baseline).
-func _text(font: Font, pos: Vector2, s: String, size: int, col: Color, width: float = -1.0) -> void:
-	if width > 0.0:
-		draw_string(font, Vector2(pos.x - width * 0.5, pos.y), s,
-			HORIZONTAL_ALIGNMENT_CENTER, width, size, col)
-	else:
-		draw_string(font, pos, s, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
