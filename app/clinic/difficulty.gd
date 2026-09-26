@@ -1,8 +1,8 @@
 # Lifetime rule (docs/clinic_study_interface.md §3.2). For each pair, sort that
 # day's calibration movement times and take the p-th one:
 #     lifetime = t_(ceil(p * n))
-# An apple then expires at spawn + lifetime + hold, so it is caught exactly when
-# the movement is no slower than that value (§3.3).
+# In play a hold must start within the lifetime, so an apple is caught exactly
+# when the movement is no slower than that value (§3.3).
 #
 # Calibration timeouts count as slower than every catch: they sit at the top of
 # the sorted list. Dropping them would keep only the fast movements and make

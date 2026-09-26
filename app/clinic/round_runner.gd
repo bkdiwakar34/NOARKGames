@@ -15,8 +15,10 @@ extends Node2D
 #     100 Hz rather than at the frame rate.
 #   - MT = hold start − spawn, which equals catch − spawn − hold (design.md §4.6).
 #   - An apple's "window" is how long a hold may take to start: the cap in
-#     calibration, the lifetime in play. It expires at spawn + window + HOLD_S
-#     (§3.3), so in play it is caught exactly when MT <= lifetime.
+#     calibration, the lifetime in play. At the end of the window the apple
+#     goes unless a hold is under way, which then finishes (caught) or breaks
+#     (missed). So in play it is caught exactly when MT <= lifetime (§3.3), and
+#     an apple on screen can always still be caught.
 #
 # Keys: 1-3 pick the test level and Space starts (start screen); Enter / C / S
 # on the calibration check; Esc (clinic_main.gd) quits.
@@ -182,8 +184,8 @@ func _process(delta: float) -> void:
 				_stage_left -= delta
 				if _apple.is_empty():
 					_spawn()
-				elif _now() > float(_apple["deadline"]) + TIMEOUT_GRACE_S:
-					_finish_apple("timeout", _apple["deadline"])
+				elif _apple_expired():
+					_finish_apple("timeout", _window_end())
 				if _stage_left <= 0.0:
 					_end_round()
 			Stage.REST:
@@ -412,9 +414,18 @@ func _new_apple(kind: String, k: int, centre: Vector2, w: float) -> void:
 		"kind": kind, "pair": k, "a_mm": _pair_a(k) if k >= 0 else dist, "w_mm": w,
 		"n": _apple_n, "start": _hand, "centre": centre,
 		"angle": (centre - _hand).angle(), "a_actual": dist,
-		"spawn_time": t, "hold_start": -1.0, "play": in_play,
-		"window": window, "deadline": t + window + Protocol.HOLD_S,
+		"spawn_time": t, "hold_start": -1.0, "play": in_play, "window": window,
 	}
+
+
+func _window_end() -> float:
+	return float(_apple["spawn_time"]) + float(_apple["window"])
+
+
+# Past its window with no hold under way. The grace lets the last tracker
+# samples of the window arrive (they reach Godot ~20 ms after capture).
+func _apple_expired() -> bool:
+	return float(_apple["hold_start"]) < 0.0 and _now() > _window_end() + TIMEOUT_GRACE_S
 
 
 func _pair_a(k: int) -> float:
@@ -601,10 +612,9 @@ func _draw_apple() -> void:
 	draw_colored_polygon(ring, Color(0.35, 0.85, 0.45, 0.35) if inside else Color(1.0, 1.0, 1.0, 0.10))
 	draw_polyline(closed, Color(0.45, 0.95, 0.55) if inside else INK, 3.0, true)
 	if _apple["play"]:
-		# Time left: an orange arc 10 mm outside the circle, draining to the deadline.
-		var spawn: float = _apple["spawn_time"]
-		var deadline: float = _apple["deadline"]
-		var left := clampf((deadline - _now()) / (deadline - spawn), 0.0, 1.0)
+		# Time left to start the hold: an orange arc 10 mm outside the circle.
+		var window: float = _apple["window"]
+		var left := clampf((_window_end() - _now()) / window, 0.0, 1.0)
 		_arc(centre, w * 0.5 + 10.0, left, Color(1.0, 0.6, 0.2), 4.0)
 	var hold_start: float = _apple["hold_start"]
 	if hold_start >= 0.0:

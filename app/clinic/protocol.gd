@@ -42,7 +42,7 @@ const REACH_SPEED_MM_S := 150.0
 const REACH_WAIT_S := 1.0
 
 # Calibration speed points (spec §4.4). An apple waits up to POINT_CAP_S of
-# movement time; the hold comes on top, so it expires at spawn + cap + hold.
+# movement time: a hold must start within the cap (round_runner.gd).
 const POINT_CAP_S := 8.0
 const POINT_LIMITS_S: Array = [1.0, 2.0]   # MT < 1.0 s -> 3 points, < 2.0 s -> 2, else 1
 

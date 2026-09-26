@@ -90,8 +90,12 @@ Because calibration now carries everything, it runs every visit (learning betwee
 would otherwise shift the real success rate: a Day-1 model on a faster Day 3 turns a
 70 % level into ~90 %), and it is preceded by a warm-up round.
 
-Because $\ell_k$ is a percentile of MT, and MT excludes the hold, an apple in play expires at
-$t_{\mathrm{spawn}} + \ell_k + t_{\mathrm{hold}}$ — so a movement with $\mathrm{MT} \le \ell_k$ is always caught.
+Because $\ell_k$ is a percentile of MT, and MT = hold start − spawn, a hold must **start**
+within $\ell_k$ of the spawn. At $t_{\mathrm{spawn}} + \ell_k$ the apple goes unless a hold is under way,
+which then finishes (caught) or breaks (missed). So an apple is caught exactly when
+$\mathrm{MT} \le \ell_k$, and an apple on screen can always still be caught. The time ring drains
+over $\ell_k$. (First built as "expires at $t_{\mathrm{spawn}} + \ell_k + t_{\mathrm{hold}}$": the apple then stayed
+visible for a last hold-time in which entering it could no longer count — changed 2026-09-26.)
 
 ### 3.4 Geometry lives in table millimetres
 
