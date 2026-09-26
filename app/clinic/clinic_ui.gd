@@ -106,9 +106,24 @@ static func project_canvas() -> Vector2i:
 
 
 # clinic = true: the clinic app's CANVAS; false: the project's (installer tools).
+# The clinic canvas is stretched by one factor in both directions (EXPAND: a
+# window of another shape shows a little more canvas instead). The project's
+# IGNORE stretches x and y separately, and text drawn for one scale then gets
+# resampled in the other direction — the blur seen on the board (2026-09-26).
+static var _project_aspect: Window.ContentScaleAspect = Window.CONTENT_SCALE_ASPECT_IGNORE
+static var _saved: bool = false
+
 static func use_canvas(clinic: bool) -> void:
 	var root := (Engine.get_main_loop() as SceneTree).root
-	root.content_scale_size = CANVAS if clinic else project_canvas()
+	if not _saved:
+		_project_aspect = root.content_scale_aspect
+		_saved = true
+	if clinic:
+		root.content_scale_size = CANVAS
+		root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
+	else:
+		root.content_scale_size = project_canvas()
+		root.content_scale_aspect = _project_aspect
 
 
 static func _font(path: String) -> Font:

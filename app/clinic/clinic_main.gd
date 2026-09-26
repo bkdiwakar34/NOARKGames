@@ -22,8 +22,10 @@ var _visit_id: String = ""       # participant of the running visit
 
 
 func _ready() -> void:
-	# This app's canvas (clinic_ui.gd, "Canvas") and smooth edges on shapes and
-	# lines, for this app only (the patient app's project settings are untouched).
+	# Fullscreen (no title bar or desktop bar), this app's canvas (clinic_ui.gd,
+	# "Canvas") and smooth edges on shapes and lines, for this app only (the
+	# patient app's project settings are untouched).
+	get_window().mode = Window.MODE_FULLSCREEN
 	UI.use_canvas(true)
 	get_viewport().msaa_2d = Viewport.MSAA_4X
 	Protocol.load_saved()
