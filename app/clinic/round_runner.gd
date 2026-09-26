@@ -134,6 +134,9 @@ func _ready() -> void:
 	_log = VisitLogger.new()
 	_log.open(String(config["participant"]), _header_lines())
 	UDPReceiver.log_enabled = true
+	# The participant sees only the laser dot; the system arrow is hidden (it
+	# still moves, for the mouse fallback in development).
+	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 
 
 # A stopped day resumes play with its frozen calibration (§4.8): the remaining
@@ -154,6 +157,7 @@ func _restore(r: Dictionary) -> void:
 func _exit_tree() -> void:
 	UDPReceiver.log_enabled = false
 	_log.close()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE   # back for the operator screens
 
 
 func _rest_s() -> float:
@@ -788,14 +792,14 @@ func _draw_cursor() -> void:
 			var age := float(now - int(_trail[i]["t"])) / float(TRAIL_MS)
 			if pass_i == 0:
 				draw_line(_trail[i - 1]["pos"], _trail[i]["pos"], Color(LASER, (1.0 - age) * 0.22),
-					lerpf(14.0, 4.0, age), true)
+					lerpf(20.0, 6.0, age), true)
 			else:
 				draw_line(_trail[i - 1]["pos"], _trail[i]["pos"], Color(1.0, 0.75, 0.70, (1.0 - age) * 0.85),
-					lerpf(4.0, 1.5, age), true)
+					lerpf(6.0, 2.0, age), true)
 	var c := _ts.mm_to_screen(_hand)
-	Art.blit(self, Art.glow(), c, Vector2(44.0, 44.0), Color(LASER, 0.45))
-	Art.blit(self, Art.disc(), c, Vector2(20.0, 20.0), LASER)
-	Art.blit(self, Art.disc(), c, Vector2(8.0, 8.0), Color(1.0, 0.95, 0.92))
+	Art.blit(self, Art.glow(), c, Vector2(62.0, 62.0), Color(LASER, 0.45))
+	Art.blit(self, Art.disc(), c, Vector2(28.0, 28.0), LASER)
+	Art.blit(self, Art.disc(), c, Vector2(11.0, 11.0), Color(1.0, 0.95, 0.92))
 
 
 # Round progress (a segment per round, the current one filling) and the score plate.
