@@ -25,6 +25,8 @@ const PARTICIPANT_ID := "TEST"    # real IDs come with the study-DB package
 const TIMEOUT_GRACE_S := 0.15     # samples reach Godot ~20 ms after capture; wait for them
 const EDGE_MARGIN_PX := 12.0
 const POP_S := 0.8                # how long a "+3" floats
+const REPOSITION_W_MM := 60.0     # the uncounted apple that brings the hand where a pair fits
+const SPOT_GRID_MM := 25.0        # grid for searching reposition spots
 
 const BG := Color("1E221D")
 const INK := Color(1.0, 1.0, 1.0, 0.92)
@@ -46,6 +48,10 @@ var _hand: Vector2 = Vector2.ZERO   # latest hand position, table mm
 var _apple: Dictionary = {}         # the current apple; empty = none
 var _apple_n: int = 0               # apples spawned this round
 var _pair_bag: Array = []           # every block of 3 apples uses each pair once
+var _unfit: Dictionary = {}         # pair -> true: fits from nowhere in the reach area
+var _no_fit: bool = false           # no pair fits at all
+var _spots: Dictionary = {}         # pair -> reposition spots (_spots_for)
+var _repositions: int = 0           # reposition apples during calibration rounds
 var _round_points: int = 0
 var _stats: Array = []              # per pair, calibration rounds only: {caught, timeouts, mts}
 var _pops: Array = []               # floating "+3": {pos (mm), t0, text}
@@ -238,48 +244,121 @@ func _round_number() -> int:
 
 # ── Apples ────────────────────────────────────────────────────────────────────
 
+# Every counted apple sits at its pair's exact distance A from the hand — never
+# shortened. When the hand is somewhere the pairs still due in this block do not
+# fit from:
+#   1. try the other pairs still due in the block;
+#   2. else put an uncounted "reposition" apple (big, easy) at the nearest spot
+#      from which a due pair does fit, so the next apple can go at full distance;
+#   3. a pair that fits from nowhere in the reach area is skipped for the visit
+#      (the summary says so: the pair values are too big for this reach).
 func _spawn() -> void:
+	if _no_fit:
+		return
 	if _pair_bag.is_empty():
-		_pair_bag = range(Protocol.PAIRS.size())
+		for k in Protocol.PAIRS.size():
+			if not _unfit.has(k):
+				_pair_bag.append(k)
+		if _pair_bag.is_empty():
+			_no_fit = true
+			return
 		_pair_bag.shuffle()
-	var k: int = _pair_bag.pop_back()
-	var a: float = Protocol.PAIRS[k]["a_mm"]
-	var w: float = Protocol.PAIRS[k]["w_mm"]
-	var place := _place(_hand, a, w)
+	for i in range(_pair_bag.size() - 1, -1, -1):
+		var k: int = _pair_bag[i]
+		var angles := _fit_angles(_hand, _pair_a(k), _pair_w(k) * 0.5, 36)
+		if not angles.is_empty():
+			_pair_bag.remove_at(i)
+			var ang: float = angles.pick_random()
+			_new_apple("pair", k, _hand + Vector2.from_angle(ang) * _pair_a(k), _pair_w(k))
+			return
+	for i in range(_pair_bag.size() - 1, -1, -1):
+		var k: int = _pair_bag[i]
+		var spot = _reposition_spot(k)
+		if spot != null:
+			_new_apple("reposition", -1, spot, REPOSITION_W_MM)
+			return
+		_pair_bag.remove_at(i)
+		_unfit[k] = true
+
+
+func _new_apple(kind: String, k: int, centre: Vector2, w: float) -> void:
 	var t := _now()
+	var dist := _hand.distance_to(centre)
 	_apple_n += 1
 	_apple = {
-		"pair": k, "a_mm": a, "w_mm": w, "n": _apple_n,
-		"start": _hand, "centre": place["centre"],
-		"angle": place["angle"], "a_actual": place["a_actual"],
+		"kind": kind, "pair": k, "a_mm": _pair_a(k) if k >= 0 else dist, "w_mm": w,
+		"n": _apple_n, "start": _hand, "centre": centre,
+		"angle": (centre - _hand).angle(), "a_actual": dist,
 		"spawn_time": t, "hold_start": -1.0,
 		"deadline": t + Protocol.POINT_CAP_S + Protocol.HOLD_S,
 	}
 
 
-# A centre at distance a (mm) from the hand, in a random direction where the
-# whole circle fits (_fits).
-func _place(start: Vector2, a: float, w: float) -> Dictionary:
-	var r := w * 0.5
-	var fits: Array = []
+func _pair_a(k: int) -> float:
+	return Protocol.PAIRS[k]["a_mm"]
+
+
+func _pair_w(k: int) -> float:
+	return Protocol.PAIRS[k]["w_mm"]
+
+
+# Directions (radians) in which a circle of radius r at distance a from start fits.
+func _fit_angles(start: Vector2, a: float, r: float, n: int) -> Array:
+	var out: Array = []
 	var offset := randf() * TAU
-	for i in 36:
-		var ang := offset + TAU * float(i) / 36.0
+	for i in n:
+		var ang := offset + TAU * float(i) / float(n)
 		if _fits(start + Vector2.from_angle(ang) * a, r):
-			fits.append(ang)
-	if not fits.is_empty():
-		var pick: float = fits.pick_random()
-		return {"centre": start + Vector2.from_angle(pick) * a, "angle": pick, "a_actual": a}
-	# No direction fits at the full distance (hand near the edge of its reach):
-	# head for the scan's centre ring and shorten until it fits. The file keeps
-	# both distances (a_mm, a_actual_mm).
-	var dir := (_scan.home - start).normalized()
-	if dir == Vector2.ZERO:
-		dir = Vector2.RIGHT
-	var d := a
-	while d > r and not _fits(start + dir * d, r):
-		d -= 5.0
-	return {"centre": start + dir * d, "angle": dir.angle(), "a_actual": d}
+			out.append(ang)
+	return out
+
+
+# Nearest spot to the hand from which pair k fits in plenty of directions
+# (at least half as many as the best spot), so where the hand ends up inside
+# the reposition circle does not matter. null when the pair fits from nowhere.
+func _reposition_spot(k: int) -> Variant:
+	var spots := _spots_for(k)
+	if spots.is_empty():
+		return null
+	var most := 0
+	for s in spots:
+		most = maxi(most, s["n"])
+	var pick = null
+	var nearest := INF
+	for s in spots:
+		var d := _hand.distance_to(s["pos"])
+		if int(s["n"]) * 2 >= most and d < nearest:
+			nearest = d
+			pick = s["pos"]
+	return pick
+
+
+# Grid points (every SPOT_GRID_MM) where a reposition apple fits and from which
+# pair k fits in some direction: [{pos, n = how many of 24 directions}].
+# Computed once per pair, the first time it is needed.
+func _spots_for(k: int) -> Array:
+	if _spots.has(k):
+		return _spots[k]
+	var area := Rect2(_boundary[0], Vector2.ZERO) if _boundary.size() >= 3 \
+		else Rect2(_ts.screen_to_mm(Vector2.ZERO), Vector2.ZERO)
+	for b in _boundary:
+		area = area.expand(b)
+	if _boundary.size() < 3:
+		area = area.expand(_ts.screen_to_mm(get_viewport_rect().size))
+	var list: Array = []
+	var x := area.position.x
+	while x <= area.end.x:
+		var y := area.position.y
+		while y <= area.end.y:
+			var p := Vector2(x, y)
+			if _fits(p, REPOSITION_W_MM * 0.5):
+				var n := _fit_angles(p, _pair_a(k), _pair_w(k) * 0.5, 24).size()
+				if n > 0:
+					list.append({"pos": p, "n": n})
+			y += SPOT_GRID_MM
+		x += SPOT_GRID_MM
+	_spots[k] = list
+	return list
 
 
 # The whole circle is on screen and inside the reach outline.
@@ -299,7 +378,10 @@ func _finish_apple(outcome: String, t: float) -> void:
 	var a: Dictionary = _apple
 	_apple = {}
 	var caught := outcome == "caught"
-	var counted := _phase_name() == "calibration"
+	var reposition: bool = a["kind"] == "reposition"
+	var counted := _phase_name() == "calibration" and not reposition
+	if reposition and _phase_name() == "calibration":
+		_repositions += 1
 	var mt := -1.0
 	var pts := 0
 	if caught:
@@ -314,8 +396,11 @@ func _finish_apple(outcome: String, t: float) -> void:
 		_stats[a["pair"]]["timeouts"] += 1
 	var start: Vector2 = a["start"]
 	var centre: Vector2 = a["centre"]
+	# Reposition apples: phase "reposition", pair 0, so a filter on
+	# phase == "calibration" leaves them out.
 	_log.log_target([
-		_phase_name(), _round_number(), a["n"], int(a["pair"]) + 1, a["a_mm"], a["w_mm"],
+		"reposition" if reposition else _phase_name(), _round_number(), a["n"],
+		int(a["pair"]) + 1, "%.1f" % a["a_mm"], a["w_mm"],
 		"%.1f" % a["a_actual"], "%.1f" % rad_to_deg(a["angle"]),
 		"%.2f" % start.x, "%.2f" % start.y, "%.2f" % centre.x, "%.2f" % centre.y,
 		"%.6f" % a["spawn_time"], ("%.6f" % a["hold_start"]) if caught else "",
@@ -333,6 +418,9 @@ func _draw() -> void:
 		_scan.draw(self, font)
 	if _stage == Stage.ROUND and not _paused and not _apple.is_empty():
 		_draw_apple()
+	if _stage == Stage.ROUND and _no_fit:
+		_text(font, Vector2(vp.x * 0.5, vp.y * 0.5), "None of the pairs fits this reach area",
+			30, Color(1.0, 0.75, 0.4), vp.x)
 	for p in _pops:
 		var age: float = _now() - float(p["t0"])
 		var pos := _ts.mm_to_screen(p["pos"]) + Vector2(0.0, -50.0 - 70.0 * age)
@@ -409,10 +497,14 @@ func _draw_summary(font: Font, vp: Vector2) -> void:
 	for k in Protocol.PAIRS.size():
 		var p: Dictionary = Protocol.PAIRS[k]
 		var s: Dictionary = _stats[k]
-		lines.append("Pair %d · %d / %d mm · %.2f bits — caught %d, timeouts %d, median %s" % [
-			k + 1, int(p["a_mm"]), int(p["w_mm"]), Protocol.id_bits(p["a_mm"], p["w_mm"]),
-			s["caught"], s["timeouts"], _median_text(s["mts"])])
-	lines.append(_reach_text())
+		var head := "Pair %d · %d / %d mm · %.2f bits — " % [
+			k + 1, int(p["a_mm"]), int(p["w_mm"]), Protocol.id_bits(p["a_mm"], p["w_mm"])]
+		if _unfit.has(k):
+			lines.append(head + "does not fit this reach area")
+		else:
+			lines.append(head + "caught %d, timeouts %d, median %s" % [
+				s["caught"], s["timeouts"], _median_text(s["mts"])])
+	lines.append(_reach_text() + ", %d reposition apples" % _repositions)
 	lines.append("Saved in " + _log.folder)
 	lines.append("Esc to quit")
 	_draw_card(font, vp, lines, 26)

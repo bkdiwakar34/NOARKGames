@@ -137,8 +137,11 @@ scale x and y differently — e.g. 600 × 400 mm onto 1920 × 1080 px gives 3.2 
   not count. A reach within 10 mm of the screen edge is marked "limited by the screen" (the
   light cannot go further, nor can apples).
 - Apples then spawn only where the **whole circle** lies inside the 8-point outline and on
-  screen; if no direction fits at the full distance, the distance is shortened toward the
-  centre and both are logged (`a_mm`, `a_actual_mm`).
+  screen, always at the pair's **exact** distance $A$ (never shortened). When no pair still
+  due in the block fits from where the hand is, an uncounted **reposition apple** (60 mm,
+  logged with phase `reposition`, pair 0) appears at the nearest spot from which one does;
+  a pair that fits from nowhere in the reach area is skipped for the visit and the
+  summary says so — its values are too big for that reach.
 - On screen: "Follow the light", 8 progress dots. Saved as `reach.csv`, one row per spoke.
 - Implemented in `app/clinic/reach_scan.gd` (package 2).
 
