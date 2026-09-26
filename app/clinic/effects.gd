@@ -170,7 +170,8 @@ func draw(ci: CanvasItem) -> void:
 		var size: Vector2 = s["size"]
 		var p: Vector2 = s["pos"] + Vector2(0.0, 50.0 * t * t)
 		var k := 1.0 - 0.3 * t
-		Art.blit(ci, Art.orb(), p, size * k, Color(Art.MISS, (1.0 - t) * 0.7))
+		Art.blit(ci, tex, p, size * 1.6 * k, Color(Art.MISS, (1.0 - t) * 0.35))
+		Art.blit(ci, Art.disc(), p, size * k, Color(Art.MISS, (1.0 - t) * 0.18))
 	for fl in _flashes:
 		var t: float = float(fl["t"]) / 0.45
 		var size: Vector2 = fl["size"]
@@ -180,9 +181,10 @@ func draw(ci: CanvasItem) -> void:
 		# The hitstop: squashed, extra bright, still.
 		var size: Vector2 = _hit["size"]
 		var p: Vector2 = _hit["pos"]
-		Art.blit(ci, tex, p, size * 2.6, Color(Art.FF_GLOW, 0.6))
-		Art.blit(ci, Art.orb(), p, Vector2(size.x * 1.16, size.y * 0.84))
-		Art.blit(ci, Art.disc(), p, Vector2(size.x * 1.16, size.y * 0.84) * 0.9, Color(1, 1, 1, 0.85))
+		var sq := Vector2(size.x * 1.16, size.y * 0.84)
+		Art.blit(ci, tex, p, size * 3.4, Color(Art.FF_GLOW, 0.7))
+		Art.blit(ci, Art.disc(), p, sq, Color(1.0, 1.0, 0.92, 0.8))
+		Art.blit(ci, tex, p, sq * 1.2, Color(1, 1, 1, 0.9))
 	for s in _sparks:
 		var a := 1.0 - float(s["t"]) / float(s["life"])
 		Art.blit(ci, tex, s["pos"], Vector2.ONE * float(s["size"]), Color(s["col"], a))

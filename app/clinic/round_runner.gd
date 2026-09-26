@@ -53,6 +53,8 @@ const STREAK := 3                 # this many "Perfect" catches in a row make a 
 
 const GOLD := Color("FFE27A")
 const AMBER := Color(1.0, 0.75, 0.4)
+const LASER := Color(0.95, 0.15, 0.10)   # the cursor, as in the patient game (ui_theme.gd LASER)
+const TRAIL_MS := 600
 
 enum Stage { SCAN, ROUND, REST, CHECK, DONE }
 
@@ -97,6 +99,8 @@ var _shown_stage: int = -1
 var _float_t: float = 0.0
 var _spawn_after: float = 0.0       # the next target waits for the catch's hitstop
 var _streak: int = 0                # "Perfect" catches in a row (calibration)
+var _trail: Array = []              # cursor tail: [{pos (px), t (ms)}]
+var _rounds_before: int = 0         # play rounds done before this session (a resumed day)
 
 
 func _ready() -> void:
@@ -140,6 +144,7 @@ func _restore(r: Dictionary) -> void:
 		_boundary.append(Vector2(pt[0], pt[1]))
 	for k in r["unfit"]:
 		_unfit[int(k)] = true
+	_rounds_before = int(r["rounds_done"])
 	for i in range(int(r["rounds_done"]), int(r["rounds_total"])):
 		_rounds.append({"phase": "play", "number": i + 1})
 	_stage = Stage.REST
@@ -251,6 +256,12 @@ func _process(delta: float) -> void:
 			if before < at and _stage_t >= at:
 				_snd.star(i)
 	_fx.update(delta)
+	var now_ms := Time.get_ticks_msec()
+	var cur := _ts.mm_to_screen(_hand)
+	if _trail.is_empty() or cur.distance_to(_trail[-1]["pos"]) > 3.0:
+		_trail.append({"pos": cur, "t": now_ms})
+	while not _trail.is_empty() and now_ms - int(_trail[0]["t"]) > TRAIL_MS:
+		_trail.pop_front()
 	if _stage == Stage.DONE:
 		_float_t += delta
 		if _float_t > 0.2:
@@ -722,23 +733,29 @@ func _draw_apple() -> void:
 		pop = age / 0.16 * 1.1
 	elif age < 0.3:
 		pop = lerpf(1.1, 1.0, (age - 0.16) / 0.14)
-	var breath := 1.0 + 0.06 * sin(now * 3.2)
-	Art.blit(self, Art.glow(), c, size * (2.3 * breath) * pop,
-		Color(Art.FF_GLOW, 0.55 if inside else 0.38))
-	Art.blit(self, Art.orb(), c, size * pop)
+	# A light, not a ball: wide halo, see-through body, bright core, and a thin
+	# bright rim that marks W exactly.
+	var breath := 1.0 + 0.07 * sin(now * 3.2)
+	Art.blit(self, Art.glow(), c, size * (3.4 * breath) * pop, Color(Art.FF_GLOW, 0.5 if inside else 0.34))
+	Art.blit(self, Art.disc(), c, size * pop, Color(Art.FF_GLOW, 0.20 if inside else 0.13))
+	Art.blit(self, Art.glow(), c, size * (0.95 * breath) * pop, Color(Art.FF_CORE, 0.85))
+	Art.blit(self, Art.disc(), c, size * 0.12 * pop, Color.WHITE)
 	var hold_start: float = _apple["hold_start"]
 	if hold_start >= 0.0:
 		var frac: float = clampf((now - hold_start) / Protocol.HOLD_S, 0.0, 1.0)
-		Art.blit(self, Art.disc(), c, size * frac, Color(1.0, 1.0, 0.94, 0.92))
-		Art.blit(self, Art.glow(), c, size * (1.0 + 1.2 * frac), Color(1.0, 1.0, 0.9, 0.35 * frac))
-	elif inside:
-		Art.blit(self, Art.disc(), c, size * 0.2, Color(1, 1, 1, 0.7))
+		Art.blit(self, Art.disc(), c, size * frac, Color(1.0, 1.0, 0.92, 0.75))
+		Art.blit(self, Art.glow(), c, size * (1.2 + 1.6 * frac), Color(1.0, 1.0, 0.88, 0.4 * frac))
+	var rim := Color(1.0, 1.0, 0.95, 0.95) if inside else Color(Art.FF_BODY, 0.85)
+	var rim_w := 3.0 if inside else 2.0
 	if _apple["play"]:
+		# Play: the rim itself drains over the lifetime.
 		var window: float = _apple["window"]
 		var left := clampf((_window_end() - now) / window, 0.0, 1.0)
-		_arc(centre, w * 0.5, 1.0, Color(1.0, 1.0, 1.0, 0.16), 4.0)
-		_arc(centre, w * 0.5, left, Color(1.0, 1.0, 1.0, 0.95), 4.0)
-	elif _apple["kind"] == "pair":
+		_arc(centre, w * 0.5, 1.0, Color(rim, 0.18), rim_w)
+		_arc(centre, w * 0.5, left, rim, rim_w + 1.0)
+	else:
+		_arc(centre, w * 0.5, 1.0, rim, rim_w)
+	if not _apple["play"] and _apple["kind"] == "pair":
 		var worth := _worth(now) if hold_start < 0.0 else Protocol.points_for(hold_start - float(_apple["spawn_time"]))
 		for i in 3:
 			var p := c + Vector2((float(i) - 1.0) * 16.0, -size.y * 0.5 - 16.0)
@@ -761,12 +778,24 @@ func _arc(centre: Vector2, r_mm: float, frac: float, col: Color, width: float) -
 	draw_polyline(pts, col, width, true)
 
 
-# The hand: a simple white dot with a soft halo and a dark rim.
+# The hand: a laser-pointer dot with a fading tail, as in the patient game
+# (GoodNotes style): red glow, red body, white-hot centre; the tail is the last
+# TRAIL_MS of movement, wide and faint outside, thin and bright inside.
 func _draw_cursor() -> void:
+	var now := Time.get_ticks_msec()
+	for pass_i in 2:
+		for i in range(1, _trail.size()):
+			var age := float(now - int(_trail[i]["t"])) / float(TRAIL_MS)
+			if pass_i == 0:
+				draw_line(_trail[i - 1]["pos"], _trail[i]["pos"], Color(LASER, (1.0 - age) * 0.22),
+					lerpf(14.0, 4.0, age), true)
+			else:
+				draw_line(_trail[i - 1]["pos"], _trail[i]["pos"], Color(1.0, 0.75, 0.70, (1.0 - age) * 0.85),
+					lerpf(4.0, 1.5, age), true)
 	var c := _ts.mm_to_screen(_hand)
-	Art.blit(self, Art.glow(), c, Vector2(46.0, 46.0), Color(1, 1, 1, 0.3))
-	Art.blit(self, Art.disc(), c, Vector2(26.0, 26.0), Color(0.05, 0.08, 0.18, 0.6))
-	Art.blit(self, Art.disc(), c, Vector2(20.0, 20.0), Color.WHITE)
+	Art.blit(self, Art.glow(), c, Vector2(44.0, 44.0), Color(LASER, 0.45))
+	Art.blit(self, Art.disc(), c, Vector2(20.0, 20.0), LASER)
+	Art.blit(self, Art.disc(), c, Vector2(8.0, 8.0), Color(1.0, 0.95, 0.92))
 
 
 # Round progress (a segment per round, the current one filling) and the score plate.
@@ -779,13 +808,15 @@ func _draw_hud(vp: Vector2) -> void:
 	for i in _rounds.size():
 		if (_rounds[i]["phase"] == "play") == play:
 			segs.append(i)
-	# Round progress: a dot per round in a glass pill; done rounds glow.
-	var n := segs.size()
+	# Round progress: a dot per round in a glass pill; done rounds glow. On a
+	# resumed day the rounds played before the stop come first, as done.
+	var before := _rounds_before if play else 0
+	var n := segs.size() + before
 	var w := float(n) * 17.0 + 22.0
 	var pill := Rect2(vp.x * 0.5 - w * 0.5, 16.0, w, 30.0)
 	Art.draw_glass(self, pill, 15)
 	for j in n:
-		var gi: int = segs[j]
+		var gi: int = -1 if j < before else segs[j - before]
 		var p := Vector2(pill.position.x + 19.0 + float(j) * 17.0, pill.get_center().y)
 		if gi < _round_idx:
 			Art.blit(self, Art.glow(), p, Vector2(22.0, 22.0), Color(Art.FF_GLOW, 0.6))
@@ -905,7 +936,7 @@ func _draw_complete(vp: Vector2) -> void:
 	Art.text(self, Vector2(cx, y0 + 104.0), "Thank you — well played", 18, Art.INK_SOFT)
 	_stars(Vector2(cx, y0 + 165.0), roundi(5.0 * frac), 26.0)
 	var tiles: Array = [["%d%%" % roundi(100.0 * frac), "fireflies caught"],
-		[str(_rounds_of("play")), "rounds played"]]
+		[str(_rounds_of("play") + _rounds_before), "rounds played"]]
 	for i in 2:
 		var tile := Rect2(cx - 185.0 + float(i) * 200.0, y0 + 222.0, 170.0, 84.0)
 		Art.draw_glass(self, tile, 18)
@@ -972,7 +1003,8 @@ func _draw_overlay(vp: Vector2) -> void:
 		pair = "pair %d (A %d · W %d)" % [k + 1, int(_pair_a(k)), int(_pair_w(k))]
 	var rows: Array = [
 		["Tracker", "%d Hz" % UDPReceiver.packets_per_sec],
-		["Round", "%d of %d · %d:%02d left" % [_round_number(), _rounds_of("play"), left / 60, left % 60]],
+		["Round", "%d of %d · %d:%02d left" % [_round_number(), _rounds_of("play") + _rounds_before,
+			left / 60, left % 60]],
 		["Apple", pair],
 		["This round", "%d caught · %d missed" % [_round_caught, _round_missed]],
 	]

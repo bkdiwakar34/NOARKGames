@@ -48,11 +48,12 @@ func _draw() -> void:
 	_band(h * 0.45, h * 0.75, Color("121C3A"), Color("17304A"))
 	_band(h * 0.75, h, Color("17304A"), Color("1B3B3E"))
 	# The moon and its halo, high on the right, away from the play area.
-	var moon := Vector2(w * 0.79, h * 0.16)
-	Art.blit(self, Art.glow(), moon, Vector2(h, h) * 0.9, Color(1.0, 0.95, 0.82, 0.10))
-	Art.blit(self, Art.glow(), moon, Vector2(h, h) * 0.35, Color(1.0, 0.96, 0.85, 0.22))
-	Art.blit(self, Art.disc(), moon, Vector2(h, h) * 0.085, Color("F3EBD2"))
-	Art.blit(self, Art.disc(), moon + Vector2(h * 0.012, -h * 0.008), Vector2(h, h) * 0.07, Color(1, 1, 1, 0.35))
+	var moon := Vector2(w * 0.80, h * 0.15)
+	Art.blit(self, Art.glow(), moon, Vector2(h, h) * 1.3, Color(0.85, 0.9, 1.0, 0.12))
+	Art.blit(self, Art.glow(), moon, Vector2(h, h) * 0.55, Color(0.95, 0.95, 1.0, 0.22))
+	Art.blit(self, Art.glow(), moon, Vector2(h, h) * 0.2, Color(1.0, 1.0, 1.0, 0.45))
+	Art.blit(self, Art.disc(), moon, Vector2(h, h) * 0.055, Color("F4F1E6"))
+	Art.blit(self, Art.disc(), moon + Vector2(h * 0.008, h * 0.006), Vector2(h, h) * 0.02, Color(0.8, 0.8, 0.85, 0.35))
 	# Far hills, mist, near hills.
 	_hill(h * 0.80, h * 0.035, 1.3, 0.4, Color("1B3346"), Color("10202B"))
 	draw_polygon(PackedVector2Array([Vector2(0, h * 0.66), Vector2(w, h * 0.66), Vector2(w, h * 0.84), Vector2(0, h * 0.84)]),
