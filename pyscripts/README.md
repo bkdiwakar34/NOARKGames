@@ -57,6 +57,7 @@ Run everything from the repo root with the venv active, e.g.
 | `compare_jitter.py` | Measured vs predicted jitter for every still hold of a recording → `jitter_by_hold.csv`. Ratio ≈ 1 means corner noise explains the jitter. |
 | `compare_rigs.py` | Predicted error maps of several camera arrangements (gap:angle) on one colour scale, optionally with the measured holds on top. |
 | `visibility_explorer.py` | Builds `visibility_explorer.html`: which tags each camera should see vs which it read, per hold. |
+| `clinic_catch_rate.py` | Clinic-study visit check: per pair, the lifetime recomputed from the calibration apples vs the one the app used, and the real play catch rate (95 % interval) against the level p. Default: newest visit in `~/Documents/NOARK/clinic/`. |
 | `camera_placement.py` | Where should the cameras sit? Scores "what if" placements (moved back / up, re-aimed) at every T1 place from the recorded device poses: usable markers, worst angle, sharpness. |
 | `check_board.py` | Is the device geometry the limit? Per-marker consistency of `board_geometry.json`. |
 

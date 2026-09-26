@@ -18,6 +18,16 @@ const ROUND_S := 60.0
 const REST_S := 15.0
 const WARMUP_ROUNDS := 1     # played like calibration, not counted
 const CALIB_ROUNDS := 5
+const PLAY_ROUNDS := 15
+
+# Test levels, picked with keys 1-3 on the start screen until the study DB
+# (package 4) assigns them from order + study day. DRAFT: the study's three
+# percentiles are not decided (spec §6).
+const TEST_LEVELS: Array = [0.60, 0.75, 0.90]
+
+# The calibration check between calibration and play (spec §4.4). In the study
+# it follows the researcher-overlay switch (Settings, package 4); on for now.
+const SHOW_CALIB_CHECK := true
 
 # Reach scan (spec §4.3): a light glides from the centre ring to the screen
 # edge along each spoke, waits, and comes back.
