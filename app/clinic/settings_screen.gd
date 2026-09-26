@@ -277,7 +277,10 @@ func _cam_tile(cam: int) -> Control:
 	var n := UI.label("—", 30, Color.WHITE, true)
 	mid.add_child(n)
 	_live["cam%d" % cam] = n
-	v.add_child(UI.label("tags in view · picture: debug preview", 11, Color(1, 1, 1, 0.55)))
+	var note := UI.label("tags per frame", 11, Color(1, 1, 1, 0.55))
+	v.add_child(note)
+	_live["cam%d_note" % cam] = note
+	v.add_child(UI.label("picture: Open debug preview", 10, Color(1, 1, 1, 0.4)))
 	return panel
 
 
@@ -353,12 +356,19 @@ func _process(_delta: float) -> void:
 				UI.GOOD if fresh else UI.WARN, Color("2E8B4A") if fresh else UI.ACCENT))
 			slot.set_meta("fresh", fresh)
 		_live["Sample rate"].text = "%d Hz" % UDPReceiver.packets_per_sec if fresh else "—"
-		_live["Tags seen"].text = "%d + %d" % [int(st.get("m0", 0)), int(st.get("m1", 0))] if fresh else "—"
+		_live["Tags seen"].text = "%.1f + %.1f" % [float(st.get("m0", 0)), float(st.get("m1", 0))] if fresh else "—"
 		_live["Device at"].text = ("%.0f, %.0f mm" % [float(st["x_mm"]), float(st["z_mm"])]) \
 			if fresh and st.has("x_mm") else "not seen"
 		_live["Fusion"].text = String(st.get("fusion", "")) if fresh and String(st.get("fusion", "")) != "" else "—"
+		# Mean over the last half second (the tracker's status window), and the
+		# share of passes that had this camera's frame at all.
 		for cam in 2:
-			_live["cam%d" % cam].text = str(int(st.get("m%d" % cam, 0))) if fresh else "—"
+			var paired: float = float(st.get("p%d" % cam, 0.0))
+			_live["cam%d" % cam].text = "%.1f" % float(st.get("m%d" % cam, 0)) if fresh else "—"
+			var note: Label = _live["cam%d_note" % cam]
+			note.text = ("tags per frame · paired %d %%" % roundi(100.0 * paired)) if fresh else "tags per frame"
+			note.add_theme_color_override("font_color",
+				Color(1, 0.72, 0.45) if fresh and paired < 0.95 else Color(1, 1, 1, 0.55))
 	if _visit:
 		_update_live()
 

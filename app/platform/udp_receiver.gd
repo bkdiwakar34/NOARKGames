@@ -140,7 +140,9 @@ func _apply_status(payload: String) -> void:
 
 # Latest validation-recorder status from the tracker (empty until one arrives).
 # Keys: rec, name, n, missed, rise, fall, folder, last, gate, sync_err,
-# m0, m1, fusion, and x_mm/z_mm/h_mm/yaw_deg while the device is seen.
+# m0, m1 (mean tags per pass over the last status window), p0, p1 (share of
+# passes with that camera's frame), passes, fusion, and x_mm/z_mm/h_mm/yaw_deg
+# while the device is seen.
 func recorder_status() -> Dictionary:
 	_status_mutex.lock()
 	var out: Dictionary = _status.duplicate(true)

@@ -462,6 +462,13 @@ class MainClass:
         self._rec_last  = ""            # summary of the last recording, shown in Godot
         self._rec_error = ""            # why the last REC_START failed (name in use, ...)
         self._status_t  = 0.0           # when the last status packet went out
+        # Per camera, since the last status packet: passes that had a frame of
+        # that camera (cam1 is left out when no frame is within the skew
+        # limit) and tags found. The status reports the mean over the window,
+        # not one sampled pass (Godot's Settings -> Device tiles).
+        self._stat_passes = 0
+        self._stat_framed = [0, 0]
+        self._stat_tags   = [0, 0]
         self._sync = None
         self._sync_error = None
         self._init_sync_watcher(settings)
@@ -900,11 +907,18 @@ class MainClass:
             }
         status["gate"] = bool(self._sync.high) if self._sync is not None else False
         status["sync_err"] = self._sync_error or ""
-        status["m0"] = status["m1"] = 0
+        # m0/m1: mean tags per pass; p0/p1: share of passes with that camera's
+        # frame — over the passes since the last status packet.
+        n = max(self._stat_passes, 1)
+        for cam in (0, 1):
+            status[f"m{cam}"] = round(self._stat_tags[cam] / n, 1)
+            status[f"p{cam}"] = round(self._stat_framed[cam] / n, 3)
+        status["passes"] = self._stat_passes
+        self._stat_passes = 0
+        self._stat_framed = [0, 0]
+        self._stat_tags = [0, 0]
         status["fusion"] = ""
         if result is not None:
-            status["m0"] = 0 if result.ids[0] is None else len(result.ids[0])
-            status["m1"] = 0 if result.ids[1] is None else len(result.ids[1])
             status["fusion"] = result.fusion or ""
             status.update(self._placement(result))
         payload = struct.pack("<f", STATUS_CODE) + json.dumps(status).encode()
@@ -1789,6 +1803,11 @@ class MainClass:
         # Tag flicker: a frame whose set of found tags differs from the frame
         # before. Each change moves the pose slightly (the tags' layout is
         # calibrated to ~0.7 px, not 0), so flicker is seen as vibration.
+        self._stat_passes += 1
+        for cam, ids in ((0, ids0), (1, ids1)):
+            if job["frames"][cam] is not None:
+                self._stat_framed[cam] += 1
+            self._stat_tags[cam] += 0 if ids is None else len(ids)
         for cam, ids in ((0, ids0), (1, ids1)):
             now = frozenset() if ids is None else frozenset(int(i) for i in np.asarray(ids).flatten())
             if self._prev_tags[cam] is not None and now != self._prev_tags[cam]:
