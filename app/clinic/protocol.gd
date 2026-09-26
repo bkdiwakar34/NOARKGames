@@ -19,6 +19,12 @@ const REST_S := 15.0
 const WARMUP_ROUNDS := 1     # played like calibration, not counted
 const CALIB_ROUNDS := 5
 
+# Reach scan (spec §4.3): a light glides from the centre ring to the screen
+# edge along each spoke, waits, and comes back.
+const REACH_SPOKES := 8
+const REACH_SPEED_MM_S := 150.0
+const REACH_WAIT_S := 1.0
+
 # Calibration speed points (spec §4.4). An apple waits up to POINT_CAP_S of
 # movement time; the hold comes on top, so it expires at spawn + cap + hold.
 const POINT_CAP_S := 8.0

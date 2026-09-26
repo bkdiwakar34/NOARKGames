@@ -128,11 +128,19 @@ scale x and y differently — e.g. 600 × 400 mm onto 1920 × 1080 px gives 3.2 
 
 ### 4.3 Reach scan (participant)
 
-- A glowing target **glides from the centre out past reach and back**, along **8 spokes**,
-  ~150 mm/s → one spoke = 900 mm / 150 mm/s = 6 s, all 8 ≈ 48 s.
-- Edge in each direction = the farthest cursor point, detected when the target–cursor gap
-  starts growing along the path. Apples then spawn inside the 8-point boundary.
-- On screen: "Follow the light", 8 progress dots.
+- Starts when the cursor has been held in the centre ring (30 mm) for 1 s.
+- A glowing target **glides from the centre ring to the screen edge**, waits 1 s, and comes
+  back, along **8 spokes** (every 45°) at 150 mm/s, with 0.5 s at the centre between
+  spokes — about 40 s in all.
+- Reach along spoke $\mathbf{u}$ = the furthest the hand got along it while the light was
+  out: $\max_t\,(\mathbf{h}(t) - \mathbf{h}_{\mathrm{home}})\cdot\mathbf{u}$. Sideways drift does
+  not count. A reach within 10 mm of the screen edge is marked "limited by the screen" (the
+  light cannot go further, nor can apples).
+- Apples then spawn only where the **whole circle** lies inside the 8-point outline and on
+  screen; if no direction fits at the full distance, the distance is shortened toward the
+  centre and both are logged (`a_mm`, `a_actual_mm`).
+- On screen: "Follow the light", 8 progress dots. Saved as `reach.csv`, one row per spoke.
+- Implemented in `app/clinic/reach_scan.gd` (package 2).
 
 ### 4.4 Warm-up and calibration rounds (participant)
 

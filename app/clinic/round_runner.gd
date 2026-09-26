@@ -1,12 +1,13 @@
 extends Node2D
 
-# Warm-up + calibration rounds with plain shapes (docs/clinic_study_interface.md
-# §4.4; build plan §7.2, package 1). One apple at a time at one of the three
-# fixed pairs; hold inside it for HOLD_S to catch it; speed points; 1-minute
-# rounds with rests between.
+# Reach scan, then warm-up + calibration rounds, with plain shapes
+# (docs/clinic_study_interface.md §4.3-4.4; build plan §7.2, packages 1-2).
+# One apple at a time at one of the three fixed pairs; hold inside it for
+# HOLD_S to catch it; speed points; 1-minute rounds with rests between.
 #
 #   - Apples are placed and hit-tested in table mm (§3.4, table_space.gd); the
-#     screen only draws them.
+#     screen only draws them. The whole circle must lie inside the reach
+#     outline from the scan (reach_scan.gd) and on screen.
 #   - Holds are judged per tracker sample on the camera's capture clock, so at
 #     100 Hz rather than at the frame rate.
 #   - MT = hold start − spawn, which equals catch − spawn − hold (design.md §4.6).
@@ -18,6 +19,7 @@ extends Node2D
 const Protocol := preload("res://app/clinic/protocol.gd")
 const TableSpace := preload("res://app/clinic/table_space.gd")
 const VisitLogger := preload("res://app/clinic/visit_logger.gd")
+const ReachScan := preload("res://app/clinic/reach_scan.gd")
 
 const PARTICIPANT_ID := "TEST"    # real IDs come with the study-DB package
 const TIMEOUT_GRACE_S := 0.15     # samples reach Godot ~20 ms after capture; wait for them
@@ -28,10 +30,12 @@ const BG := Color("1E221D")
 const INK := Color(1.0, 1.0, 1.0, 0.92)
 const GOLD := Color("FFC23D")
 
-enum Stage { READY, ROUND, REST, DONE }
+enum Stage { READY, SCAN, ROUND, REST, DONE }
 
 var _ts: TableSpace
 var _log: VisitLogger
+var _scan: ReachScan
+var _boundary := PackedVector2Array()   # reach outline, table mm; empty until the scan ends
 var _rounds: Array = []          # [{phase, number}] in play order
 var _round_idx: int = 0
 var _stage: Stage = Stage.READY
@@ -57,6 +61,7 @@ func _ready() -> void:
 	for k in Protocol.PAIRS.size():
 		_stats.append({"caught": 0, "timeouts": 0, "mts": []})
 	_hand = _ts.screen_to_mm(vp * 0.5)
+	_scan = ReachScan.new(_ts, vp)
 	_log = VisitLogger.new()
 	_log.open(PARTICIPANT_ID, _header_lines())
 	UDPReceiver.log_enabled = true
@@ -92,7 +97,7 @@ func _header_lines() -> Array:
 func _unhandled_input(event: InputEvent) -> void:
 	if _stage == Stage.READY and event is InputEventKey and event.pressed \
 			and not event.echo and event.keycode == KEY_SPACE:
-		_start_round()
+		_stage = Stage.SCAN
 
 
 func _process(delta: float) -> void:
@@ -100,6 +105,12 @@ func _process(delta: float) -> void:
 	_update_pause()
 	if not _paused:
 		match _stage:
+			Stage.SCAN:
+				_scan.update(delta)
+				if _scan.is_done():
+					_log.log_reach(_scan.csv_rows())
+					_boundary = _scan.boundary()
+					_start_round()
 			Stage.ROUND:
 				_stage_left -= delta
 				if _apple.is_empty():
@@ -145,6 +156,9 @@ func _read_hand() -> void:
 
 func _on_sample(t: float, mm: Vector2) -> void:
 	_hand = mm
+	if _stage == Stage.SCAN and not _paused:
+		_scan.on_sample(t, mm)
+		return
 	if _paused or _stage != Stage.ROUND or _apple.is_empty():
 		return
 	var spawn: float = _apple["spawn_time"]
@@ -161,14 +175,19 @@ func _on_sample(t: float, mm: Vector2) -> void:
 		_finish_apple("caught", t)
 
 
-# Tracker was streaming but packets stopped: freeze the round, drop the apple.
+# Tracker was streaming but packets stopped: freeze the round and drop the
+# apple, or restart the scan's current spoke.
 func _update_pause() -> void:
 	var lost: bool = UDPReceiver.connected and not UDPReceiver.is_fresh()
 	if lost == _paused:
 		return
 	_paused = lost
-	if lost and not _apple.is_empty():
+	if not lost:
+		return
+	if not _apple.is_empty():
 		_finish_apple("aborted", _now())
+	if _stage == Stage.SCAN:
+		_scan.restart_spoke()
 
 
 # ── Rounds ────────────────────────────────────────────────────────────────────
@@ -200,6 +219,8 @@ func _phase_name() -> String:
 			return _rounds[_round_idx]["phase"]
 		Stage.REST:
 			return "rest"
+		Stage.SCAN:
+			return "reach_scan"
 		Stage.READY:
 			return "ready"
 	return "done"
@@ -237,28 +258,41 @@ func _spawn() -> void:
 
 
 # A centre at distance a (mm) from the hand, in a random direction where the
-# whole circle is on screen.
+# whole circle fits (_fits).
 func _place(start: Vector2, a: float, w: float) -> Dictionary:
-	var vp := get_viewport_rect().size
 	var r := w * 0.5
 	var fits: Array = []
 	var offset := randf() * TAU
 	for i in 36:
 		var ang := offset + TAU * float(i) / 36.0
-		if _ts.fits_on_screen(start + Vector2.from_angle(ang) * a, r, vp, EDGE_MARGIN_PX):
+		if _fits(start + Vector2.from_angle(ang) * a, r):
 			fits.append(ang)
 	if not fits.is_empty():
 		var pick: float = fits.pick_random()
 		return {"centre": start + Vector2.from_angle(pick) * a, "angle": pick, "a_actual": a}
-	# No direction fits at the full distance (hand near an edge): head for the
-	# screen centre and shorten until it fits. The file keeps both distances.
-	var dir := (_ts.screen_to_mm(vp * 0.5) - start).normalized()
+	# No direction fits at the full distance (hand near the edge of its reach):
+	# head for the scan's centre ring and shorten until it fits. The file keeps
+	# both distances (a_mm, a_actual_mm).
+	var dir := (_scan.home - start).normalized()
 	if dir == Vector2.ZERO:
 		dir = Vector2.RIGHT
 	var d := a
-	while d > r and not _ts.fits_on_screen(start + dir * d, r, vp, EDGE_MARGIN_PX):
+	while d > r and not _fits(start + dir * d, r):
 		d -= 5.0
 	return {"centre": start + dir * d, "angle": dir.angle(), "a_actual": d}
+
+
+# The whole circle is on screen and inside the reach outline.
+func _fits(centre: Vector2, r: float) -> bool:
+	if not _ts.fits_on_screen(centre, r, get_viewport_rect().size, EDGE_MARGIN_PX):
+		return false
+	if _boundary.size() < 3:
+		return true
+	for i in 16:
+		var p := centre + Vector2.from_angle(TAU * float(i) / 16.0) * r
+		if not Geometry2D.is_point_in_polygon(p, _boundary):
+			return false
+	return true
 
 
 func _finish_apple(outcome: String, t: float) -> void:
@@ -295,6 +329,8 @@ func _draw() -> void:
 	var vp := get_viewport_rect().size
 	var font: Font = ThemeDB.fallback_font
 	draw_rect(Rect2(Vector2.ZERO, vp), BG)
+	if _stage == Stage.SCAN:
+		_scan.draw(self, font)
 	if _stage == Stage.ROUND and not _paused and not _apple.is_empty():
 		_draw_apple()
 	for p in _pops:
@@ -353,16 +389,19 @@ func _draw_hud(font: Font, vp: Vector2) -> void:
 		_text(font, Vector2(vp.x * 0.5, 44.0), "%d:%02d" % [left / 60, left % 60], 30, INK, 200.0)
 	elif _stage == Stage.REST:
 		label = "Rest"
+	else:
+		return   # ready, scan, done: no round HUD
 	_text(font, Vector2(24.0, 44.0), label, 28, INK)
 	_text(font, Vector2(vp.x - 244.0, 44.0), "%d points" % _round_points, 28, INK, 220.0)
 
 
-func _draw_card(font: Font, vp: Vector2, lines: Array) -> void:
+func _draw_card(font: Font, vp: Vector2, lines: Array, body_size: int = 30) -> void:
 	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.0, 0.0, 0.0, 0.55))
-	var y := vp.y * 0.5 - 30.0 * float(lines.size() - 1)
+	var step := float(body_size) * 1.6
+	var y := vp.y * 0.5 - step * 0.5 * float(lines.size() - 1)
 	for i in lines.size():
-		_text(font, Vector2(vp.x * 0.5, y), lines[i], 48 if i == 0 else 30, INK, vp.x)
-		y += 64.0 if i == 0 else 48.0
+		_text(font, Vector2(vp.x * 0.5, y), lines[i], 48 if i == 0 else body_size, INK, vp.x)
+		y += 64.0 if i == 0 else step
 
 
 func _draw_summary(font: Font, vp: Vector2) -> void:
@@ -370,12 +409,28 @@ func _draw_summary(font: Font, vp: Vector2) -> void:
 	for k in Protocol.PAIRS.size():
 		var p: Dictionary = Protocol.PAIRS[k]
 		var s: Dictionary = _stats[k]
-		lines.append("Pair %d  (A %d mm, W %d mm, ID %.2f bits):  caught %d,  timeouts %d,  median MT %s" % [
+		lines.append("Pair %d · %d / %d mm · %.2f bits — caught %d, timeouts %d, median %s" % [
 			k + 1, int(p["a_mm"]), int(p["w_mm"]), Protocol.id_bits(p["a_mm"], p["w_mm"]),
 			s["caught"], s["timeouts"], _median_text(s["mts"])])
+	lines.append(_reach_text())
 	lines.append("Saved in " + _log.folder)
 	lines.append("Esc to quit")
-	_draw_card(font, vp, lines)
+	_draw_card(font, vp, lines, 26)
+
+
+func _reach_text() -> String:
+	if _scan.results.is_empty():
+		return "Reach: not measured"
+	var lo := INF
+	var hi := 0.0
+	var by_screen := 0
+	for r in _scan.results:
+		lo = minf(lo, r["reach_mm"])
+		hi = maxf(hi, r["reach_mm"])
+		if r["limited_by"] == "screen":
+			by_screen += 1
+	return "Reach %d–%d mm, %d of %d directions stopped by the screen edge" % [
+		int(lo), int(hi), by_screen, _scan.results.size()]
 
 
 func _median_text(values: Array) -> String:
